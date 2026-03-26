@@ -1,0 +1,46 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+*.tsbuildinfo
+
+# code coverage
+coverage/
+*.lcov
+
+# logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+.pnpm-debug.log*
+report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+
+# dotenv environment variable files
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# caches
+.eslintcache
+.cache
+.parcel-cache
+
+# Claude Code local overrides (not shared — machine-specific settings and worktrees)
+/.claude/settings.local.json
+/.claude/worktrees/
+
+# IDEs
+.idea/
+.vscode-test
+
+# OS
+.DS_Store
+
+# pnpm
+package-lock.json

@@ -1,0 +1,21 @@
+packages:
+  - 'packages/*'
+
+blockExoticSubdeps: true
+minimumReleaseAge: 1440
+minimumReleaseAgeExclude:
+  - '@polygonlabs/*'
+  - '@maticnetwork/*'
+  - '@agglayer/*'
+  - '@0xsequence/*'
+  - '@0xtrails/*'
+# katex 0.16.34 (transitive dep of markdownlint-cli2) has a broken ESM build
+# where __VERSION__ is not replaced at build time, crashing on Node 24.
+overrides:
+  katex: ^0.16.38
+onlyBuiltDependencies:
+  - esbuild
+trustPolicy: no-downgrade
+trustPolicyExclude:
+  - 'undici-types@6.19.8'
+  - 'semver@6.3.1'
