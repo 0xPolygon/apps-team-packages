@@ -14,7 +14,8 @@
   },
   "scripts": {
     "prepare": "husky",
-    "ci:publish": "pnpm exec changeset publish",
+    "ci:publish": "pnpm run build && pnpm exec changeset publish",
+    "clean": "pnpm -r run clean && rm -rf node_modules",
     "build": "pnpm -r --if-present run build",
     "test": "pnpm -r run test",
     "typecheck": "pnpm -r run typecheck",

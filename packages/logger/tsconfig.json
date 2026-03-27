@@ -1,0 +1,7 @@
+{
+  "extends": ["@tsconfig/node24", "@tsconfig/node-ts"],
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts", "vitest.config.ts"]
+}
