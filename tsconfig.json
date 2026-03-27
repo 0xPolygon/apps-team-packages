@@ -1,5 +1,9 @@
 {
   "extends": ["@tsconfig/node24", "@tsconfig/node-ts"],
   "compilerOptions": { "noEmit": true },
-  "references": [{ "path": "packages/logger" }, { "path": "packages/verror" }]
+  "references": [
+    { "path": "packages/apps-team-lint" },
+    { "path": "packages/logger" },
+    { "path": "packages/verror" }
+  ]
 }

@@ -30,7 +30,7 @@
     "@changesets/cli": "^2.30.0",
     "@commitlint/cli": "^20.5.0",
     "@commitlint/config-conventional": "^20.5.0",
-    "@polygonlabs/apps-team-lint": "^1.0.0",
+    "@polygonlabs/apps-team-lint": "workspace:*",
     "@tsconfig/node-ts": "^23.0.0",
     "@tsconfig/node24": "^24.0.0",
     "@types/node": "^24.0.0",
