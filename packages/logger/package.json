@@ -3,6 +3,11 @@
   "version": "0.1.0",
   "description": "Pino-based logger with Sentry integration, configured for Datadog ingestion and prettified output capable.",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/0xPolygon/apps-team-packages.git",
+    "directory": "packages/logger"
+  },
   "publishConfig": {
     "access": "public"
   },

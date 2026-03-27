@@ -3,6 +3,11 @@
   "version": "0.1.0",
   "description": "TypeScript-first, browser-friendly VError-inspired error handling library",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/0xPolygon/apps-team-packages.git",
+    "directory": "packages/verror"
+  },
   "publishConfig": {
     "access": "public"
   },
