@@ -10,7 +10,12 @@ via changesets.
 
 ## Packages
 
-Packages live under `packages/`. Each has its own `README.md`, `package.json`, and changelog.
+| Package | Version | Description |
+| ------- | ------- | ----------- |
+| [@polygonlabs/logger](packages/logger) | [![npm](https://img.shields.io/npm/v/@polygonlabs/logger)](https://www.npmjs.com/package/@polygonlabs/logger) | Pino-based logger with Sentry integration, configured for Datadog ingestion |
+| [@polygonlabs/verror](packages/verror) | [![npm](https://img.shields.io/npm/v/@polygonlabs/verror)](https://www.npmjs.com/package/@polygonlabs/verror) | TypeScript-first VError-inspired error handling with cause chains and HTTP error classes |
+
+Each package has its own `README.md`, `package.json`, and changelog.
 
 ## Development
 
