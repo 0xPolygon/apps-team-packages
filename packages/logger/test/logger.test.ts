@@ -518,6 +518,16 @@ describe('Sentry integration', () => {
     expect(sentry.captureMessage).not.toHaveBeenCalled();
   });
 
+  it('calls captureException on logger.fatal({ err })', async () => {
+    const sentry = { captureException: vi.fn(), captureMessage: vi.fn() };
+    const { destination } = makeCapture();
+    const logger = await createLogger({ destination, sentry });
+    const err = new Error('fatal oops');
+    logger.fatal({ err }, err.message);
+    expect(sentry.captureException).toHaveBeenCalledWith(err);
+    expect(sentry.captureMessage).not.toHaveBeenCalled();
+  });
+
   it('does NOT call captureException on logger.warn({ err })', async () => {
     const sentry = { captureException: vi.fn(), captureMessage: vi.fn() };
     const { destination } = makeCapture();

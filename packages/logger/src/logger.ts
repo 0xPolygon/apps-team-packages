@@ -23,14 +23,15 @@ export interface CreateLoggerOptions {
    */
   destination?: DestinationStream;
   /**
-   * Optional Sentry adapter for automatic error capturing on logger.error() calls.
-   * Pass your initialised @sentry/node instance (or any object satisfying
-   * SentryAdapter). Inherited by all child loggers.
+   * Optional Sentry adapter for automatic error capturing on logger.error() and
+   * logger.fatal() calls. Pass your initialised @sentry/node instance (or any
+   * object satisfying SentryAdapter). Inherited by all child loggers.
    */
   sentry?: SentryAdapter;
 }
 
-// Pino's numeric level for "error". Used in hooks.logMethod to gate Sentry capture.
+// Pino's numeric level for "error". Levels at or above this (error=50, fatal=60)
+// are captured in Sentry.
 const PINO_ERROR_LEVEL = 50;
 
 export async function createLogger(options?: CreateLoggerOptions): Promise<Logger> {
@@ -110,8 +111,8 @@ export async function createLogger(options?: CreateLoggerOptions): Promise<Logge
             }
             if (err !== obj['err']) (args as unknown[])[0] = { ...obj, err };
 
-            // Capture in Sentry for error-level calls only.
-            if (level === PINO_ERROR_LEVEL) options?.sentry?.captureException(err);
+            // Capture in Sentry for error and fatal.
+            if (level >= PINO_ERROR_LEVEL) options?.sentry?.captureException(err);
           }
         }
         method.apply(this, args);
