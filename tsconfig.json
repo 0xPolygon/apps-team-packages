@@ -1,5 +1,5 @@
 {
   "extends": ["@tsconfig/node24", "@tsconfig/node-ts"],
   "compilerOptions": { "noEmit": true },
-  "references": []
+  "references": [{ "path": "packages/logger" }, { "path": "packages/verror" }]
 }
