@@ -100,7 +100,29 @@ describe('errorForEach', () => {
       shortMessage: 'first of 3 errors',
       cause: { name: 'Error', message: 'error one', shortMessage: 'error one', info: {} },
       info: {},
-      errors: [err1, err2, err3]
+      errors: [
+        {
+          name: 'Error',
+          message: 'error one',
+          shortMessage: 'error one',
+          cause: undefined,
+          info: {}
+        },
+        {
+          name: 'Error',
+          message: 'error two',
+          shortMessage: 'error two',
+          cause: undefined,
+          info: {}
+        },
+        {
+          name: 'Error',
+          message: 'error three',
+          shortMessage: 'error three',
+          cause: undefined,
+          info: {}
+        }
+      ]
     });
   });
 });

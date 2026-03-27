@@ -265,6 +265,6 @@ export class MultiError extends VError {
   }
 
   override toJSON(): Record<string, unknown> {
-    return { ...super.toJSON(), errors: [...this.errors] };
+    return { ...super.toJSON(), errors: this.errors.map(serializeError) };
   }
 }

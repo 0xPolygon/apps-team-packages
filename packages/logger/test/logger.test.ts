@@ -80,8 +80,8 @@ describe('createLogger — output format', () => {
 // ---------------------------------------------------------------------------
 
 describe('pino API integrity — root logger', () => {
-  let logger: AppLogger;
-  let records: () => LogRecord[];
+  let logger!: AppLogger;
+  let records!: () => LogRecord[];
 
   beforeEach(async () => {
     const capture = makeCapture();
@@ -183,8 +183,8 @@ describe('pino API integrity — root logger', () => {
 // ---------------------------------------------------------------------------
 
 describe('pino API integrity — child logger', () => {
-  let child: AppLogger;
-  let records: () => LogRecord[];
+  let child!: AppLogger;
+  let records!: () => LogRecord[];
 
   beforeEach(async () => {
     const capture = makeCapture();
@@ -270,8 +270,8 @@ describe('pino API integrity — child logger', () => {
 // ---------------------------------------------------------------------------
 
 describe('pino API integrity — grandchild logger', () => {
-  let grandchild: AppLogger;
-  let records: () => LogRecord[];
+  let grandchild!: AppLogger;
+  let records!: () => LogRecord[];
 
   beforeEach(async () => {
     const capture = makeCapture();
@@ -341,8 +341,8 @@ describe('pino API integrity — grandchild logger', () => {
 // ---------------------------------------------------------------------------
 
 describe('AppLogger.logError', () => {
-  let logger: AppLogger;
-  let records: () => LogRecord[];
+  let logger!: AppLogger;
+  let records!: () => LogRecord[];
 
   beforeEach(async () => {
     const capture = makeCapture();
