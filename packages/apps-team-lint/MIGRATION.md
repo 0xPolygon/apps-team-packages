@@ -5,7 +5,51 @@ upgrading across multiple versions.
 
 | From | To | Section |
 | ---- | -- | ------- |
+| 1.x  | 2.0 | [1.x → 2.0](#1x--20) |
 | 0.x  | 1.0 | [0.x → 1.0](#0x--10) |
+
+---
+
+## 1.x → 2.0
+
+### Breaking: `markdownlint` and `commitlint` are now functions
+
+Both were previously plain config objects. Call them to get the config:
+
+```diff
+ // .markdownlint-cli2.mjs
+ import { markdownlint } from '@polygonlabs/apps-team-lint/markdownlint';
+
+-export default markdownlint;
++export default markdownlint();
+```
+
+```diff
+ // commitlint.config.js
+ import { commitlint } from '@polygonlabs/apps-team-lint/commitlint';
+
+-export default commitlint;
++export default commitlint();
+```
+
+`markdownlint()` accepts optional `config` and `ignores` overrides — see the
+README for details.
+
+### Breaking: `markdownlint` and `commitlint` removed from the main entry point
+
+If you imported either from `@polygonlabs/apps-team-lint` directly rather than
+the subpath, update the import:
+
+```diff
+-import { markdownlint } from '@polygonlabs/apps-team-lint';
++import { markdownlint } from '@polygonlabs/apps-team-lint/markdownlint';
+
+-import { commitlint } from '@polygonlabs/apps-team-lint';
++import { commitlint } from '@polygonlabs/apps-team-lint/commitlint';
+```
+
+Imports from `@polygonlabs/apps-team-lint` for ESLint functions (`recommended`,
+`typescript`, `frontend`) are unchanged.
 
 ---
 

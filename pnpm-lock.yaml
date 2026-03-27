@@ -84,12 +84,18 @@ importers:
         specifier: ^8.56.1
         version: 8.57.2(eslint@10.1.0(jiti@2.6.1))(typescript@5.9.3)
     devDependencies:
+      '@commitlint/types':
+        specifier: ^19.0.0
+        version: 19.8.1
       '@tsconfig/node-ts':
         specifier: ^23.0.0
         version: 23.6.4
       '@tsconfig/node24':
         specifier: ^24.0.0
         version: 24.0.4
+      markdownlint:
+        specifier: ^0.40.0
+        version: 0.40.0
       typescript:
         specifier: ^5.9.3
         version: 5.9.3

@@ -10,6 +10,7 @@ copying config files.
 
 | From | To | Guide |
 | ---- | -- | ----- |
+| 1.x  | 2.0 | [MIGRATION.md](./MIGRATION.md#1x--20) |
 | 0.x  | 1.0 | [MIGRATION.md](./MIGRATION.md#0x--10) |
 
 ## Install
@@ -19,7 +20,16 @@ pnpm add -D @polygonlabs/apps-team-lint eslint typescript
 ```
 
 `eslint` and `typescript` are peer dependencies — keep them in your repo's
-devDependencies. The following packages are now provided transitively and
+devDependencies.
+
+The main entry point (`@polygonlabs/apps-team-lint`) exports only the ESLint
+config functions. Markdownlint and commitlint configs are available via explicit
+subpath imports:
+
+- `@polygonlabs/apps-team-lint/markdownlint`
+- `@polygonlabs/apps-team-lint/commitlint`
+
+The following packages are now provided transitively and
 can be removed from your devDependencies:
 
 - `eslint-config-prettier`
@@ -94,20 +104,6 @@ ESLint v10 discovers configs per-file, so each workspace package can have
 its own `eslint.config.js`. The root config acts as a thin safety net for
 root-level files and any packages missing their own config.
 
-Use `defineConfig` from `eslint/config` for type-safe config authoring.
-
-**Single-package repo (with `defineConfig`):**
-
-```js
-import { defineConfig } from 'eslint/config';
-import { recommended, typescript } from '@polygonlabs/apps-team-lint';
-
-export default defineConfig([
-  ...recommended({ globals: 'node' }),
-  ...typescript(),
-]);
-```
-
 **Monorepo — per-package `eslint.config.js` (recommended):**
 
 Each workspace package gets its own `eslint.config.js`. Pass
@@ -171,14 +167,59 @@ own config automatically.
 
 ## Markdownlint
 
+Use a `.markdownlint-cli2.mjs` file rather than a static `.jsonc` so the
+config stays centrally managed — rule and ignore updates propagate to all
+repos on the next `pnpm update`, with no manual copying required.
+
 ```js
 // .markdownlint-cli2.mjs
 import { markdownlint } from '@polygonlabs/apps-team-lint/markdownlint';
 
-export default markdownlint;
+export default markdownlint();
 ```
 
 Delete your `.markdownlint-cli2.jsonc` after adding this file.
+
+When passed, `ignores` replaces the base ignore list entirely. Import
+`baseIgnores` to compose with it:
+
+```js
+// .markdownlint-cli2.mjs
+import { baseIgnores, markdownlint } from '@polygonlabs/apps-team-lint/markdownlint';
+
+// Default — uses base ignore list as-is:
+export default markdownlint();
+
+// Add ignores:
+export default markdownlint({ ignores: [...baseIgnores, '**/generated/**'] });
+
+// Remove an ignore:
+export default markdownlint({ ignores: baseIgnores.filter(i => i !== '**/CHANGELOG.md') });
+```
+
+Pass `config` to override specific rules — shallow-merged with the base, so
+only the rules you specify are affected:
+
+```js
+export default markdownlint({ config: { MD013: { line_length: 120 } } });
+```
+
+### What the config enforces
+
+All [built-in markdownlint rules](https://github.com/DavidAnson/markdownlint/blob/main/doc/Rules.md)
+are enabled by default. The following rules are explicitly overridden:
+
+| Rule | Setting | Why |
+| ---- | ------- | --- |
+| MD013 line-length | disabled | Long lines are unavoidable in practice — URLs, table cells, and inline code cannot be wrapped without breaking formatting or readability. |
+| MD024 no-duplicate-heading | `siblings_only` | Duplicate headings are only flagged when they are direct siblings in the same section. Same-named headings in different sections (e.g. `### Parameters` in multiple API entries) are intentional and common. |
+| MD041 first-line-heading | disabled | Not all markdown files should begin with a heading — preamble, front matter, or files like `MIGRATION.md` that open with prose are legitimate. |
+| MD060 table-column-style | disabled | Prettier formats tables by padding columns to equal width, which produces spacing that MD060 misreads as inconsistent style. With Prettier already owning table formatting, MD060 produces false positives. |
+
+`CHANGELOG.md` files are excluded from linting entirely. They are auto-generated
+by changesets and committed by the release bot without running hooks. The generated
+structure (version headings, changeset body embedded in list items) reliably triggers
+MD022 and MD024 violations that `--fix` cannot resolve.
 
 ## Commitlint
 
@@ -186,7 +227,7 @@ Delete your `.markdownlint-cli2.jsonc` after adding this file.
 // commitlint.config.js
 import { commitlint } from '@polygonlabs/apps-team-lint/commitlint';
 
-export default commitlint;
+export default commitlint();
 ```
 
 This extends `@commitlint/config-conventional`, which is provided as a
