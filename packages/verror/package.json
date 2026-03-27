@@ -27,7 +27,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc --noEmit && tsc -p tsconfig.build.json",
+    "build": "pnpm run typecheck && tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "lint": "eslint .",
