@@ -134,8 +134,8 @@ importers:
   packages/verror:
     devDependencies:
       '@polygonlabs/apps-team-lint':
-        specifier: ^1.0.0
-        version: 1.0.0(@typescript-eslint/utils@8.57.2(eslint@10.1.0(jiti@2.6.1))(typescript@5.9.3))(eslint@10.1.0(jiti@2.6.1))(typescript@5.9.3)
+        specifier: workspace:*
+        version: link:../apps-team-lint
       '@tsconfig/node-ts':
         specifier: ^23.0.0
         version: 23.6.4
@@ -777,16 +777,6 @@ packages:
 
   '@pinojs/redact@0.4.0':
     resolution: {integrity: sha512-k2ENnmBugE/rzQfEcdWHcCY+/FM3VLzH9cYEsbdsoqrvzAKRhUZeRNhAZvB8OitQJ1TBed3yqWtdjzS6wJKBwg==}
-
-  '@polygonlabs/apps-team-lint@1.0.0':
-    resolution: {integrity: sha512-gwT3TrWCwz6d0oalRvfwWxfG5cVibGy3YyilawD5DH5Lw6Rm02RDu4gl9OQcvRhDLcT+GkISx00o+NnMQ/ecdQ==}
-    engines: {node: '>=24'}
-    peerDependencies:
-      eslint: ^10.0.0
-      typescript: ^5.0.0
-    peerDependenciesMeta:
-      typescript:
-        optional: true
 
   '@prisma/instrumentation@7.4.2':
     resolution: {integrity: sha512-r9JfchJF1Ae6yAxcaLu/V1TGqBhAuSDe3mRNOssBfx1rMzfZ4fdNvrgUBwyb/TNTGXFxlH9AZix5P257x07nrg==}
@@ -3428,24 +3418,6 @@ snapshots:
   '@package-json/types@0.0.12': {}
 
   '@pinojs/redact@0.4.0': {}
-
-  '@polygonlabs/apps-team-lint@1.0.0(@typescript-eslint/utils@8.57.2(eslint@10.1.0(jiti@2.6.1))(typescript@5.9.3))(eslint@10.1.0(jiti@2.6.1))(typescript@5.9.3)':
-    dependencies:
-      '@commitlint/config-conventional': 19.8.1
-      eslint: 10.1.0(jiti@2.6.1)
-      eslint-config-prettier: 10.1.8(eslint@10.1.0(jiti@2.6.1))
-      eslint-import-resolver-typescript: 4.4.4(eslint-plugin-import-x@4.16.2(@typescript-eslint/utils@8.57.2(eslint@10.1.0(jiti@2.6.1))(typescript@5.9.3))(eslint@10.1.0(jiti@2.6.1)))(eslint@10.1.0(jiti@2.6.1))
-      eslint-plugin-import-x: 4.16.2(@typescript-eslint/utils@8.57.2(eslint@10.1.0(jiti@2.6.1))(typescript@5.9.3))(eslint@10.1.0(jiti@2.6.1))
-      eslint-plugin-perfectionist: 5.7.0(eslint@10.1.0(jiti@2.6.1))(typescript@5.9.3)
-      globals: 17.4.0
-      typescript-eslint: 8.57.2(eslint@10.1.0(jiti@2.6.1))(typescript@5.9.3)
-    optionalDependencies:
-      typescript: 5.9.3
-    transitivePeerDependencies:
-      - '@typescript-eslint/utils'
-      - eslint-import-resolver-node
-      - eslint-plugin-import
-      - supports-color
 
   '@prisma/instrumentation@7.4.2(@opentelemetry/api@1.9.1)':
     dependencies:
