@@ -1,6 +1,6 @@
 {
   "name": "@polygonlabs/verror",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "TypeScript-first, browser-friendly VError-inspired error handling library",
   "type": "module",
   "repository": {
@@ -9,12 +9,18 @@
     "directory": "packages/verror"
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js"
+      }
+    }
   },
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
     }
   },
   "files": [
