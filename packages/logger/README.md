@@ -1,7 +1,7 @@
 # @polygonlabs/logger
 
 Shared pino-based logger for Polygon Apps Team services. Pre-configured for Datadog
-ingestion with VError-aware error logging and optional Sentry capture.
+ingestion with automatic VError-aware error handling and optional Sentry capture.
 
 ## Why this package exists
 
@@ -10,8 +10,9 @@ Every service in the team needs the same pino configuration: `message` key inste
 in each service individually leads to drift — one service logs `"msg"` while another logs
 `"message"`, breaking Datadog log parsing.
 
-This package provides one factory, one type, and a consistent output shape across all
-services.
+This package provides one factory and a consistent output shape across all services.
+VError/WError handling and Sentry capture are wired in at the pino level, so every log
+call benefits automatically — no special method required.
 
 ## Usage
 
@@ -20,7 +21,7 @@ import { createLogger } from '@polygonlabs/logger';
 
 const logger = await createLogger();
 logger.info({ requestId: '123' }, 'request received');
-logger.logError({ err });
+logger.error({ err }, err.message);
 ```
 
 **Do not import as a module-level singleton.** Construct once at the service entry point
@@ -34,7 +35,7 @@ const logger = await createLogger({ sentry });
 
 // handler / service layer
 class UserService {
-  constructor(private readonly logger: AppLogger) {}
+  constructor(private readonly logger: Logger) {}
 
   async getUser(id: string) {
     const log = this.logger.child({ userId: id });
@@ -42,6 +43,8 @@ class UserService {
   }
 }
 ```
+
+`createLogger` returns pino's `Logger` type directly — import it from `pino`.
 
 ## Customisation via child loggers
 
@@ -84,84 +87,48 @@ const httpLogger = logger.child(
 **Request/handler-scoped fields** — create further children inside handlers:
 
 ```ts
-async function handleRequest(req: Request, logger: AppLogger) {
+async function handleRequest(req: Request, logger: Logger) {
   const log = logger.child({ requestId: req.id, method: req.method });
-  log.info('handling request');   // { service, env, requestId, method, message }
-  log.logError({ err });          // { service, env, requestId, method, err, message }
+  log.info('handling request');
+  log.error({ err }, err.message);
 }
 ```
 
 Child bindings and options merge at any depth — grandchild loggers carry all ancestor
-bindings, and `logError` and `child()` are preserved at every level.
+bindings, and all VError/WError behaviour is preserved at every level.
 
-## `AppLogger` type
+## VError and WError handling
 
-`AppLogger` is a standard `pino.Logger` with two additions:
-
-- **`logError({ err, ...context }, message?)`** — VError/WError-aware error logging (see below)
-- **`child()`** — overridden to return `AppLogger` so child loggers carry `logError`
-  at any depth
-
-Use `AppLogger` as the type throughout your service code rather than importing
-`createLogger` everywhere.
-
-## `logError({ err, ...context }, message?)`
-
-`logError` is the only method `AppLogger` adds to the standard pino API. Its signature
-mirrors pino's merge-object form with `err` as a required key:
+VError/WError handling is automatic for every log level. Pass `err` in the merge object
+as you would any other pino log call:
 
 ```ts
-try {
-  await db.query(sql);
-} catch (err) {
-  logger.logError({ err });
-  logger.logError({ err, requestId, userId });                  // with call-site context
-  logger.logError({ err, requestId }, 'user-facing message');   // with message override
-}
+logger.error({ err }, err.message)
+logger.warn({ err, requestId }, 'degraded — retrying')
+logger.error({ err, requestId, userId }, 'optional message override')
 ```
 
-Any fields beyond `err` are merged into the log entry at the top level, exactly as they
-would be if you called `logger.error({ err, requestId }, message)` directly. All entries
-carry the child bindings of the logger and are always at `error` level.
-
-`err` must be an `Error` instance — passing a non-Error is a TypeScript error. For unknown
-values from a catch block, narrow first or fall back to `logger.error()` directly:
-
-```ts
-try {
-  await something();
-} catch (err) {
-  if (err instanceof Error) {
-    logger.logError({ err });
-  } else {
-    logger.error(String(err));
-  }
-}
-```
-
-### VError `info` is namespaced under `"error_info"`
+### `error_info`
 
 VError `info` fields from the full cause chain are always emitted under the reserved
 `error_info` key — never spread at the top level. This keeps error-carried context clearly
-separated from call-site context, with no collision risk and no precedence rules to remember:
+separated from call-site context, with no collision risk:
 
 ```ts
 const err = new VError('query failed', { info: { requestId: 'abc', table: 'users' } });
-logger.logError({ err, traceId: 'xyz' });
-// { level: 'error', message: 'query failed', err: { ... },
-//   traceId: 'xyz',                               ← call-site context, top level
+logger.error({ err, traceId: 'xyz' }, err.message);
+// {
+//   level: 'error', message: 'query failed', err: { ... },
+//   traceId: 'xyz',                                  ← call-site context, top level
 //   error_info: { requestId: 'abc', table: 'users' } ← error info, always nested
 // }
 ```
 
-`error_info` is a **reserved key** in the context object — passing it is a TypeScript error:
+If a VError has no `info`, the `error_info` key is omitted entirely.
 
-```ts
-logger.logError({ err, error_info: { foo: 'bar' } });
-//                     ^^^^^^^^^^ TypeScript error: error_info is not assignable to never
-```
-
-If a VError has no `info`, the `error_info` key is omitted from the log entry entirely.
+`error_info` is a **reserved key** — do not include it in merge objects. If a caller
+supplies it, the logger emits a `warn`-level diagnostic with the conflicting value under
+`callerErrorInfo`, then overwrites the key with the real VError info.
 
 ### Behaviour by `err` type
 
@@ -169,7 +136,7 @@ If a VError has no `info`, the `error_info` key is omitted from the log entry en
 `stdSerializers.err`) and the error message as the log message. No `error_info` key:
 
 ```ts
-logger.logError({ err: new Error('connection refused') });
+logger.error({ err: new Error('connection refused') }, 'connection refused');
 // { level: 'error', message: 'connection refused', err: { message, stack, type } }
 ```
 
@@ -177,7 +144,7 @@ logger.logError({ err: new Error('connection refused') });
 
 ```ts
 const err = new VError('query failed', { info: { requestId: 'abc', table: 'users' } });
-logger.logError({ err });
+logger.error({ err }, err.message);
 // { level: 'error', message: 'query failed', err: { ... }, error_info: { requestId: 'abc', table: 'users' } }
 ```
 
@@ -187,19 +154,22 @@ context is carried through to the cause's entry:
 ```ts
 const root = new Error('connection refused');
 const err = new WError('could not load user', { cause: root });
-logger.logError({ err, requestId: 'abc' });
+logger.error({ err, requestId: 'abc' }, err.message);
 // { level: 'error', message: 'connection refused', err: { ... }, requestId: 'abc' }
 // 'could not load user' is NOT logged — the cause is what matters
 ```
 
 The cause is processed by the same rules, so a `WError` wrapping a `VError` with `info`
-will emit the `VError` entry with `info` nested and call-site context at the top level.
+will emit the `VError`'s `error_info` alongside call-site context.
 
-### Sentry
+## Sentry
 
-If a Sentry client was passed to `createLogger`, `logError` captures alongside the pino
-entries: `captureException` for `Error` instances, `captureMessage` for non-Error values.
-For a `WError`, only the cause is captured — consistent with the logging behaviour above.
+If a Sentry client was passed to `createLogger`, `captureException` fires automatically
+for every `logger.error({ err })` call. It does not fire for `warn`, `info`, or other
+levels — only `error`.
+
+For a `WError`, the cause is captured rather than the wrapper, consistent with what is
+logged.
 
 ```ts
 import * as Sentry from '@sentry/node';
@@ -232,6 +202,12 @@ The logger is pre-configured for Datadog ingestion:
 | `pid`, `hostname` | suppressed |
 | `err` | serialised via pino's built-in `stdSerializers.err` |
 
-Passing a `timestamp` key in a merge object is detected and renamed to `callerTimestamp`
-with a warning. Letting caller-supplied timestamps shadow the authoritative timestamp
-causes Datadog to sort log entries incorrectly.
+### Reserved keys
+
+Two keys in the merge object are reserved and will trigger a `warn`-level diagnostic if
+supplied by a caller:
+
+| Key | Written by | Conflicting value preserved as |
+|-----|-----------|-------------------------------|
+| `timestamp` | `timestamp` function | `callerTimestamp` |
+| `error_info` | VError info extractor | `callerErrorInfo` |

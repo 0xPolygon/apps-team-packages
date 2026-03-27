@@ -1,10 +1,8 @@
-import type { DestinationStream } from 'pino';
+import type { DestinationStream, Logger } from 'pino';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { VError, WError } from '@polygonlabs/verror';
-
-import type { AppLogger } from '../src/index.ts';
 
 import { createLogger } from '../src/index.ts';
 
@@ -76,21 +74,97 @@ describe('createLogger — output format', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Reserved key guard — error_info
+// ---------------------------------------------------------------------------
+
+describe('reserved key guard — error_info', () => {
+  it('emits a warn-level warning when error_info is supplied in the merge object', async () => {
+    const { destination, records } = makeCapture();
+    const logger = await createLogger({ destination });
+    logger.info({ error_info: { bad: true } }, 'test');
+    expect(records()[0]).toHaveProperty('level', 'warn');
+    expect(records()).toHaveLength(2);
+  });
+
+  it('preserves the conflicting value in the warning as callerErrorInfo', async () => {
+    const { destination, records } = makeCapture();
+    const logger = await createLogger({ destination });
+    logger.info({ error_info: { bad: true } }, 'test');
+    expect(records()[0]).toHaveProperty('callerErrorInfo', { bad: true });
+  });
+
+  it('strips error_info from the log record when no err is present', async () => {
+    const { destination, records } = makeCapture();
+    const logger = await createLogger({ destination });
+    logger.info({ error_info: { bad: true } }, 'test');
+    expect(records()[1]).not.toHaveProperty('error_info');
+  });
+
+  it('strips error_info and warns when err is a plain Error (no VError info to replace it)', async () => {
+    const { destination, records } = makeCapture();
+    const logger = await createLogger({ destination });
+    const err = new Error('plain');
+    logger.error({ err, error_info: { bad: true } }, err.message);
+    const [warn, log] = records();
+    expect(warn).toHaveProperty('callerErrorInfo', { bad: true });
+    expect(log).not.toHaveProperty('error_info');
+  });
+
+  it('strips error_info and warns when err is a VError with no info', async () => {
+    const { destination, records } = makeCapture();
+    const logger = await createLogger({ destination });
+    const err = new VError('no info');
+    logger.error({ err, error_info: { bad: true } }, err.message);
+    const [warn, log] = records();
+    expect(warn).toHaveProperty('callerErrorInfo', { bad: true });
+    expect(log).not.toHaveProperty('error_info');
+  });
+
+  it('strips caller error_info and replaces it with the real VError info', async () => {
+    const { destination, records } = makeCapture();
+    const logger = await createLogger({ destination });
+    const err = new VError('fail', { info: { requestId: 'abc' } });
+    logger.error({ err, error_info: { bad: true } }, err.message);
+    const [warn, log] = records();
+    expect(warn).toHaveProperty('callerErrorInfo', { bad: true });
+    expect((log['error_info'] as Record<string, unknown>)['requestId']).toBe('abc');
+    expect(log['error_info']).not.toHaveProperty('bad');
+  });
+
+  it('strips caller error_info, warns, and emits cause VError info when err is a WError', async () => {
+    const { destination, records } = makeCapture();
+    const logger = await createLogger({ destination });
+    const cause = new VError('root', { info: { fromRoot: true } });
+    const wrapped = new WError('wrapper', { cause });
+    logger.error({ err: wrapped, error_info: { bad: true } }, wrapped.message);
+    const [warn, log] = records();
+    expect(warn).toHaveProperty('callerErrorInfo', { bad: true });
+    expect((log['error_info'] as Record<string, unknown>)['fromRoot']).toBe(true);
+    expect(log['error_info']).not.toHaveProperty('bad');
+  });
+
+  it('does not emit a warning when error_info is absent from the merge object', async () => {
+    const { destination, records } = makeCapture();
+    const logger = await createLogger({ destination });
+    const err = new VError('fail', { info: { requestId: 'abc' } });
+    logger.error({ err }, err.message);
+    expect(records()).toHaveLength(1);
+    expect(records()[0]).toHaveProperty('level', 'error');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // pino API integrity — root logger
 // ---------------------------------------------------------------------------
 
 describe('pino API integrity — root logger', () => {
-  let logger!: AppLogger;
+  let logger!: Logger;
   let records!: () => LogRecord[];
 
   beforeEach(async () => {
     const capture = makeCapture();
     logger = await createLogger({ destination: capture.destination });
     records = capture.records;
-  });
-
-  it('has a logError method', () => {
-    expect(typeof logger.logError).toBe('function');
   });
 
   it('fatal() emits a record at fatal level', () => {
@@ -167,12 +241,7 @@ describe('pino API integrity — root logger', () => {
     expect(logger.isLevelEnabled('trace')).toBe(false);
   });
 
-  it('child() returns an AppLogger (has logError)', () => {
-    const child = logger.child({ component: 'test' });
-    expect(typeof child.logError).toBe('function');
-  });
-
-  it('child() returns an AppLogger (has child)', () => {
+  it('child() returns an Logger (has child)', () => {
     const child = logger.child({ component: 'test' });
     expect(typeof child.child).toBe('function');
   });
@@ -183,7 +252,7 @@ describe('pino API integrity — root logger', () => {
 // ---------------------------------------------------------------------------
 
 describe('pino API integrity — child logger', () => {
-  let child!: AppLogger;
+  let child!: Logger;
   let records!: () => LogRecord[];
 
   beforeEach(async () => {
@@ -191,10 +260,6 @@ describe('pino API integrity — child logger', () => {
     const logger = await createLogger({ destination: capture.destination });
     child = logger.child({ component: 'worker' });
     records = capture.records;
-  });
-
-  it('has logError', () => {
-    expect(typeof child.logError).toBe('function');
   });
 
   it('fatal() works and includes parent bindings', () => {
@@ -258,9 +323,8 @@ describe('pino API integrity — child logger', () => {
     expect(child.isLevelEnabled('debug')).toBe(false);
   });
 
-  it('child.child() returns an AppLogger', () => {
+  it('child.child() returns an Logger', () => {
     const grandchild = child.child({ subcomponent: 'task' });
-    expect(typeof grandchild.logError).toBe('function');
     expect(typeof grandchild.child).toBe('function');
   });
 });
@@ -270,7 +334,7 @@ describe('pino API integrity — child logger', () => {
 // ---------------------------------------------------------------------------
 
 describe('pino API integrity — grandchild logger', () => {
-  let grandchild!: AppLogger;
+  let grandchild!: Logger;
   let records!: () => LogRecord[];
 
   beforeEach(async () => {
@@ -278,10 +342,6 @@ describe('pino API integrity — grandchild logger', () => {
     const logger = await createLogger({ destination: capture.destination });
     grandchild = logger.child({ a: 1 }).child({ b: 2 });
     records = capture.records;
-  });
-
-  it('has logError', () => {
-    expect(typeof grandchild.logError).toBe('function');
   });
 
   it('has child', () => {
@@ -307,8 +367,8 @@ describe('pino API integrity — grandchild logger', () => {
     expect(levels).toEqual(['fatal', 'error', 'warn', 'info', 'debug', 'trace']);
   });
 
-  it('logError emits with both ancestor bindings merged', () => {
-    grandchild.logError({ err: new Error('deep error') });
+  it('error() with { err } emits with both ancestor bindings merged', () => {
+    grandchild.error({ err: new Error('deep error') }, 'deep error');
     expect(records()[0]).toHaveProperty('a', 1);
     expect(records()[0]).toHaveProperty('b', 2);
     expect(records()[0]).toHaveProperty('message', 'deep error');
@@ -337,11 +397,11 @@ describe('pino API integrity — grandchild logger', () => {
 });
 
 // ---------------------------------------------------------------------------
-// AppLogger.logError
+// VError / WError handling
 // ---------------------------------------------------------------------------
 
-describe('AppLogger.logError', () => {
-  let logger!: AppLogger;
+describe('VError/WError handling', () => {
+  let logger!: Logger;
   let records!: () => LogRecord[];
 
   beforeEach(async () => {
@@ -350,73 +410,96 @@ describe('AppLogger.logError', () => {
     records = capture.records;
   });
 
-  it('logs a plain Error at error level with { err } and message', () => {
+  it('logger.error({ err }) logs a plain Error with err field', () => {
     const err = new Error('something went wrong');
-    logger.logError({ err });
+    logger.error({ err }, err.message);
     expect(records()[0]).toHaveProperty('level', 'error');
     expect(records()[0]).toHaveProperty('message', 'something went wrong');
     expect(records()[0]).toHaveProperty('err');
   });
 
-  it('logs a VError with info nested under the "info" key', () => {
+  it('logger.error({ err }) emits error_info for a VError with info', () => {
     const err = new VError('upstream failed', { info: { requestId: 'abc123', statusCode: 500 } });
-    logger.logError({ err });
+    logger.error({ err }, err.message);
     expect(records()).toHaveLength(1);
-    expect(records()[0]).toHaveProperty('message', 'upstream failed');
-    expect(records()[0]).toHaveProperty('err');
     expect(records()[0]).toHaveProperty('error_info');
     expect((records()[0]['error_info'] as Record<string, unknown>)['requestId']).toBe('abc123');
     expect((records()[0]['error_info'] as Record<string, unknown>)['statusCode']).toBe(500);
   });
 
-  it('omits the "info" key for a VError with no info', () => {
-    logger.logError({ err: new VError('no info here') });
+  it('logger.warn({ err }) also emits error_info for a VError', () => {
+    const err = new VError('upstream failed', { info: { requestId: 'abc123' } });
+    logger.warn({ err }, err.message);
+    expect(records()[0]).toHaveProperty('level', 'warn');
+    expect(records()[0]).toHaveProperty('error_info');
+    expect((records()[0]['error_info'] as Record<string, unknown>)['requestId']).toBe('abc123');
+  });
+
+  it('omits error_info for a VError with no info', () => {
+    logger.error({ err: new VError('no info here') }, 'no info here');
     expect(records()).toHaveLength(1);
     expect(records()[0]).not.toHaveProperty('error_info');
   });
 
-  it('omits the "info" key for a plain Error', () => {
-    logger.logError({ err: new Error('plain') });
+  it('omits error_info for a plain Error', () => {
+    logger.error({ err: new Error('plain') }, 'plain');
     expect(records()[0]).not.toHaveProperty('error_info');
   });
 
-  it('logs only the cause of a WError, not the wrapper itself', () => {
+  it('logger.error({ err: wErr }) logs the cause, not the WError wrapper', () => {
     const root = new Error('root cause');
     const wrapped = new WError('wrapped error', { cause: root });
-    logger.logError({ err: wrapped });
-    const messages = records().map((r) => r['message']);
-    expect(messages).not.toContain('wrapped error');
-    expect(messages).toContain('root cause');
+    logger.error({ err: wrapped }, wrapped.message);
+    expect(records()).toHaveLength(1);
+    expect((records()[0]['err'] as Record<string, unknown>)['message']).toBe('root cause');
   });
 
-  it('merges call-site context into the log entry', () => {
+  it('logger.warn({ err: wErr }) also unwraps WError to the cause', () => {
+    const root = new Error('root cause');
+    const wrapped = new WError('wrapped error', { cause: root });
+    logger.warn({ err: wrapped }, wrapped.message);
+    expect(records()).toHaveLength(1);
+    expect((records()[0]['err'] as Record<string, unknown>)['message']).toBe('root cause');
+  });
+
+  it('merges call-site context into the log entry alongside err', () => {
     const err = new Error('db failed');
-    logger.logError({ err, requestId: 'xyz', userId: 42 });
+    logger.error({ err, requestId: 'xyz', userId: 42 }, err.message);
     expect(records()[0]).toHaveProperty('requestId', 'xyz');
     expect(records()[0]).toHaveProperty('userId', 42);
-    expect(records()[0]).toHaveProperty('message', 'db failed');
   });
 
   it('call-site context and VError info occupy separate namespaces', () => {
     const err = new VError('failed', { info: { fromError: 'yes' } });
-    logger.logError({ err, fromCallsite: 'yes' });
-    // call-site keys are at the top level, info keys are under 'error_info'
+    logger.error({ err, fromCallsite: 'yes' }, err.message);
     expect(records()[0]).toHaveProperty('fromCallsite', 'yes');
     expect((records()[0]['error_info'] as Record<string, unknown>)['fromError']).toBe('yes');
   });
 
-  it('accepts a message override', () => {
-    const err = new Error('internal message');
-    logger.logError({ err }, 'user-facing message');
-    expect(records()[0]).toHaveProperty('message', 'user-facing message');
-  });
-
-  it('carries call-site context through WError to the cause entry', () => {
+  it('carries call-site context through WError unwrapping', () => {
     const root = new Error('root cause');
     const wrapped = new WError('wrapper', { cause: root });
-    logger.logError({ err: wrapped, requestId: 'abc' });
-    expect(records()[0]).toHaveProperty('message', 'root cause');
+    logger.error({ err: wrapped, requestId: 'abc' }, wrapped.message);
     expect(records()[0]).toHaveProperty('requestId', 'abc');
+    expect((records()[0]['err'] as Record<string, unknown>)['message']).toBe('root cause');
+  });
+
+  it('error_info reflects the cause chain info after WError unwrapping', () => {
+    const root = new VError('root', { info: { fromRoot: true } });
+    const wrapped = new WError('wrapper', { cause: root });
+    logger.error({ err: wrapped }, wrapped.message);
+    expect((records()[0]['error_info'] as Record<string, unknown>)['fromRoot']).toBe(true);
+  });
+
+  it('does not infinite-loop when a WError has no valid cause', () => {
+    // WError without a cause: VError.cause() returns null, loop must break rather
+    // than falling back to the same WError instance indefinitely.
+    // Simulate a JS caller passing a non-Error cause, bypassing TypeScript.
+    // VError.cause() returns null, loop must break rather than falling back to
+    // the same WError instance indefinitely.
+    const causeless = new WError('no cause', { cause: null as unknown as Error });
+    expect(() => logger.error({ err: causeless }, causeless.message)).not.toThrow();
+    expect(records()[0]).toHaveProperty('level', 'error');
   });
 });
 
@@ -425,23 +508,31 @@ describe('AppLogger.logError', () => {
 // ---------------------------------------------------------------------------
 
 describe('Sentry integration', () => {
-  it('calls captureException for Error instances', async () => {
+  it('calls captureException on logger.error({ err })', async () => {
     const sentry = { captureException: vi.fn(), captureMessage: vi.fn() };
     const { destination } = makeCapture();
     const logger = await createLogger({ destination, sentry });
     const err = new Error('oops');
-    logger.logError({ err });
+    logger.error({ err }, err.message);
     expect(sentry.captureException).toHaveBeenCalledWith(err);
     expect(sentry.captureMessage).not.toHaveBeenCalled();
   });
 
-  it('captures only the cause of a WError, not the wrapper itself', async () => {
+  it('does NOT call captureException on logger.warn({ err })', async () => {
+    const sentry = { captureException: vi.fn(), captureMessage: vi.fn() };
+    const { destination } = makeCapture();
+    const logger = await createLogger({ destination, sentry });
+    logger.warn({ err: new Error('just a warning') }, 'just a warning');
+    expect(sentry.captureException).not.toHaveBeenCalled();
+  });
+
+  it('captures the cause of a WError, not the wrapper', async () => {
     const sentry = { captureException: vi.fn(), captureMessage: vi.fn() };
     const { destination } = makeCapture();
     const logger = await createLogger({ destination, sentry });
     const root = new Error('root');
     const wrapped = new WError('wrapped', { cause: root });
-    logger.logError({ err: wrapped });
+    logger.error({ err: wrapped }, wrapped.message);
     expect(sentry.captureException).toHaveBeenCalledTimes(1);
     expect(sentry.captureException).toHaveBeenCalledWith(root);
     expect(sentry.captureException).not.toHaveBeenCalledWith(wrapped);
@@ -452,7 +543,7 @@ describe('Sentry integration', () => {
     const { destination } = makeCapture();
     const logger = await createLogger({ destination, sentry });
     const err = new Error('child error');
-    logger.child({ component: 'worker' }).logError({ err });
+    logger.child({ component: 'worker' }).error({ err }, err.message);
     expect(sentry.captureException).toHaveBeenCalledWith(err);
   });
 
@@ -461,7 +552,7 @@ describe('Sentry integration', () => {
     const { destination } = makeCapture();
     const logger = await createLogger({ destination, sentry });
     const err = new Error('deep');
-    logger.child({ a: 1 }).child({ b: 2 }).logError({ err });
+    logger.child({ a: 1 }).child({ b: 2 }).error({ err }, err.message);
     expect(sentry.captureException).toHaveBeenCalledWith(err);
   });
 });
