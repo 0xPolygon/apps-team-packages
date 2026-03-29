@@ -121,18 +121,30 @@ export async function createLogger(options?: CreateLoggerOptions): Promise<Logge
   };
 
   let destination: DestinationStream | undefined = options?.destination;
+  let prettyFailed = false;
   if (!destination && options?.pretty) {
-    destination = (await import('pino-pretty')).default({
-      colorize: true,
-      timestampKey: 'timestamp',
-      translateTime: 'SYS:standard',
-      ignore: 'pid,hostname',
-      sync: true
-    });
+    try {
+      destination = (await import('pino-pretty')).default({
+        colorize: true,
+        timestampKey: 'timestamp',
+        translateTime: 'SYS:standard',
+        ignore: 'pid,hostname',
+        sync: true
+      });
+    } catch {
+      prettyFailed = true;
+    }
   }
 
   const base = destination ? pino(pinoOptions, destination) : pino(pinoOptions);
 
   ref.self = base;
+
+  if (prettyFailed) {
+    base.warn(
+      'pino-pretty is not installed — falling back to JSON output. Install it as a dev dependency to enable pretty logging.'
+    );
+  }
+
   return base;
 }
