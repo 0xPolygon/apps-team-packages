@@ -1,5 +1,17 @@
 # @polygonlabs/verror
 
+## 1.0.1
+
+### Patch Changes
+
+- 820c80a: `MIGRATION.md` is now included in the published npm bundle.
+
+  Previously, `MIGRATION.md` was present in the repository but absent from the `files`
+  allowlist in `package.json`, so it was silently dropped when packages were published
+  to the registry. Consumers who installed a package and looked for migration guidance
+  would find no file. Adding `"MIGRATION.md"` to `files` ensures it ships alongside
+  `dist/` in every release.
+
 ## 1.0.0
 
 Stable public release. No API changes since 0.2.0.
