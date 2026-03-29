@@ -28,7 +28,11 @@ export function typescript(options?: TypeScriptOptions) {
     rules: {
       '@typescript-eslint/consistent-type-imports': ['error'],
       '@typescript-eslint/no-floating-promises': 'error',
-      '@typescript-eslint/no-explicit-any': 'warn'
+      '@typescript-eslint/no-explicit-any': 'warn',
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }
+      ]
     }
   });
 }
