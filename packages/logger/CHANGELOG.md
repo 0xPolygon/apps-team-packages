@@ -1,5 +1,30 @@
 # @polygonlabs/logger
 
+## 1.0.1
+
+### Patch Changes
+
+- 820c80a: `MIGRATION.md` is now included in the published npm bundle.
+
+  Previously, `MIGRATION.md` was present in the repository but absent from the `files`
+  allowlist in `package.json`, so it was silently dropped when packages were published
+  to the registry. Consumers who installed a package and looked for migration guidance
+  would find no file. Adding `"MIGRATION.md"` to `files` ensures it ships alongside
+  `dist/` in every release.
+
+- eb445a5: `Logger`, `Level`, and `DestinationStream` types are now exported directly from `@polygonlabs/logger`.
+
+  Previously, consumers needed to `import type { Logger } from 'pino'` to type-annotate logger instances,
+  requiring a direct pino dependency. All three types are now re-exported from the package so consumers
+  can import them from `@polygonlabs/logger` without adding pino as an explicit dependency.
+
+  `createLogger` now also handles a missing `pino-pretty` gracefully: if `pretty: true` is passed but
+  `pino-pretty` is not installed, the logger falls back to JSON output and emits a warning rather than
+  throwing an import error.
+
+- Updated dependencies [820c80a]
+  - @polygonlabs/verror@1.0.1
+
 ## 1.0.0
 
 Stable public release. No breaking API changes since 0.3.0.
