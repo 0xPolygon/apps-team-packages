@@ -121,7 +121,6 @@ export async function createLogger(options?: CreateLoggerOptions): Promise<Logge
   };
 
   let destination: DestinationStream | undefined = options?.destination;
-  let prettyFailed = false;
   if (!destination && options?.pretty) {
     try {
       destination = (await import('pino-pretty')).default({
@@ -132,19 +131,14 @@ export async function createLogger(options?: CreateLoggerOptions): Promise<Logge
         sync: true
       });
     } catch {
-      prettyFailed = true;
+      console.warn(
+        'pino-pretty is not installed — falling back to JSON output. Install it as a dev dependency to enable pretty logging.'
+      );
     }
   }
 
   const base = destination ? pino(pinoOptions, destination) : pino(pinoOptions);
 
   ref.self = base;
-
-  if (prettyFailed) {
-    base.warn(
-      'pino-pretty is not installed — falling back to JSON output. Install it as a dev dependency to enable pretty logging.'
-    );
-  }
-
   return base;
 }
