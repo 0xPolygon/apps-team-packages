@@ -24,7 +24,8 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "MIGRATION.md"
   ],
   "scripts": {
     "build": "pnpm run typecheck && tsc -p tsconfig.build.json",
