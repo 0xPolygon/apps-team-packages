@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.0.2
+
+### Patch Changes
+
+- 04e690a: Underscore-prefixed variables and parameters no longer trigger the unused-vars error.
+
+  Overrides `@typescript-eslint/no-unused-vars` from `tseslint.configs.recommended` to add
+  `argsIgnorePattern` and `varsIgnorePattern` matching `/^_/`, restoring the conventional
+  behaviour where a leading underscore signals an intentionally unused name — most commonly
+  needed for the mandatory fourth parameter in Express error-handling middleware.
+
 ## 2.0.1
 
 ### Patch Changes
