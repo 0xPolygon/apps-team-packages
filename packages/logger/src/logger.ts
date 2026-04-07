@@ -59,27 +59,60 @@ export async function createLogger(options?: CreateLoggerOptions): Promise<Logge
       log(object: Record<string, unknown>) {
         let out = object;
 
-        // Detect a caller-supplied "timestamp" key and rename it so it cannot
-        // shadow the authoritative timestamp written by the timestamp function.
-        if ('timestamp' in out) {
-          const { timestamp, ...rest } = out;
-          ref.self?.warn(
-            { callerTimestamp: timestamp },
-            'Log call included "timestamp" in merge object — reserved key renamed to callerTimestamp. Fix the call site.'
-          );
-          out = { callerTimestamp: timestamp, ...rest };
+        // Reserved keys — values that the logger or Datadog agent writes
+        // authoritatively. If a caller includes one of these in a merge object it
+        // either silently overrides the authoritative value or is silently dropped.
+        //
+        // Strategy: collect all caller-supplied reserved values into a single
+        // nested `_logger` object. Using a namespace rather than flat renamed keys
+        // (e.g. `callerTimestamp`) avoids a second collision surface — `_logger`
+        // is far less likely to be used by application code than `callerFoo`.
+        //
+        // If `_logger` itself is in the merge object we merge into it (preserving
+        // whatever the caller put there) and emit a warn, rather than clobbering.
+        //
+        // Reserved keys and why:
+        //   timestamp  — written by the pino timestamp function; caller value
+        //                would shadow the authoritative ISO 8601 string
+        //   message    — written by pino as messageKey; caller value in the merge
+        //                object races with the string argument
+        //   error_info — written by formatters.log from VError.info(); caller
+        //                value would be overwritten without warning
+        //   service    — set by the Datadog agent from the container name; a
+        //                caller value silently breaks log attribution
+        //   host       — set by the Datadog agent from the container hostname; a
+        //                caller value silently overrides infrastructure routing
+
+        const RESERVED = ['timestamp', 'message', 'error_info', 'service', 'host'] as const;
+        const shadowed: Record<string, unknown> = {};
+
+        for (const key of RESERVED) {
+          if (key in out) {
+            shadowed[key] = out[key];
+            const { [key]: _dropped, ...rest } = out;
+            out = rest;
+          }
         }
 
-        // Detect a caller-supplied "error_info" key and strip it — the correct
-        // value is derived from the err below. Preserve the caller's value in a
-        // warning so it is not silently lost.
-        if ('error_info' in out) {
-          const { error_info, ...rest } = out;
+        if (Object.keys(shadowed).length > 0) {
+          // Merge into any existing _logger value rather than clobber it.
+          const existing =
+            typeof out['_logger'] === 'object' && out['_logger'] !== null
+              ? (out['_logger'] as Record<string, unknown>)
+              : {};
+          if ('_logger' in out && (typeof out['_logger'] !== 'object' || out['_logger'] === null)) {
+            // _logger exists but is a primitive — warn separately so it isn't lost.
+            ref.self?.warn(
+              { _logger: out['_logger'] },
+              'Log call included "_logger" as a non-object — overwritten by logger internals. Fix the call site.'
+            );
+          }
+          out = { ...out, _logger: { ...existing, ...shadowed } };
+          const keys = Object.keys(shadowed).join(', ');
           ref.self?.warn(
-            { callerErrorInfo: error_info },
-            'Log call included "error_info" in merge object — reserved key ignored. Fix the call site.'
+            { _logger: shadowed },
+            `Log call included reserved key(s) [${keys}] in merge object — moved to _logger. Fix the call site.`
           );
-          out = rest;
         }
 
         // Emit merged VError info chain under error_info for structured querying.
