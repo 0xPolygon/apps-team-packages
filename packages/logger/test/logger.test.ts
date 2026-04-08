@@ -62,13 +62,13 @@ describe('createLogger — output format', () => {
     expect(records()[0]).not.toHaveProperty('hostname');
   });
 
-  it('renames a "timestamp" key in the merge object to "callerTimestamp"', async () => {
+  it('moves a "timestamp" key in the merge object to _logger.timestamp', async () => {
     const { destination, records } = makeCapture();
     const logger = await createLogger({ destination });
     logger.info({ timestamp: 'caller-supplied' }, 'test');
     const [warn, log] = records();
     expect(warn).toHaveProperty('level', 'warn');
-    expect(log).toHaveProperty('callerTimestamp', 'caller-supplied');
+    expect(log).nested.property('_logger.timestamp').equal('caller-supplied');
     expect(log).not.toHaveProperty('timestamp', 'caller-supplied');
   });
 });
@@ -86,11 +86,11 @@ describe('reserved key guard — error_info', () => {
     expect(records()).toHaveLength(2);
   });
 
-  it('preserves the conflicting value in the warning as callerErrorInfo', async () => {
+  it('preserves the conflicting value in the warning under _logger.error_info', async () => {
     const { destination, records } = makeCapture();
     const logger = await createLogger({ destination });
     logger.info({ error_info: { bad: true } }, 'test');
-    expect(records()[0]).toHaveProperty('callerErrorInfo', { bad: true });
+    expect(records()[0]).nested.property('_logger.error_info').deep.equal({ bad: true });
   });
 
   it('strips error_info from the log record when no err is present', async () => {
@@ -106,7 +106,7 @@ describe('reserved key guard — error_info', () => {
     const err = new Error('plain');
     logger.error({ err, error_info: { bad: true } }, err.message);
     const [warn, log] = records();
-    expect(warn).toHaveProperty('callerErrorInfo', { bad: true });
+    expect(warn).nested.property('_logger.error_info').deep.equal({ bad: true });
     expect(log).not.toHaveProperty('error_info');
   });
 
@@ -116,7 +116,7 @@ describe('reserved key guard — error_info', () => {
     const err = new VError('no info');
     logger.error({ err, error_info: { bad: true } }, err.message);
     const [warn, log] = records();
-    expect(warn).toHaveProperty('callerErrorInfo', { bad: true });
+    expect(warn).nested.property('_logger.error_info').deep.equal({ bad: true });
     expect(log).not.toHaveProperty('error_info');
   });
 
@@ -126,9 +126,9 @@ describe('reserved key guard — error_info', () => {
     const err = new VError('fail', { info: { requestId: 'abc' } });
     logger.error({ err, error_info: { bad: true } }, err.message);
     const [warn, log] = records();
-    expect(warn).toHaveProperty('callerErrorInfo', { bad: true });
-    expect((log['error_info'] as Record<string, unknown>)['requestId']).toBe('abc');
-    expect(log['error_info']).not.toHaveProperty('bad');
+    expect(warn).nested.property('_logger.error_info').deep.equal({ bad: true });
+    expect(log).nested.property('error_info.requestId').equal('abc');
+    expect(log).not.nested.property('error_info.bad');
   });
 
   it('strips caller error_info, warns, and emits cause VError info when err is a WError', async () => {
@@ -138,9 +138,9 @@ describe('reserved key guard — error_info', () => {
     const wrapped = new WError('wrapper', { cause });
     logger.error({ err: wrapped, error_info: { bad: true } }, wrapped.message);
     const [warn, log] = records();
-    expect(warn).toHaveProperty('callerErrorInfo', { bad: true });
-    expect((log['error_info'] as Record<string, unknown>)['fromRoot']).toBe(true);
-    expect(log['error_info']).not.toHaveProperty('bad');
+    expect(warn).nested.property('_logger.error_info').deep.equal({ bad: true });
+    expect(log).nested.property('error_info.fromRoot').equal(true);
+    expect(log).not.nested.property('error_info.bad');
   });
 
   it('does not emit a warning when error_info is absent from the merge object', async () => {
@@ -423,8 +423,8 @@ describe('VError/WError handling', () => {
     logger.error({ err }, err.message);
     expect(records()).toHaveLength(1);
     expect(records()[0]).toHaveProperty('error_info');
-    expect((records()[0]['error_info'] as Record<string, unknown>)['requestId']).toBe('abc123');
-    expect((records()[0]['error_info'] as Record<string, unknown>)['statusCode']).toBe(500);
+    expect(records()[0]).nested.property('error_info.requestId').equal('abc123');
+    expect(records()[0]).nested.property('error_info.statusCode').equal(500);
   });
 
   it('logger.warn({ err }) also emits error_info for a VError', () => {
@@ -432,7 +432,7 @@ describe('VError/WError handling', () => {
     logger.warn({ err }, err.message);
     expect(records()[0]).toHaveProperty('level', 'warn');
     expect(records()[0]).toHaveProperty('error_info');
-    expect((records()[0]['error_info'] as Record<string, unknown>)['requestId']).toBe('abc123');
+    expect(records()[0]).nested.property('error_info.requestId').equal('abc123');
   });
 
   it('omits error_info for a VError with no info', () => {
@@ -451,7 +451,7 @@ describe('VError/WError handling', () => {
     const wrapped = new WError('wrapped error', { cause: root });
     logger.error({ err: wrapped }, wrapped.message);
     expect(records()).toHaveLength(1);
-    expect((records()[0]['err'] as Record<string, unknown>)['message']).toBe('root cause');
+    expect(records()[0]).nested.property('err.message').equal('root cause');
   });
 
   it('logger.warn({ err: wErr }) also unwraps WError to the cause', () => {
@@ -459,7 +459,7 @@ describe('VError/WError handling', () => {
     const wrapped = new WError('wrapped error', { cause: root });
     logger.warn({ err: wrapped }, wrapped.message);
     expect(records()).toHaveLength(1);
-    expect((records()[0]['err'] as Record<string, unknown>)['message']).toBe('root cause');
+    expect(records()[0]).nested.property('err.message').equal('root cause');
   });
 
   it('merges call-site context into the log entry alongside err', () => {
@@ -473,7 +473,7 @@ describe('VError/WError handling', () => {
     const err = new VError('failed', { info: { fromError: 'yes' } });
     logger.error({ err, fromCallsite: 'yes' }, err.message);
     expect(records()[0]).toHaveProperty('fromCallsite', 'yes');
-    expect((records()[0]['error_info'] as Record<string, unknown>)['fromError']).toBe('yes');
+    expect(records()[0]).nested.property('error_info.fromError').equal('yes');
   });
 
   it('carries call-site context through WError unwrapping', () => {
@@ -481,14 +481,14 @@ describe('VError/WError handling', () => {
     const wrapped = new WError('wrapper', { cause: root });
     logger.error({ err: wrapped, requestId: 'abc' }, wrapped.message);
     expect(records()[0]).toHaveProperty('requestId', 'abc');
-    expect((records()[0]['err'] as Record<string, unknown>)['message']).toBe('root cause');
+    expect(records()[0]).nested.property('err.message').equal('root cause');
   });
 
   it('error_info reflects the cause chain info after WError unwrapping', () => {
     const root = new VError('root', { info: { fromRoot: true } });
     const wrapped = new WError('wrapper', { cause: root });
     logger.error({ err: wrapped }, wrapped.message);
-    expect((records()[0]['error_info'] as Record<string, unknown>)['fromRoot']).toBe(true);
+    expect(records()[0]).nested.property('error_info.fromRoot').equal(true);
   });
 
   it('does not infinite-loop when a WError has no valid cause', () => {
