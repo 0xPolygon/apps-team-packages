@@ -1,6 +1,6 @@
 {
   "name": "@polygonlabs/logger",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Pino-based logger with Sentry integration, configured for Datadog ingestion and prettified output capable.",
   "type": "module",
   "repository": {
