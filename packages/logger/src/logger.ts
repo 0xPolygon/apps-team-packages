@@ -2,7 +2,7 @@ import type { DestinationStream, Logger, LoggerOptions } from 'pino';
 
 import { pino, stdSerializers } from 'pino';
 
-import { VError, WError } from '@polygonlabs/verror';
+import { VError, WERROR_SYMBOL } from '@polygonlabs/verror';
 
 /**
  * Duck-typed interface for Sentry error capturing. Matches the surface of
@@ -136,8 +136,11 @@ export async function createLogger(options?: CreateLoggerOptions): Promise<Logge
           const obj = first as Record<string, unknown>;
           if (obj['err'] instanceof Error) {
             // Unwrap WError chain — WError's own message is never the useful signal.
+            // Use WERROR_SYMBOL (Symbol.for) instead of instanceof — works across
+            // module boundaries regardless of how many copies of @polygonlabs/verror
+            // are loaded.
             let err: Error = obj['err'];
-            while (err instanceof WError) {
+            while ((err as unknown as Record<symbol, unknown>)[WERROR_SYMBOL] === true) {
               const cause = VError.cause(err);
               if (cause === null) break;
               err = cause;

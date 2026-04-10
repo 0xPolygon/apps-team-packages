@@ -210,6 +210,18 @@ export class VError extends Error {
 // ─── WError ────────────────────────────────────────────────────────────────────
 
 /**
+ * Cross-boundary identity marker for WError and its subclasses.
+ *
+ * Uses Symbol.for() so the same symbol is returned from the global registry
+ * regardless of which module copy of @polygonlabs/verror is loaded — unlike
+ * `instanceof`, which breaks when the host and a dependency have separate
+ * copies of the class.
+ *
+ * Check with: `(err as Record<symbol, unknown>)[WERROR_SYMBOL] === true`
+ */
+export const WERROR_SYMBOL: unique symbol = Symbol.for('@polygonlabs/verror/is-werror');
+
+/**
  * A "wrapped error" — like VError but the cause's message is intentionally
  * NOT appended to this error's own message.  The cause is still traversable
  * via `VError.cause()` and visible in `toString()`, but cause chains remain
@@ -220,6 +232,10 @@ export class VError extends Error {
  */
 export class WError extends VError {
   override readonly name: string = 'WError';
+
+  // Presence of this property (checked via WERROR_SYMBOL) identifies WError
+  // and its subclasses across module boundaries without relying on instanceof.
+  readonly [WERROR_SYMBOL] = true;
 
   constructor(
     message: string,
