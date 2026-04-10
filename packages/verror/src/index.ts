@@ -1,4 +1,11 @@
-export { serializeError, VError, WError, MultiError, WERROR_SYMBOL } from './verror.ts';
+export {
+  serializeError,
+  VError,
+  WError,
+  MultiError,
+  WERROR_SYMBOL,
+  MULTIERROR_SYMBOL
+} from './verror.ts';
 export type { VErrorOptions } from './types.ts';
 export {
   HTTPError,
