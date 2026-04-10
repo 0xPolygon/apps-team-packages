@@ -74,86 +74,6 @@ describe('createLogger — output format', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Reserved key guard — error_info
-// ---------------------------------------------------------------------------
-
-describe('reserved key guard — error_info', () => {
-  it('emits a warn-level warning when error_info is supplied in the merge object', async () => {
-    const { destination, records } = makeCapture();
-    const logger = await createLogger({ destination });
-    logger.info({ error_info: { bad: true } }, 'test');
-    expect(records()[0]).toHaveProperty('level', 'warn');
-    expect(records()).toHaveLength(2);
-  });
-
-  it('preserves the conflicting value in the warning under _logger.error_info', async () => {
-    const { destination, records } = makeCapture();
-    const logger = await createLogger({ destination });
-    logger.info({ error_info: { bad: true } }, 'test');
-    expect(records()[0]).nested.property('_logger.error_info').deep.equal({ bad: true });
-  });
-
-  it('strips error_info from the log record when no err is present', async () => {
-    const { destination, records } = makeCapture();
-    const logger = await createLogger({ destination });
-    logger.info({ error_info: { bad: true } }, 'test');
-    expect(records()[1]).not.toHaveProperty('error_info');
-  });
-
-  it('strips error_info and warns when err is a plain Error (no VError info to replace it)', async () => {
-    const { destination, records } = makeCapture();
-    const logger = await createLogger({ destination });
-    const err = new Error('plain');
-    logger.error({ err, error_info: { bad: true } }, err.message);
-    const [warn, log] = records();
-    expect(warn).nested.property('_logger.error_info').deep.equal({ bad: true });
-    expect(log).not.toHaveProperty('error_info');
-  });
-
-  it('strips error_info and warns when err is a VError with no info', async () => {
-    const { destination, records } = makeCapture();
-    const logger = await createLogger({ destination });
-    const err = new VError('no info');
-    logger.error({ err, error_info: { bad: true } }, err.message);
-    const [warn, log] = records();
-    expect(warn).nested.property('_logger.error_info').deep.equal({ bad: true });
-    expect(log).not.toHaveProperty('error_info');
-  });
-
-  it('strips caller error_info and replaces it with the real VError info', async () => {
-    const { destination, records } = makeCapture();
-    const logger = await createLogger({ destination });
-    const err = new VError('fail', { info: { requestId: 'abc' } });
-    logger.error({ err, error_info: { bad: true } }, err.message);
-    const [warn, log] = records();
-    expect(warn).nested.property('_logger.error_info').deep.equal({ bad: true });
-    expect(log).nested.property('error_info.requestId').equal('abc');
-    expect(log).not.nested.property('error_info.bad');
-  });
-
-  it('strips caller error_info, warns, and emits cause VError info when err is a WError', async () => {
-    const { destination, records } = makeCapture();
-    const logger = await createLogger({ destination });
-    const cause = new VError('root', { info: { fromRoot: true } });
-    const wrapped = new WError('wrapper', { cause });
-    logger.error({ err: wrapped, error_info: { bad: true } }, wrapped.message);
-    const [warn, log] = records();
-    expect(warn).nested.property('_logger.error_info').deep.equal({ bad: true });
-    expect(log).nested.property('error_info.fromRoot').equal(true);
-    expect(log).not.nested.property('error_info.bad');
-  });
-
-  it('does not emit a warning when error_info is absent from the merge object', async () => {
-    const { destination, records } = makeCapture();
-    const logger = await createLogger({ destination });
-    const err = new VError('fail', { info: { requestId: 'abc' } });
-    logger.error({ err }, err.message);
-    expect(records()).toHaveLength(1);
-    expect(records()[0]).toHaveProperty('level', 'error');
-  });
-});
-
-// ---------------------------------------------------------------------------
 // pino API integrity — root logger
 // ---------------------------------------------------------------------------
 
@@ -418,32 +338,30 @@ describe('VError/WError handling', () => {
     expect(records()[0]).toHaveProperty('err');
   });
 
-  it('logger.error({ err }) emits error_info for a VError with info', () => {
+  it('logger.error({ err }) emits err.info for a VError with info', () => {
     const err = new VError('upstream failed', { info: { requestId: 'abc123', statusCode: 500 } });
     logger.error({ err }, err.message);
     expect(records()).toHaveLength(1);
-    expect(records()[0]).toHaveProperty('error_info');
-    expect(records()[0]).nested.property('error_info.requestId').equal('abc123');
-    expect(records()[0]).nested.property('error_info.statusCode').equal(500);
+    expect(records()[0]).nested.property('err.info.requestId').equal('abc123');
+    expect(records()[0]).nested.property('err.info.statusCode').equal(500);
   });
 
-  it('logger.warn({ err }) also emits error_info for a VError', () => {
+  it('logger.warn({ err }) also emits err.info for a VError', () => {
     const err = new VError('upstream failed', { info: { requestId: 'abc123' } });
     logger.warn({ err }, err.message);
     expect(records()[0]).toHaveProperty('level', 'warn');
-    expect(records()[0]).toHaveProperty('error_info');
-    expect(records()[0]).nested.property('error_info.requestId').equal('abc123');
+    expect(records()[0]).nested.property('err.info.requestId').equal('abc123');
   });
 
-  it('omits error_info for a VError with no info', () => {
+  it('omits err.info for a VError with no info', () => {
     logger.error({ err: new VError('no info here') }, 'no info here');
     expect(records()).toHaveLength(1);
-    expect(records()[0]).not.toHaveProperty('error_info');
+    expect(records()[0]).not.nested.property('err.info');
   });
 
-  it('omits error_info for a plain Error', () => {
+  it('omits err.info for a plain Error', () => {
     logger.error({ err: new Error('plain') }, 'plain');
-    expect(records()[0]).not.toHaveProperty('error_info');
+    expect(records()[0]).not.nested.property('err.info');
   });
 
   it('logger.error({ err: wErr }) logs the cause, not the WError wrapper', () => {
@@ -469,11 +387,11 @@ describe('VError/WError handling', () => {
     expect(records()[0]).toHaveProperty('userId', 42);
   });
 
-  it('call-site context and VError info occupy separate namespaces', () => {
+  it('call-site context and VError info are both present', () => {
     const err = new VError('failed', { info: { fromError: 'yes' } });
     logger.error({ err, fromCallsite: 'yes' }, err.message);
     expect(records()[0]).toHaveProperty('fromCallsite', 'yes');
-    expect(records()[0]).nested.property('error_info.fromError').equal('yes');
+    expect(records()[0]).nested.property('err.info.fromError').equal('yes');
   });
 
   it('carries call-site context through WError unwrapping', () => {
@@ -484,11 +402,37 @@ describe('VError/WError handling', () => {
     expect(records()[0]).nested.property('err.message').equal('root cause');
   });
 
-  it('error_info reflects the cause chain info after WError unwrapping', () => {
+  it('err.info reflects the cause chain info after WError unwrapping', () => {
     const root = new VError('root', { info: { fromRoot: true } });
     const wrapped = new WError('wrapper', { cause: root });
     logger.error({ err: wrapped }, wrapped.message);
-    expect(records()[0]).nested.property('error_info.fromRoot').equal(true);
+    expect(records()[0]).nested.property('err.info.fromRoot').equal(true);
+  });
+
+  it('unwraps a WError subclass to its cause', () => {
+    class DomainError extends WError {
+      override readonly name = 'DomainError' as const;
+    }
+    const root = new VError('root cause', { info: { code: 42 } });
+    const wrapped = new DomainError('domain context', { cause: root });
+    logger.error({ err: wrapped }, wrapped.message);
+    expect(records()).toHaveLength(1);
+    expect(records()[0]).nested.property('err.message').equal('root cause');
+    expect(records()[0]).nested.property('err.info.code').equal(42);
+  });
+
+  it('err.info merges the full VError cause chain, not just the top-level error', () => {
+    // This is the key benefit of using VError.info() in the serializer rather than
+    // just reading err.info directly — info from deeper causes surfaces too.
+    const root = new VError('root', { info: { fromRoot: true, shared: 'root' } });
+    const mid = new VError('mid', { cause: root, info: { fromMid: true, shared: 'mid' } });
+    logger.error({ err: mid }, mid.message);
+    // fromRoot comes from the cause chain
+    expect(records()[0]).nested.property('err.info.fromRoot').equal(true);
+    // fromMid comes from the top error
+    expect(records()[0]).nested.property('err.info.fromMid').equal(true);
+    // closer error wins on collision
+    expect(records()[0]).nested.property('err.info.shared').equal('mid');
   });
 
   it('does not infinite-loop when a WError has no valid cause', () => {
