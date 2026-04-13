@@ -1,5 +1,43 @@
 # Migration Guide
 
+## 1.x → 2.0.0
+
+### Update `@polygonlabs/verror` from a transitive to a direct dependency
+
+`@polygonlabs/verror` has moved from `dependencies` to `peerDependencies`. It must
+now be listed as a direct `dependency` in your service's `package.json`:
+
+```json
+"dependencies": {
+  "@polygonlabs/verror": ">=1.0.2"
+}
+```
+
+pnpm will warn at install time if the peer is missing.
+
+### Replace `error_info` with `err.info` in log reads and Datadog queries
+
+The top-level `error_info` field is removed. VError info is now written under
+`err.info` by the pino error serialiser, which walks the full cause chain and
+merges info from every link. Previously, `error_info` only captured the
+top-level error's info — context attached to wrapped causes was silently dropped.
+
+**Datadog** — update any saved searches, log queries, monitors, or dashboard
+widgets that reference `@error_info.*`:
+
+```text
+# before
+@error_info.requestId:*
+
+# after
+@err.info.requestId:*
+```
+
+**Code that reads structured logs** (e.g. integration tests or log parsers) —
+replace `log.error_info` with `log.err.info`.
+
+---
+
 ## 0.2 → 0.3
 
 ### Replace `logError()` with standard pino log methods
