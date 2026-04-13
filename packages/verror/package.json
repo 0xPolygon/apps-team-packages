@@ -1,6 +1,6 @@
 {
   "name": "@polygonlabs/verror",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "TypeScript-first, browser-friendly VError-inspired error handling library",
   "type": "module",
   "repository": {
