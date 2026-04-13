@@ -1,5 +1,33 @@
 # @polygonlabs/logger
 
+## 2.0.0
+
+### Major Changes
+
+- d7ea53e: VError info is now emitted as `err.info` instead of the top-level `error_info` field
+
+  The `err` serializer now calls `VError.info()` to walk the full cause chain and merge info from every link. Previously, `error_info` was written as a separate top-level field and only captured the top-level error's info — cause chain context was silently dropped. The `error_info` field is removed entirely.
+
+  ## Migration
+
+  Update any Datadog log queries, saved searches, monitors, or dashboards that reference `@error_info.*` to use `@err.info.*` instead.
+
+### Patch Changes
+
+- e99ba29: Fix `instanceof WError` failing across module boundaries when multiple copies of `@polygonlabs/verror` are loaded
+
+  `@polygonlabs/verror` now exports `WERROR_SYMBOL` (`Symbol.for('@polygonlabs/verror/is-werror')`). WError and all subclasses carry this symbol as an instance property. Because `Symbol.for()` uses the V8 global registry, the same symbol value is returned in every module copy — unlike `instanceof`, which compares prototype chains and silently returns `false` when two copies of the class exist.
+
+  `@polygonlabs/logger` now uses `WERROR_SYMBOL` to identify WError instances in the log hook, fixing a silent failure where WError cause chains were not unwrapped when the host service and the logger each had their own copy of `@polygonlabs/verror` in `node_modules`. `@polygonlabs/verror` is also moved from `dependencies` to `peerDependencies`, ensuring a single shared copy in consuming services.
+
+  ## Migration
+
+  Add `@polygonlabs/verror` to your service's direct `dependencies` if it is not already present — pnpm will warn if the peer is missing.
+
+- Updated dependencies [ea88e1e]
+- Updated dependencies [e99ba29]
+  - @polygonlabs/verror@1.0.2
+
 ## 1.0.2
 
 ### Patch Changes

@@ -1,5 +1,23 @@
 # @polygonlabs/verror
 
+## 1.0.2
+
+### Patch Changes
+
+- ea88e1e: Fix `instanceof MultiError` failing across module boundaries in `errorForEach`
+
+  `@polygonlabs/verror` now exports `MULTIERROR_SYMBOL` (`Symbol.for('@polygonlabs/verror/is-multierror')`). MultiError and all subclasses carry this symbol as an instance property. `VError.errorForEach` uses `MULTIERROR_SYMBOL` to identify MultiError instances instead of `instanceof MultiError`, fixing silent incorrect behaviour when multiple copies of the package are loaded.
+
+- e99ba29: Fix `instanceof WError` failing across module boundaries when multiple copies of `@polygonlabs/verror` are loaded
+
+  `@polygonlabs/verror` now exports `WERROR_SYMBOL` (`Symbol.for('@polygonlabs/verror/is-werror')`). WError and all subclasses carry this symbol as an instance property. Because `Symbol.for()` uses the V8 global registry, the same symbol value is returned in every module copy — unlike `instanceof`, which compares prototype chains and silently returns `false` when two copies of the class exist.
+
+  `@polygonlabs/logger` now uses `WERROR_SYMBOL` to identify WError instances in the log hook, fixing a silent failure where WError cause chains were not unwrapped when the host service and the logger each had their own copy of `@polygonlabs/verror` in `node_modules`. `@polygonlabs/verror` is also moved from `dependencies` to `peerDependencies`, ensuring a single shared copy in consuming services.
+
+  ## Migration
+
+  Add `@polygonlabs/verror` to your service's direct `dependencies` if it is not already present — pnpm will warn if the peer is missing.
+
 ## 1.0.1
 
 ### Patch Changes
