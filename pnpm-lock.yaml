@@ -102,9 +102,6 @@ importers:
 
   packages/logger:
     dependencies:
-      '@polygonlabs/verror':
-        specifier: workspace:*
-        version: link:../verror
       '@sentry/node':
         specifier: '>=8.0.0'
         version: 10.46.0
@@ -112,6 +109,9 @@ importers:
         specifier: ^10.3.1
         version: 10.3.1
     devDependencies:
+      '@polygonlabs/verror':
+        specifier: workspace:*
+        version: link:../verror
       '@tsconfig/node-ts':
         specifier: ^23.0.0
         version: 23.6.4

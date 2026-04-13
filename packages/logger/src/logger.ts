@@ -2,7 +2,7 @@ import type { DestinationStream, Logger, LoggerOptions } from 'pino';
 
 import { pino, stdSerializers } from 'pino';
 
-import { VError, WError } from '@polygonlabs/verror';
+import { VError, WERROR_SYMBOL } from '@polygonlabs/verror';
 
 /**
  * Duck-typed interface for Sentry error capturing. Matches the surface of
@@ -76,14 +76,12 @@ export async function createLogger(options?: CreateLoggerOptions): Promise<Logge
         //                would shadow the authoritative ISO 8601 string
         //   message    — written by pino as messageKey; caller value in the merge
         //                object races with the string argument
-        //   error_info — written by formatters.log from VError.info(); caller
-        //                value would be overwritten without warning
         //   service    — set by the Datadog agent from the container name; a
         //                caller value silently breaks log attribution
         //   host       — set by the Datadog agent from the container hostname; a
         //                caller value silently overrides infrastructure routing
 
-        const RESERVED = ['timestamp', 'message', 'error_info', 'service', 'host'] as const;
+        const RESERVED = ['timestamp', 'message', 'service', 'host'] as const;
         const shadowed: Record<string, unknown> = {};
 
         for (const key of RESERVED) {
@@ -115,19 +113,25 @@ export async function createLogger(options?: CreateLoggerOptions): Promise<Logge
           );
         }
 
-        // Emit merged VError info chain under error_info for structured querying.
-        // By this point hooks.logMethod has already unwrapped any WError, so err
-        // is always the meaningful cause when it arrives here.
-        if (out['err'] instanceof VError) {
-          const info = VError.info(out['err']);
-          if (Object.keys(info).length > 0) out = { ...out, error_info: info };
-        }
-
         return out;
       }
     },
     serializers: {
-      err: stdSerializers.err
+      // Extend pino's standard err serializer with VError's merged info chain.
+      // VError.info() walks the full cause chain and merges info from all links,
+      // whereas stdSerializers.err only captures the top-level error's own .info.
+      // We replace the base .info with the merged chain (omitting the key entirely
+      // when the chain has no info) so callers always get the full context.
+      // VError.info() duck-types .info so it works across module boundaries.
+      err(err: unknown) {
+        const base = stdSerializers.err(err as Error);
+        if (err instanceof Error) {
+          const merged = VError.info(err as VError);
+          const { info: _dropped, ...rest } = base as Record<string, unknown>;
+          return Object.keys(merged).length > 0 ? { ...rest, info: merged } : rest;
+        }
+        return base;
+      }
     },
     hooks: {
       logMethod(args, method, level) {
@@ -136,8 +140,11 @@ export async function createLogger(options?: CreateLoggerOptions): Promise<Logge
           const obj = first as Record<string, unknown>;
           if (obj['err'] instanceof Error) {
             // Unwrap WError chain — WError's own message is never the useful signal.
+            // Use WERROR_SYMBOL (Symbol.for) instead of instanceof — works across
+            // module boundaries regardless of how many copies of @polygonlabs/verror
+            // are loaded.
             let err: Error = obj['err'];
-            while (err instanceof WError) {
+            while ((err as unknown as Record<symbol, unknown>)[WERROR_SYMBOL] === true) {
               const cause = VError.cause(err);
               if (cause === null) break;
               err = cause;

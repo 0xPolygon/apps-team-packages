@@ -1,6 +1,41 @@
 import { describe, expect, it } from 'vitest';
 
-import { MultiError, VError, errorForEach, errorFromList } from '../src/index.ts';
+import {
+  MultiError,
+  MULTIERROR_SYMBOL,
+  VError,
+  errorForEach,
+  errorFromList
+} from '../src/index.ts';
+
+describe('MULTIERROR_SYMBOL', () => {
+  it('is present on MultiError instances', () => {
+    const merr = new MultiError([new Error('a')]);
+    expect((merr as unknown as Record<symbol, unknown>)[MULTIERROR_SYMBOL]).toBe(true);
+  });
+
+  it('is present on MultiError subclass instances', () => {
+    class AggregateError extends MultiError {
+      override readonly name = 'AggregateError' as const;
+    }
+    const merr = new AggregateError([new Error('a')]);
+    expect((merr as unknown as Record<symbol, unknown>)[MULTIERROR_SYMBOL]).toBe(true);
+  });
+
+  it('is absent on plain VError instances', () => {
+    const err = new VError('msg');
+    expect((err as unknown as Record<symbol, unknown>)[MULTIERROR_SYMBOL]).toBeUndefined();
+  });
+
+  it('is absent on plain Error instances', () => {
+    const err = new Error('msg');
+    expect((err as unknown as Record<symbol, unknown>)[MULTIERROR_SYMBOL]).toBeUndefined();
+  });
+
+  it('equals Symbol.for with the canonical key', () => {
+    expect(MULTIERROR_SYMBOL).toBe(Symbol.for('@polygonlabs/verror/is-multierror'));
+  });
+});
 
 describe('MultiError', () => {
   const err1 = new Error('error one');

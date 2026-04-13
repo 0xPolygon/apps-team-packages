@@ -1,6 +1,35 @@
 import { describe, expect, it } from 'vitest';
 
-import { VError, WError } from '../src/index.ts';
+import { VError, WError, WERROR_SYMBOL } from '../src/index.ts';
+
+describe('WERROR_SYMBOL', () => {
+  it('is present on WError instances', () => {
+    const err = new WError('msg', { cause: new Error('root') });
+    expect((err as unknown as Record<symbol, unknown>)[WERROR_SYMBOL]).toBe(true);
+  });
+
+  it('is present on WError subclass instances', () => {
+    class SpecificError extends WError {
+      override readonly name = 'SpecificError' as const;
+    }
+    const err = new SpecificError('msg', { cause: new Error('root') });
+    expect((err as unknown as Record<symbol, unknown>)[WERROR_SYMBOL]).toBe(true);
+  });
+
+  it('is absent on plain VError instances', () => {
+    const err = new VError('msg');
+    expect((err as unknown as Record<symbol, unknown>)[WERROR_SYMBOL]).toBeUndefined();
+  });
+
+  it('is absent on plain Error instances', () => {
+    const err = new Error('msg');
+    expect((err as unknown as Record<symbol, unknown>)[WERROR_SYMBOL]).toBeUndefined();
+  });
+
+  it('equals Symbol.for with the canonical key', () => {
+    expect(WERROR_SYMBOL).toBe(Symbol.for('@polygonlabs/verror/is-werror'));
+  });
+});
 
 describe('WError — construction', () => {
   it('message with cause', () => {

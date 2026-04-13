@@ -199,8 +199,8 @@ export class VError extends Error {
   static errorForEach(err: Error, func: (e: Error) => void): void {
     if (!(err instanceof Error)) throw new Error('err must be an Error');
     if (typeof func !== 'function') throw new Error('func (func) is required');
-    if (err instanceof MultiError) {
-      for (const e of err.errors) func(e);
+    if ((err as unknown as Record<symbol, unknown>)[MULTIERROR_SYMBOL] === true) {
+      for (const e of (err as MultiError).errors) func(e);
     } else {
       func(err);
     }
@@ -208,6 +208,30 @@ export class VError extends Error {
 }
 
 // ─── WError ────────────────────────────────────────────────────────────────────
+
+/**
+ * Cross-boundary identity marker for WError and its subclasses.
+ *
+ * Uses Symbol.for() so the same symbol is returned from the global registry
+ * regardless of which module copy of @polygonlabs/verror is loaded — unlike
+ * `instanceof`, which breaks when the host and a dependency have separate
+ * copies of the class.
+ *
+ * Check with: `(err as Record<symbol, unknown>)[WERROR_SYMBOL] === true`
+ */
+export const WERROR_SYMBOL: unique symbol = Symbol.for('@polygonlabs/verror/is-werror');
+
+/**
+ * Cross-boundary identity marker for MultiError and its subclasses.
+ *
+ * Uses Symbol.for() so the same symbol is returned from the global registry
+ * regardless of which module copy of @polygonlabs/verror is loaded — unlike
+ * `instanceof`, which breaks when the host and a dependency have separate
+ * copies of the class.
+ *
+ * Check with: `(err as Record<symbol, unknown>)[MULTIERROR_SYMBOL] === true`
+ */
+export const MULTIERROR_SYMBOL: unique symbol = Symbol.for('@polygonlabs/verror/is-multierror');
 
 /**
  * A "wrapped error" — like VError but the cause's message is intentionally
@@ -220,6 +244,10 @@ export class VError extends Error {
  */
 export class WError extends VError {
   override readonly name: string = 'WError';
+
+  // Presence of this property (checked via WERROR_SYMBOL) identifies WError
+  // and its subclasses across module boundaries without relying on instanceof.
+  readonly [WERROR_SYMBOL] = true;
 
   constructor(
     message: string,
@@ -251,6 +279,11 @@ export class WError extends VError {
  */
 export class MultiError extends VError {
   override readonly name: string = 'MultiError';
+
+  // Presence of this property (checked via MULTIERROR_SYMBOL) identifies MultiError
+  // and its subclasses across module boundaries without relying on instanceof.
+  readonly [MULTIERROR_SYMBOL] = true;
+
   readonly errors: readonly Error[];
 
   constructor(errors: Error[]) {
