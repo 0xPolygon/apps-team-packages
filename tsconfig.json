@@ -1,6 +1,9 @@
 {
   "extends": ["@tsconfig/node24", "@tsconfig/node-ts"],
-  "compilerOptions": { "noEmit": true },
+  "compilerOptions": {
+    "noEmit": true,
+    "customConditions": ["@polygonlabs/source"]
+  },
   "references": [
     { "path": "packages/apps-team-lint" },
     { "path": "packages/logger" },

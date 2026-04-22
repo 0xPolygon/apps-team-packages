@@ -1,7 +1,8 @@
 {
   "extends": ["@tsconfig/node24", "@tsconfig/node-ts"],
   "compilerOptions": {
-    "noEmit": true
+    "noEmit": true,
+    "customConditions": ["@polygonlabs/source"]
   },
   "include": ["src/**/*.ts", "test/**/*.ts", "vitest.config.ts"]
 }

@@ -24,3 +24,20 @@ After scaffolding the package under `packages/`, two root files must be updated:
 - **`packages/<name>/eslint.config.js`** — pass `tsconfigRootDir: import.meta.dirname` to
   `typescript()` so `typescript-eslint` can resolve the correct tsconfig when ESLint runs
   from the repo root rather than the package directory
+
+## `exports` shape in this repo
+
+Packages consumed by TypeScript (`logger`, `verror`) use the team-standards
+`@polygonlabs/source` three-condition pattern: workspace consumers resolve `./src/index.ts`
+via the custom condition, published consumers get `./dist/...` via `publishConfig.exports`.
+
+**`@polygonlabs/apps-team-lint` is a scoped exception** — its `exports` point `default` and
+`types` at `./src/index.ts` directly, not under a custom condition. ESLint loads the package
+at Node runtime via a binary we can't pass `--conditions` to, so the `@polygonlabs/source`
+condition would never activate and `default` would fall through to `./dist/index.js` —
+which doesn't exist without a prior `pnpm run build`, breaking lint for every fresh clone.
+`publishConfig.exports` still flips to `./dist/...` at publish time, so npm consumers see
+no difference.
+
+Do not "fix" apps-team-lint's exports to match the other packages. It is intentionally
+different.
