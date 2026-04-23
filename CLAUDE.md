@@ -27,7 +27,7 @@ After scaffolding the package under `packages/`, two root files must be updated:
 
 ## `exports` shape in this repo
 
-Packages consumed by TypeScript (`logger`, `verror`) use the team-standards
+Packages consumed by TypeScript (`express`, `logger`, `verror`) use the team-standards
 `@polygonlabs/source` three-condition pattern: workspace consumers resolve `./src/index.ts`
 via the custom condition, published consumers get `./dist/...` via `publishConfig.exports`.
 
