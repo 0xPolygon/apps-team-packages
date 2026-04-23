@@ -162,6 +162,39 @@ logger.error({ err, requestId: 'abc' }, err.message);
 The cause is processed by the same rules, so a `WError` wrapping a `VError` with `info`
 will emit the `VError`'s `error_info` alongside call-site context.
 
+## Ethers fetch-error sanitisation
+
+Ethers v5 and v6 fetch errors (thrown by `JsonRpcProvider`,
+`FallbackProvider`, `StaticJsonRpcProvider`, and anything else built on
+ethers' web fetch layer) embed the full request URL — including any
+`?token=<secret>` query string — in `err.message`, `err.stack`, and (v6)
+`err.info.requestUrl` or (v5) top-level `err.url`. Without intervention,
+any `logger.debug({ err })` / `logger.error({ err })` call that receives
+one of these errors propagates the token into log output via pino's
+default err serialiser.
+
+This package's pino `err` serializer detects ethers fetch errors
+structurally (duck-typed on the v5/v6 fingerprints — no runtime
+dependency on ethers) and replaces them with a sanitised clone before
+emission. Every `{ err }` log call is protected automatically: HTTP
+request handlers, cron ticks, background workers,
+`unhandledRejection` catches, startup failures, anywhere.
+
+The full `.cause` chain is preserved: a service that wraps an RPC
+failure with `new VError('fetching block number', { cause: rpcErr })`
+still sees both the "what was being attempted" wrapper and the
+sanitised RPC node. URL-stripping runs across every node's `message`
+and `stack` as defence in depth; the ethers node's `info` is rebuilt to
+`{ requestUrl: origin, responseStatus? }` (drops v5's leaky top-level
+`body`/`responseText`/`url`, drops v6's other info fields alongside
+`requestUrl`); wrappers' own `info` is preserved unchanged.
+
+The detector is also exported as `sanitiseEthersFetchError(err): Error | null`
+for service-level unit tests, and for `@polygonlabs/express`'s global
+error handler to reuse when deriving HTTP response-body messages. The
+sanitiser is unaware of log-vs-response surfaces: it returns a
+sanitised Error clone, and callers route it wherever they need.
+
 ## Sentry
 
 If a Sentry client was passed to `createLogger`, `captureException` fires automatically

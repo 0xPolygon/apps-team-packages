@@ -13,7 +13,7 @@ via changesets.
 | Package | Version | Description |
 | ------- | ------- | ----------- |
 | [@polygonlabs/apps-team-lint](packages/apps-team-lint) | [![npm](https://img.shields.io/npm/v/@polygonlabs/apps-team-lint)](https://www.npmjs.com/package/@polygonlabs/apps-team-lint) | Shared ESLint, markdownlint, and commitlint configurations |
-| [@polygonlabs/logger](packages/logger) | [![npm](https://img.shields.io/npm/v/@polygonlabs/logger)](https://www.npmjs.com/package/@polygonlabs/logger) | Pino-based logger with Sentry integration, configured for Datadog ingestion |
+| [@polygonlabs/logger](packages/logger) | [![npm](https://img.shields.io/npm/v/@polygonlabs/logger)](https://www.npmjs.com/package/@polygonlabs/logger) | Pino-based logger with Sentry integration, configured for Datadog ingestion; pino `err` serializer sanitises ethers v5/v6 fetch-error tokens across the cause chain |
 | [@polygonlabs/verror](packages/verror) | [![npm](https://img.shields.io/npm/v/@polygonlabs/verror)](https://www.npmjs.com/package/@polygonlabs/verror) | TypeScript-first VError-inspired error handling with cause chains and HTTP error classes |
 
 Each package has its own `README.md`, `package.json`, and changelog.
