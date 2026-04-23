@@ -1,12 +1,12 @@
 {
-  "name": "@polygonlabs/verror",
-  "version": "1.0.2",
-  "description": "TypeScript-first, browser-friendly VError-inspired error handling library",
+  "name": "@polygonlabs/express",
+  "version": "0.0.0",
+  "description": "Shared Express middleware for Polygon Apps Team services: per-request child logger, global error handler with ethers fetch-error sanitisation, and a uniform 404 handler.",
   "type": "module",
   "repository": {
     "type": "git",
     "url": "https://github.com/0xPolygon/apps-team-packages.git",
-    "directory": "packages/verror"
+    "directory": "packages/express"
   },
   "publishConfig": {
     "access": "public",
@@ -36,14 +36,25 @@
     "clean": "rm -rf node_modules dist *.tsbuildinfo",
     "prepublishOnly": "pnpm run build"
   },
-  "dependencies": {},
   "devDependencies": {
     "@polygonlabs/apps-team-lint": "workspace:*",
+    "@polygonlabs/logger": "workspace:*",
+    "@polygonlabs/verror": "workspace:*",
     "@tsconfig/node-ts": "^23.0.0",
     "@tsconfig/node24": "^24.0.0",
+    "@types/express": "^5.0.0",
     "@types/node": "^24.0.0",
+    "@types/supertest": "^6.0.0",
     "eslint": "^10.0.0",
+    "ethers": "^6.16.0",
+    "express": "^5.0.0",
+    "supertest": "^7.2.2",
     "typescript": "^5.9.3",
     "vitest": "^3.2.3"
+  },
+  "peerDependencies": {
+    "@polygonlabs/logger": "^2.0.0",
+    "@polygonlabs/verror": "^1.0.2",
+    "express": ">=5"
   }
 }

@@ -4,6 +4,8 @@ import { pino, stdSerializers } from 'pino';
 
 import { VError, WERROR_SYMBOL } from '@polygonlabs/verror';
 
+import { sanitiseEthersFetchError } from './sanitise.ts';
+
 /**
  * Duck-typed interface for Sentry error capturing. Matches the surface of
  * @sentry/node used by automatic error capture on logger.error() calls. Pass
@@ -117,16 +119,34 @@ export async function createLogger(options?: CreateLoggerOptions): Promise<Logge
       }
     },
     serializers: {
-      // Extend pino's standard err serializer with VError's merged info chain.
-      // VError.info() walks the full cause chain and merges info from all links,
-      // whereas stdSerializers.err only captures the top-level error's own .info.
-      // We replace the base .info with the merged chain (omitting the key entirely
-      // when the chain has no info) so callers always get the full context.
-      // VError.info() duck-types .info so it works across module boundaries.
+      // Extend pino's standard err serializer with two transforms:
+      //
+      // 1. Ethers fetch-error sanitisation. If `err` (or anything in its
+      //    `.cause` chain) matches the v5 or v6 fetch-error fingerprint,
+      //    replace it with a sanitised clone whose messages and stacks are
+      //    URL-stripped and whose ethers-node `info.requestUrl` is reduced
+      //    to origin. The wrapping cause chain is preserved, so operators
+      //    still see "what was being attempted" above the RPC failure.
+      //    This runs across EVERY log call that passes `{ err }` — not
+      //    just HTTP handlers — because the leak applies to any logger
+      //    consumer that passes an ethers error.
+      //
+      // 2. VError.info chain-merge. VError.info() walks the full cause
+      //    chain and merges info from all links, whereas stdSerializers.err
+      //    only captures the top-level error's own .info. We replace the
+      //    base .info with the merged chain (omitting the key entirely
+      //    when the chain has no info) so callers always get the full
+      //    context. VError.info() duck-types .info so it works across
+      //    module boundaries. Running this on the sanitised clone means
+      //    the merged info reflects the sanitised per-node info, so
+      //    `@err.info.requestUrl` in Datadog is the origin, never the
+      //    full URL.
       err(err: unknown) {
-        const base = stdSerializers.err(err as Error);
-        if (err instanceof Error) {
-          const merged = VError.info(err as VError);
+        const safeErr: unknown = sanitiseEthersFetchError(err) ?? err;
+
+        const base = stdSerializers.err(safeErr as Error);
+        if (safeErr instanceof Error) {
+          const merged = VError.info(safeErr as VError);
           const { info: _dropped, ...rest } = base as Record<string, unknown>;
           return Object.keys(merged).length > 0 ? { ...rest, info: merged } : rest;
         }
