@@ -9,6 +9,7 @@
     { "path": "packages/express" },
     { "path": "packages/logger" },
     { "path": "packages/verror" },
+    { "path": "packages/wallet-kit" },
     { "path": "packages/zod-codecs" },
     { "path": "packages/zod-to-openapi-heyapi" }
   ]

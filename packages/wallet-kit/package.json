@@ -1,0 +1,63 @@
+{
+  "name": "@polygonlabs/wallet-kit",
+  "version": "0.1.0",
+  "description": "Polygon Apps Team shared React wallet integration: Sequence Connect provider, SCW / Sequence-v3 detection, TRM sanctions screening.",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/0xPolygon/apps-team-packages.git",
+    "directory": "packages/wallet-kit"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js"
+      }
+    }
+  },
+  "exports": {
+    ".": {
+      "@polygonlabs/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "MIGRATION.md"
+  ],
+  "scripts": {
+    "build": "pnpm run typecheck && tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "eslint .",
+    "clean": "rm -rf node_modules dist *.tsbuildinfo",
+    "prepublishOnly": "pnpm run build"
+  },
+  "dependencies": {},
+  "peerDependencies": {
+    "@0xsequence/connect": "^6.0.0",
+    "@tanstack/react-query": ">=5",
+    "react": "^18.2.0 || ^19.0.0",
+    "react-dom": "^18.2.0 || ^19.0.0",
+    "viem": ">=2.45.0",
+    "wagmi": ">=3.2.0"
+  },
+  "devDependencies": {
+    "@0xsequence/connect": "^6.0.5",
+    "@tanstack/react-query": "^5.59.13",
+    "@tsconfig/node-ts": "^23.0.0",
+    "@tsconfig/node24": "^24.0.0",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "typescript": "^5.9.3",
+    "viem": "^2.47.2",
+    "vitest": "^3.2.3",
+    "wagmi": "^3.6.0"
+  }
+}
