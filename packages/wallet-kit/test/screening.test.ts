@@ -25,13 +25,16 @@ const mockResponse = (payload: unknown, init: { ok?: boolean; status?: number } 
     headers: { 'content-type': 'application/json' }
   });
 
-const sanctionedPayload = [
+const ownershipRiskPayload = (categoryRiskScoreLevel: number) => [
   {
-    addressRiskIndicators: [{ riskType: 'OWNERSHIP', categoryRiskScoreLevel: 10 }]
+    addressRiskIndicators: [{ riskType: 'OWNERSHIP', categoryRiskScoreLevel }]
   }
 ];
 
-const cleanPayload = [
+const sanctionedPayload = ownershipRiskPayload(10);
+const cleanPayload = ownershipRiskPayload(0);
+
+const counterpartyExposurePayload = [
   {
     addressRiskIndicators: [{ riskType: 'COUNTERPARTY_EXPOSURE', categoryRiskScoreLevel: 5 }]
   }
@@ -88,8 +91,11 @@ describe('createScreener', () => {
     });
   });
 
-  it('returns false when OWNERSHIP risk is absent', async () => {
-    fetchFn.mockResolvedValueOnce(mockResponse(cleanPayload));
+  it.each([
+    { name: 'OWNERSHIP risk score is zero', payload: cleanPayload },
+    { name: 'only non-OWNERSHIP risk is present', payload: counterpartyExposurePayload }
+  ])('returns false when $name', async ({ payload }) => {
+    fetchFn.mockResolvedValueOnce(mockResponse(payload));
     const screen = createScreener({
       apiOrigin: API_ORIGIN
     });
@@ -104,6 +110,15 @@ describe('createScreener', () => {
     await screen(ADDRESS);
     const headers = fetchFn.mock.calls[0][1].headers;
     expect(headers).not.toHaveProperty('x-api-key');
+  });
+
+  it('defaults apiOrigin to the Polygon TRM gateway when omitted', async () => {
+    fetchFn.mockResolvedValueOnce(mockResponse(cleanPayload));
+    const screen = createScreener({});
+    await screen(ADDRESS);
+    expect(fetchFn.mock.calls[0][0]).to.equal(
+      'https://api-gateway.polygon.technology/screen-addresses'
+    );
   });
 
   it('caches the result and skips TRM on a second call within TTL', async () => {
@@ -175,7 +190,7 @@ describe('createScreener', () => {
     });
 
     expect(await screen(ADDRESS)).toBe(false);
-    expect(prescreen).toHaveBeenCalledOnce();
+    expect(prescreen).toHaveBeenCalledWith(LOWER);
     expect(fetchFn).toHaveBeenCalledOnce();
   });
 
@@ -199,7 +214,7 @@ describe('createScreener', () => {
     expect(cached).not.to.have.property(ADDRESS);
   });
 
-  it('swallows localStorage.setItem errors', async () => {
+  it('returns the TRM result when cache writes fail', async () => {
     fetchFn.mockResolvedValueOnce(mockResponse(sanctionedPayload));
     Object.defineProperty(globalThis, 'localStorage', {
       configurable: true,
@@ -264,7 +279,7 @@ describe('createScreener', () => {
     await expect(screen(ADDRESS)).resolves.toBe(false);
   });
 
-  it('fails open when prescreen storage write throws', async () => {
+  it('returns the prescreen result when cache writes fail', async () => {
     Object.defineProperty(globalThis, 'localStorage', {
       configurable: true,
       value: {
@@ -283,18 +298,6 @@ describe('createScreener', () => {
 
     await expect(screen(ADDRESS)).resolves.toBe(true);
     expect(fetchFn).not.toHaveBeenCalled();
-  });
-
-  it('passes the normalized address to prescreen', async () => {
-    const prescreen = vi.fn().mockResolvedValue(false);
-    fetchFn.mockResolvedValueOnce(mockResponse(cleanPayload));
-    const screen = createScreener({
-      apiOrigin: API_ORIGIN,
-      prescreen
-    });
-
-    await screen(ADDRESS);
-    expect(prescreen).toHaveBeenCalledWith(LOWER);
   });
 
   it('fails open when fetch is unavailable', async () => {

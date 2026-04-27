@@ -42,18 +42,20 @@ import { WalletKitProvider } from '@polygonlabs/wallet-kit';
   }}
   screening={{
     enabled: appEnv === 'production',
-    apiOrigin,
     apiKey,
     prescreen: async (address) => isLocallyBlocked(address)
   }}
   onConnect={(event) => trackWalletConnect(event)}
   onSanctioned={(address) => showSanctionModal(address)}
+  onProviderError={(error) => Sentry.captureException(error)}
 >
   {children}
 </WalletKitProvider>;
 ```
 
 `screening` is opt-in. Pass `false` or omit it to disable sanctions screening.
+
+`onProviderError` fires when wallet-kit fails to resolve the EIP1193 provider from the connected wagmi connector. Connectors that lazily attach `getProvider` (e.g. Safe via WalletConnect during the session handshake) are handled silently — only genuine failures of a present `getProvider` are surfaced. If you omit the callback the kit logs to `console.error` so the failure isn't lost; provide it to route to Sentry/telemetry and suppress the default log.
 
 ## Hook
 
@@ -76,7 +78,7 @@ wallet.isWalletSanctioned;
 
 wallet.connect();
 wallet.disconnect();
-await wallet.switchChain(1);
+const switched = await wallet.switchChain(1);
 await wallet.screenAddress(destinationAddress);
 await wallet.refreshScreening();
 ```
@@ -94,6 +96,10 @@ sanctioned.
 After a sanctions-triggered disconnect, `isWalletSanctioned` stays `true` so app-owned
 modals can remain visible after `address` clears. A later clean connected-wallet screening
 result clears it.
+
+`switchChain(chainId)` resolves `true` when the wallet ends up on the requested chain —
+already there or switched successfully — and `false` when the switch fails or the user
+rejects the prompt. Calling it for the chain the wallet is already on is a no-op.
 
 ## Smart Wallet Rules
 

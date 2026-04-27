@@ -14,7 +14,7 @@ export interface PolygonWallet {
   status: 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
   isConnected: boolean;
   chainId: number | undefined;
-  switchChain: (chainId: number) => Promise<void>;
+  switchChain: (chainId: number) => Promise<boolean>;
   walletInfo: WalletInfo | undefined;
   walletProvider: EIP1193Provider | undefined;
   isSequenceWallet: boolean;

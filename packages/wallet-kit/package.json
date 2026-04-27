@@ -1,6 +1,6 @@
 {
   "name": "@polygonlabs/wallet-kit",
-  "version": "0.1.0",
+  "version": "0.0.0",
   "description": "Polygon Apps Team shared React wallet integration: Sequence Connect provider, SCW / Sequence-v3 detection, TRM sanctions screening.",
   "type": "module",
   "repository": {

@@ -44,6 +44,8 @@ export interface WalletKitProviderProps {
   onConnect?: (event: WalletConnectEvent) => void;
   onDisconnect?: () => void;
   onSanctioned?: (address: Hex) => void;
+  /** Routes EIP1193 provider-resolution failures to telemetry. Defaults to `console.error`; provide to suppress. */
+  onProviderError?: (error: unknown) => void;
   children: ReactNode;
 }
 
@@ -54,6 +56,7 @@ export const WalletKitProvider = ({
   onConnect,
   onDisconnect,
   onSanctioned,
+  onProviderError,
   children
 }: WalletKitProviderProps) => {
   const sequenceConfig = useMemo(() => createConfig(sequence), [sequence]);
@@ -65,6 +68,7 @@ export const WalletKitProvider = ({
         onConnect={onConnect}
         onDisconnect={onDisconnect}
         onSanctioned={onSanctioned}
+        onProviderError={onProviderError}
       >
         {children}
       </WalletKitInner>
@@ -77,6 +81,7 @@ interface WalletKitInnerProps {
   onConnect: ((event: WalletConnectEvent) => void) | undefined;
   onDisconnect: (() => void) | undefined;
   onSanctioned: ((address: Hex) => void) | undefined;
+  onProviderError: ((error: unknown) => void) | undefined;
   children: ReactNode;
 }
 
@@ -90,6 +95,7 @@ const WalletKitInner = ({
   onConnect,
   onDisconnect,
   onSanctioned,
+  onProviderError,
   children
 }: WalletKitInnerProps) => {
   const { address, status, connector, chainId } = useConnection();
@@ -168,23 +174,14 @@ const WalletKitInner = ({
   });
 
   useEffect(() => {
-    if (!connector) {
-      setWalletProvider(undefined);
-      return;
-    }
     let cancelled = false;
-    void connector
-      .getProvider()
-      .then((resolved) => {
-        if (!cancelled) setWalletProvider(resolved as EIP1193Provider);
-      })
-      .catch(() => {
-        if (!cancelled) setWalletProvider(undefined);
-      });
+    void resolveConnectorProvider(connector, onProviderError).then((resolved) => {
+      if (!cancelled) setWalletProvider(resolved);
+    });
     return () => {
       cancelled = true;
     };
-  }, [connector]);
+  }, [connector, onProviderError]);
 
   useEffect(() => {
     setIsSmartContractWallet(false);
@@ -229,10 +226,16 @@ const WalletKitInner = ({
   }, [address, screener, applyConnectedScreeningResult]);
 
   const switchChain = useCallback(
-    async (targetChainId: number): Promise<void> => {
-      await switchChainAsync({ chainId: targetChainId });
+    async (targetChainId: number): Promise<boolean> => {
+      if (chainId === targetChainId) return true;
+      try {
+        await switchChainAsync({ chainId: targetChainId });
+        return true;
+      } catch {
+        return false;
+      }
     },
-    [switchChainAsync]
+    [chainId, switchChainAsync]
   );
 
   const connect = useCallback(() => {
@@ -300,6 +303,30 @@ const WalletKitInner = ({
   );
 
   return <WalletKitContext.Provider value={value}>{children}</WalletKitContext.Provider>;
+};
+
+// Safe via WalletConnect attaches `getProvider` lazily during the session
+// handshake — calling it on a freshly-emitted connector throws `is not a
+// function` synchronously and crashes the React tree. Treat a missing
+// `getProvider` as "not ready yet"; wagmi re-emits the connector once the
+// SDK finishes wiring it.
+export const resolveConnectorProvider = async (
+  connector: { getProvider?: () => Promise<unknown> } | undefined,
+  onError?: (error: unknown) => void
+): Promise<EIP1193Provider | undefined> => {
+  if (!connector || typeof connector.getProvider !== 'function') {
+    return undefined;
+  }
+  try {
+    return (await connector.getProvider()) as EIP1193Provider;
+  } catch (error) {
+    if (onError) {
+      onError(error);
+    } else {
+      console.error('[wallet-kit] Failed to get wallet provider:', error);
+    }
+    return undefined;
+  }
 };
 
 export const enableWalletTransactionForSend = async (

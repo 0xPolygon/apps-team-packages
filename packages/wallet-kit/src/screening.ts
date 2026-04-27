@@ -5,8 +5,10 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const DEFAULT_TIMEOUT_MS = 10_000;
 const CACHE_KEY = 'polygon-wallet-kit:wallet-screening';
 
+const DEFAULT_API_ORIGIN = 'https://api-gateway.polygon.technology';
+
 export interface ScreeningConfig {
-  apiOrigin: string;
+  apiOrigin?: string;
   apiKey?: string;
   enabled?: boolean;
   prescreen?: (address: Hex) => Promise<boolean>;
@@ -52,7 +54,7 @@ export const createScreener = (config: ScreeningConfig): Screener => {
     try {
       const sanctioned = await callTrm({
         address: normalizedAddress,
-        apiOrigin: config.apiOrigin,
+        apiOrigin: config.apiOrigin ?? DEFAULT_API_ORIGIN,
         apiKey: config.apiKey
       });
       writeCache({

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   SEQUENCE_V3_CONNECTOR_ID,
@@ -51,10 +51,15 @@ describe('supportsWalletTransactionForSend', () => {
     expect(supportsWalletTransactionForSend(provider)).toBe(true);
   });
 
-  it('narrows the type for callers', () => {
-    const provider: unknown = { setUseWalletTransactionForSend: (_: boolean) => {} };
-    if (supportsWalletTransactionForSend(provider)) {
-      expect(() => provider.setUseWalletTransactionForSend(true)).not.toThrow();
+  it('narrows supported providers to the Sequence send-mode setter', () => {
+    const setUseWalletTransactionForSend = vi.fn();
+    const provider: unknown = { setUseWalletTransactionForSend };
+
+    if (!supportsWalletTransactionForSend(provider)) {
+      throw new Error('expected provider to support wallet transaction send mode');
     }
+
+    provider.setUseWalletTransactionForSend(true);
+    expect(setUseWalletTransactionForSend).toHaveBeenCalledWith(true);
   });
 });
