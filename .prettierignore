@@ -2,3 +2,8 @@
 *.md
 dist/
 pnpm-lock.yaml
+
+# Codegen snapshot — emitted by hey-api/openapi-ts; reformatting it would
+# distort the test signal (the whole point is byte-stability against the
+# plugin's actual emit).
+**/test/__generated__/

@@ -35,6 +35,9 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 /.claude/settings.local.json
 /.claude/worktrees/
 
+# Local-only planning notes (not committed; survive across `compact` for the agent)
+/.plan-*.md
+
 # IDEs
 .idea/
 .vscode-test

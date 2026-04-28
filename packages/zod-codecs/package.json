@@ -1,0 +1,52 @@
+{
+  "name": "@polygonlabs/zod-codecs",
+  "version": "0.1.0",
+  "description": "Zod v4 codecs for the wire formats JSON-on-the-wire services keep reinventing — int64 strings, unbounded big integers, decimal strings, and ISO datetimes — that decode into the right runtime type and round-trip back.",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/0xPolygon/apps-team-packages.git",
+    "directory": "packages/zod-codecs"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js"
+      }
+    }
+  },
+  "exports": {
+    ".": {
+      "@polygonlabs/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "MIGRATION.md"
+  ],
+  "scripts": {
+    "build": "pnpm run typecheck && tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "eslint .",
+    "clean": "rm -rf node_modules dist *.tsbuildinfo",
+    "prepublishOnly": "pnpm run build"
+  },
+  "peerDependencies": {
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@polygonlabs/apps-team-lint": "workspace:*",
+    "@tsconfig/node-ts": "^23.0.0",
+    "@tsconfig/node24": "^24.0.0",
+    "@types/node": "^24.0.0",
+    "eslint": "^10.0.0",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.3",
+    "zod": "^4.3.6"
+  }
+}

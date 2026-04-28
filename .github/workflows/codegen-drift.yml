@@ -1,0 +1,31 @@
+name: codegen drift
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  drift:
+    name: codegen snapshots are up to date
+    runs-on: ubuntu-latest
+    if: "!startsWith(github.head_ref, 'changeset-release/')"
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: pnpm/action-setup@41ff72655975bd51cab0327fa583b6e92b6d3061 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Verify codegen snapshots
+        id: drift
+        run: pnpm run codegen-drift-check
+      - name: Drift detected — how to fix
+        if: failure() && steps.drift.conclusion == 'failure'
+        run: |
+          echo "::error::A package's committed codegen snapshot is out of date with its source / fixtures."
+          echo "::error::Run \`pnpm run codegen-drift-check\` locally, commit the refreshed snapshot, and push."
+          exit 1

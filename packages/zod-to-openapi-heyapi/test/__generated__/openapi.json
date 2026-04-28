@@ -1,0 +1,1441 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "fixtures",
+    "version": "0.0.0"
+  },
+  "components": {
+    "schemas": {
+      "ScalarString": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "value"
+        ]
+      },
+      "ScalarNumber": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "value"
+        ]
+      },
+      "ScalarBoolean": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "value"
+        ]
+      },
+      "ScalarBigInt": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string",
+            "pattern": "^d+$"
+          }
+        },
+        "required": [
+          "value"
+        ]
+      },
+      "OptionalField": {
+        "type": "object",
+        "properties": {
+          "required": {
+            "type": "string"
+          },
+          "optional": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "required"
+        ]
+      },
+      "NullableField": {
+        "type": "object",
+        "properties": {
+          "required": {
+            "type": "string"
+          },
+          "nullable": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "required",
+          "nullable"
+        ]
+      },
+      "OptionalNullableField": {
+        "type": "object",
+        "properties": {
+          "required": {
+            "type": "string"
+          },
+          "optionalNullable": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "required"
+        ]
+      },
+      "EnumField": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "active",
+              "archived"
+            ]
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "LiteralField": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "payment"
+            ]
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "UnionOfLiterals": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "a"
+                ]
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "b"
+                ]
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "c"
+                ]
+              }
+            ]
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "ArrayOfScalars": {
+        "type": "object",
+        "properties": {
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "tags"
+        ]
+      },
+      "ArrayOfCodecs": {
+        "type": "object",
+        "properties": {
+          "amounts": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^-?\\d+$"
+            }
+          }
+        },
+        "required": [
+          "amounts"
+        ]
+      },
+      "RecordField": {
+        "type": "object",
+        "properties": {
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "metadata"
+        ]
+      },
+      "Nested": {
+        "type": "object",
+        "properties": {
+          "outer": {
+            "type": "object",
+            "properties": {
+              "inner": {
+                "type": "object",
+                "properties": {
+                  "deep": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "deep"
+                ]
+              }
+            },
+            "required": [
+              "inner"
+            ]
+          }
+        },
+        "required": [
+          "outer"
+        ]
+      },
+      "UnionField": {
+        "type": "object",
+        "properties": {
+          "payload": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              }
+            ]
+          }
+        },
+        "required": [
+          "payload"
+        ]
+      },
+      "CodecObject": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "amount": {
+            "type": "string",
+            "pattern": "^-?\\d+$"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "fee": {
+            "type": "string",
+            "pattern": "^-?\\d+(\\.\\d+)?$"
+          },
+          "createdAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "amount",
+          "currency",
+          "fee",
+          "createdAt"
+        ]
+      },
+      "Composed": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "completed"
+            ]
+          },
+          "amount": {
+            "type": "string",
+            "pattern": "^-?\\d+$"
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "childAmount": {
+                "type": "string",
+                "pattern": "^-?\\d+$"
+              }
+            },
+            "required": [
+              "id",
+              "childAmount"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "amount"
+        ]
+      },
+      "PaginatedComposed": {
+        "type": "object",
+        "properties": {
+          "hasMore": {
+            "type": "boolean"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "pending",
+                    "completed"
+                  ]
+                },
+                "amount": {
+                  "type": "string",
+                  "pattern": "^-?\\d+$"
+                },
+                "metadata": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "tags": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "parent": {
+                  "type": "object",
+                  "nullable": true,
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "childAmount": {
+                      "type": "string",
+                      "pattern": "^-?\\d+$"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "childAmount"
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "status",
+                "amount"
+              ]
+            }
+          }
+        }
+      },
+      "StringWithMinMax": {
+        "type": "object",
+        "properties": {
+          "short": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 10
+          },
+          "long": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "short",
+          "long"
+        ]
+      },
+      "NumberWithRange": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "ratio": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        },
+        "required": [
+          "count",
+          "ratio"
+        ]
+      },
+      "ArrayWithLength": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "maxItems": 5
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "StringWithFormat": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "uuid": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "email",
+          "url",
+          "uuid"
+        ]
+      },
+      "RefinedField": {
+        "type": "object",
+        "properties": {
+          "notEmpty": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "notEmpty"
+        ]
+      },
+      "ConstrainedCodec": {
+        "type": "object",
+        "properties": {
+          "amount": {
+            "type": "string",
+            "pattern": "^\\d+$"
+          }
+        },
+        "required": [
+          "amount"
+        ]
+      },
+      "TupleField": {
+        "type": "object",
+        "properties": {
+          "pair": {
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                }
+              ]
+            },
+            "minItems": 2,
+            "maxItems": 2
+          },
+          "pairWithCodec": {
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "string",
+                  "pattern": "^-?\\d+$"
+                }
+              ]
+            },
+            "minItems": 2,
+            "maxItems": 2
+          }
+        },
+        "required": [
+          "pair",
+          "pairWithCodec"
+        ]
+      },
+      "IntersectionField": {
+        "allOf": [
+          {
+            "type": "object",
+            "properties": {
+              "a": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "a"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "b": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "b"
+            ]
+          }
+        ]
+      },
+      "DiscriminatedUnion": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "text"
+                ]
+              },
+              "text": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "text"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "number"
+                ]
+              },
+              "value": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "kind",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "amount"
+                ]
+              },
+              "amount": {
+                "type": "string",
+                "pattern": "^-?\\d+$"
+              }
+            },
+            "required": [
+              "kind",
+              "amount"
+            ]
+          }
+        ]
+      },
+      "DateField": {
+        "type": "object",
+        "properties": {
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "occurredAt"
+        ]
+      },
+      "SetField": {
+        "type": "object",
+        "properties": {
+          "ids": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "ids"
+        ]
+      },
+      "MapField": {
+        "type": "object",
+        "properties": {
+          "byId": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "number"
+            }
+          }
+        },
+        "required": [
+          "byId"
+        ]
+      },
+      "DefaultField": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "default": "pending"
+          }
+        }
+      },
+      "ReadonlyArrayField": {
+        "type": "object",
+        "properties": {
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "tags"
+        ]
+      },
+      "BrandedField": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "userId"
+        ]
+      },
+      "BadRequestError": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "bad_request"
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
+          "fieldErrors": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ]
+      },
+      "NotFoundError": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "not_found"
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
+          "resourceId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "resourceId"
+        ]
+      },
+      "ServerError": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "internal_error"
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
+          "traceId": {
+            "type": "string",
+            "pattern": "^-?\\d+$"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "traceId"
+        ]
+      },
+      "ResourceFetched": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "data": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "data"
+        ]
+      },
+      "ResourceCreated": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "createdAt"
+        ]
+      }
+    },
+    "parameters": {}
+  },
+  "paths": {
+    "/fixtures/getScalarString": {
+      "get": {
+        "operationId": "getScalarString",
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScalarString"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fixtures/getScalarNumber": {
+      "get": {
+        "operationId": "getScalarNumber",
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScalarNumber"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fixtures/getScalarBoolean": {
+      "get": {
+        "operationId": "getScalarBoolean",
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScalarBoolean"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fixtures/getScalarBigInt": {
+      "get": {
+        "operationId": "getScalarBigInt",
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScalarBigInt"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fixtures/getOptionalField": {
+      "get": {
+        "operationId": "getOptionalField",
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OptionalField"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fixtures/getNullableField": {
+      "get": {
+        "operationId": "getNullableField",
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NullableField"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fixtures/getOptionalNullableField": {
+      "get": {
+        "operationId": "getOptionalNullableField",
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OptionalNullableField"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fixtures/getEnumField": {
+      "get": {
+        "operationId": "getEnumField",
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnumField"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fixtures/getLiteralField": {
+      "get": {
+        "operationId": "getLiteralField",
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LiteralField"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fixtures/getUnionOfLiterals": {
+      "get": {
+        "operationId": "getUnionOfLiterals",
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnionOfLiterals"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fixtures/getArrayOfScalars": {
+      "get": {
+        "operationId": "getArrayOfScalars",
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArrayOfScalars"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fixtures/getArrayOfCodecs": {
+      "get": {
+        "operationId": "getArrayOfCodecs",
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArrayOfCodecs"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fixtures/getRecordField": {
+      "get": {
+        "operationId": "getRecordField",
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordField"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fixtures/getNested": {
+      "get": {
+        "operationId": "getNested",
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Nested"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fixtures/getUnionField": {
+      "get": {
+        "operationId": "getUnionField",
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnionField"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fixtures/getCodecObject": {
+      "get": {
+        "operationId": "getCodecObject",
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CodecObject"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fixtures/getComposed": {
+      "get": {
+        "operationId": "getComposed",
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Composed"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fixtures/getPaginatedComposed": {
+      "get": {
+        "operationId": "getPaginatedComposed",
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedComposed"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fixtures/getStringWithMinMax": {
+      "get": {
+        "operationId": "getStringWithMinMax",
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StringWithMinMax"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fixtures/getNumberWithRange": {
+      "get": {
+        "operationId": "getNumberWithRange",
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NumberWithRange"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fixtures/getArrayWithLength": {
+      "get": {
+        "operationId": "getArrayWithLength",
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArrayWithLength"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fixtures/getStringWithFormat": {
+      "get": {
+        "operationId": "getStringWithFormat",
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StringWithFormat"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fixtures/getRefinedField": {
+      "get": {
+        "operationId": "getRefinedField",
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RefinedField"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fixtures/getConstrainedCodec": {
+      "get": {
+        "operationId": "getConstrainedCodec",
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConstrainedCodec"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fixtures/getTupleField": {
+      "get": {
+        "operationId": "getTupleField",
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TupleField"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fixtures/getIntersectionField": {
+      "get": {
+        "operationId": "getIntersectionField",
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntersectionField"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fixtures/getDiscriminatedUnion": {
+      "get": {
+        "operationId": "getDiscriminatedUnion",
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiscriminatedUnion"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fixtures/getDateField": {
+      "get": {
+        "operationId": "getDateField",
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DateField"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fixtures/getSetField": {
+      "get": {
+        "operationId": "getSetField",
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetField"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fixtures/getMapField": {
+      "get": {
+        "operationId": "getMapField",
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapField"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fixtures/getDefaultField": {
+      "get": {
+        "operationId": "getDefaultField",
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DefaultField"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fixtures/getReadonlyArrayField": {
+      "get": {
+        "operationId": "getReadonlyArrayField",
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadonlyArrayField"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fixtures/getBrandedField": {
+      "get": {
+        "operationId": "getBrandedField",
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrandedField"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fixtures/createOrFetch": {
+      "post": {
+        "operationId": "createOrFetchResource",
+        "responses": {
+          "200": {
+            "description": "fetched",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResourceFetched"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResourceCreated"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fixtures/errorsOnly": {
+      "get": {
+        "operationId": "getErrorsOnly",
+        "responses": {
+          "400": {
+            "description": "bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -19,6 +19,7 @@
     "build": "pnpm -r --if-present run build",
     "test": "pnpm -r run test",
     "typecheck": "pnpm -r run typecheck",
+    "codegen-drift-check": "pnpm -r --if-present run codegen-drift",
     "lint": "concurrently --group --prefix-colors auto 'pnpm:lint:md' 'pnpm:lint:ts' 'pnpm:typecheck' 'prettier --check .'",
     "lint:md": "markdownlint-cli2 \"**/*.md\"",
     "lint:ts": "eslint .",

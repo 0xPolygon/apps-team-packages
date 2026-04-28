@@ -1,0 +1,64 @@
+{
+  "name": "@polygonlabs/zod-to-openapi-heyapi",
+  "version": "0.1.0",
+  "description": "hey-api/openapi-ts plugin that sources Zod schemas (with codecs) from a zod-to-openapi OpenAPIRegistry instead of regenerating them from the spec — so generated clients use your actual Zod runtime types.",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/0xPolygon/apps-team-packages.git",
+    "directory": "packages/zod-to-openapi-heyapi"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js"
+      }
+    }
+  },
+  "exports": {
+    ".": {
+      "@polygonlabs/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "imports": {
+    "#test-fixtures/schemas": "./test/fixtures/schemas.ts"
+  },
+  "files": [
+    "dist",
+    "MIGRATION.md"
+  ],
+  "scripts": {
+    "build": "pnpm run typecheck && tsc -p tsconfig.build.json",
+    "codegen": "node --conditions @polygonlabs/source test/codegen.ts",
+    "codegen-drift": "pnpm run codegen && git diff --exit-code -- test/__generated__",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "eslint .",
+    "clean": "rm -rf node_modules dist *.tsbuildinfo",
+    "prepublishOnly": "pnpm run build"
+  },
+  "peerDependencies": {
+    "@asteasolutions/zod-to-openapi": "^8.0.0",
+    "@hey-api/openapi-ts": ">=0.95.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@asteasolutions/zod-to-openapi": "^8.5.0",
+    "@hey-api/client-fetch": "^0.13.0",
+    "@hey-api/openapi-ts": "^0.95.0",
+    "@polygonlabs/apps-team-lint": "workspace:*",
+    "@polygonlabs/zod-codecs": "workspace:*",
+    "@tsconfig/node-ts": "^23.0.0",
+    "@tsconfig/node24": "^24.0.0",
+    "@types/node": "^24.0.0",
+    "eslint": "^10.0.0",
+    "msw": "^2.7.0",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.3",
+    "zod": "^4.3.6"
+  }
+}
