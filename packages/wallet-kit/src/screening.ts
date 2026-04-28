@@ -7,11 +7,26 @@ const CACHE_KEY = 'polygon-wallet-kit:wallet-screening';
 
 const DEFAULT_API_ORIGIN = 'https://api-gateway.polygon.technology';
 
+export type ScreeningErrorSource = 'prescreen' | 'trm';
+
+export interface ScreeningErrorEvent {
+  source: ScreeningErrorSource;
+  address: Hex;
+  error: unknown;
+}
+
 export interface ScreeningConfig {
   apiOrigin?: string;
   apiKey?: string;
   enabled?: boolean;
   prescreen?: (address: Hex) => Promise<boolean>;
+  /**
+   * Notified for prescreen and TRM failures. The screener still falls back
+   * to TRM (prescreen) or fails open (TRM) — this callback is purely for
+   * observability. Defaults to `console.error` so failures aren't swallowed
+   * silently when no callback is provided.
+   */
+  onScreeningError?: (event: ScreeningErrorEvent) => void;
 }
 
 export interface CheckOptions {
@@ -20,9 +35,14 @@ export interface CheckOptions {
 
 export type Screener = (address: Hex, options?: CheckOptions) => Promise<boolean>;
 
+const defaultOnScreeningError = (event: ScreeningErrorEvent): void => {
+  console.error('[wallet-kit] Screening failed:', event.error);
+};
+
 export const createScreener = (config: ScreeningConfig): Screener => {
   const enabled = config.enabled ?? true;
   const ttlMs = DEFAULT_CACHE_TTL_DAYS * MS_PER_DAY;
+  const onScreeningError = config.onScreeningError ?? defaultOnScreeningError;
 
   return async (address, options) => {
     if (!enabled) return false;
@@ -46,8 +66,9 @@ export const createScreener = (config: ScreeningConfig): Screener => {
           });
           return true;
         }
-      } catch {
-        // Local blocklist failures should not bypass the TRM fallback.
+      } catch (error) {
+        onScreeningError({ source: 'prescreen', address: normalizedAddress, error });
+        // Fall through to TRM — local blocklist failure must not block screening.
       }
     }
 
@@ -62,8 +83,9 @@ export const createScreener = (config: ScreeningConfig): Screener => {
         [normalizedAddress]: { value: sanctioned, timestamp: Date.now() }
       });
       return sanctioned;
-    } catch {
-      // TRM failures are fail-open so wallet flows do not break on network or service issues.
+    } catch (error) {
+      onScreeningError({ source: 'trm', address: normalizedAddress, error });
+      // Fail open so wallet flows do not break on network or service issues.
       return false;
     }
   };
@@ -128,6 +150,8 @@ const callTrm = async ({ address, apiOrigin, apiKey }: CallTrmArgs): Promise<boo
     const response = await fetch(`${apiOrigin}/screen-addresses`, {
       method: 'POST',
       headers,
+      // TRM ownership-risk scoring is address-level for EOAs; `chain` is
+      // required by the API but doesn't affect the result we read.
       body: JSON.stringify([
         {
           address,

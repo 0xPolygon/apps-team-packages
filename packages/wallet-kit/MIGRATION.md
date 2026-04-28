@@ -136,6 +136,27 @@ For arbitrary destination checks, use `screenAddress(address)`. It shares the
 same cache but does not disconnect the connected wallet or mutate
 `isWalletSanctioned`.
 
+### External-SCW disclaimer modals
+
+Wallet-kit does not own external-SCW disclaimer state. Apps that previously
+persisted dismissal in localStorage (for example portal or staking-ui) should
+keep that modal in the app and drive it from wallet-kit state:
+
+```tsx
+const { address, isExternalSmartContractWallet } = usePolygonWallet();
+const [dismissed, setDismissed] = useState(false);
+
+useEffect(() => {
+  setDismissed(false);
+}, [address]);
+
+const showDisclaimer = isExternalSmartContractWallet && !dismissed;
+```
+
+With component-local dismissal, the modal re-shows on every fresh connect. If an
+app needs cross-session persistence, keep that storage key app-owned rather than
+inside wallet-kit.
+
 ### Step 6 - Delete local shared copies
 
 Once the adapter and call sites are moved, delete app-local copies of:
@@ -163,6 +184,8 @@ the app.
   wallets. They should not show the external-SCW warning, but should still avoid
   ERC20 permit paths when `requiresApproveInsteadOfPermit` is true.
 - TRM failures fail open, matching the existing apps-team frontend behaviour.
+  Pass `onScreeningError` on the provider to route prescreen and TRM failures
+  to telemetry; the event payload distinguishes sources via `source: 'prescreen' | 'trm'`.
 
 ### Verification checklist
 

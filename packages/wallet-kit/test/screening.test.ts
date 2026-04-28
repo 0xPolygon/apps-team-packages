@@ -42,6 +42,7 @@ const counterpartyExposurePayload = [
 
 describe('createScreener', () => {
   let fetchFn: ReturnType<typeof vi.fn>;
+  let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     fetchFn = vi.fn();
@@ -50,9 +51,13 @@ describe('createScreener', () => {
       configurable: true,
       value: memoryStorage()
     });
+    // Default screening error handler is `console.error`; silence it
+    // by default so fail-open tests don't pollute output.
+    consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
   });
 
   afterEach(() => {
+    consoleErrorSpy.mockRestore();
     vi.useRealTimers();
     vi.unstubAllGlobals();
   });
@@ -308,5 +313,82 @@ describe('createScreener', () => {
 
     const screen = createScreener({ apiOrigin: API_ORIGIN });
     await expect(screen(ADDRESS)).resolves.toBe(false);
+  });
+
+  it('reports prescreen failure via onScreeningError and falls through to TRM', async () => {
+    fetchFn.mockResolvedValueOnce(mockResponse(cleanPayload));
+    const onScreeningError = vi.fn();
+    const prescreen = vi.fn().mockRejectedValue(new Error('firestore unreachable'));
+    const screen = createScreener({
+      apiOrigin: API_ORIGIN,
+      prescreen,
+      onScreeningError
+    });
+
+    await expect(screen(ADDRESS)).resolves.toBe(false);
+    expect(onScreeningError).toHaveBeenCalledOnce();
+    expect(onScreeningError).toHaveBeenCalledWith({
+      source: 'prescreen',
+      address: LOWER,
+      error: expect.any(Error)
+    });
+    expect(fetchFn).toHaveBeenCalledOnce();
+  });
+
+  it('reports TRM rejection via onScreeningError and fails open', async () => {
+    fetchFn.mockRejectedValueOnce(new Error('network'));
+    const onScreeningError = vi.fn();
+    const screen = createScreener({
+      apiOrigin: API_ORIGIN,
+      onScreeningError
+    });
+
+    await expect(screen(ADDRESS)).resolves.toBe(false);
+    expect(onScreeningError).toHaveBeenCalledOnce();
+    expect(onScreeningError).toHaveBeenCalledWith({
+      source: 'trm',
+      address: LOWER,
+      error: expect.any(Error)
+    });
+  });
+
+  it('reports TRM non-2xx status via onScreeningError', async () => {
+    fetchFn.mockResolvedValueOnce(mockResponse({}, { ok: false }));
+    const onScreeningError = vi.fn();
+    const screen = createScreener({
+      apiOrigin: API_ORIGIN,
+      onScreeningError
+    });
+
+    await expect(screen(ADDRESS)).resolves.toBe(false);
+    expect(onScreeningError).toHaveBeenCalledWith({
+      source: 'trm',
+      address: LOWER,
+      error: expect.any(Error)
+    });
+  });
+
+  it('logs to console.error when no onScreeningError callback is supplied', async () => {
+    fetchFn.mockRejectedValueOnce(new Error('network'));
+    const screen = createScreener({ apiOrigin: API_ORIGIN });
+    await expect(screen(ADDRESS)).resolves.toBe(false);
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      '[wallet-kit] Screening failed:',
+      expect.any(Error)
+    );
+  });
+
+  it('does not invoke onScreeningError on cache hits', async () => {
+    fetchFn.mockResolvedValueOnce(mockResponse(sanctionedPayload));
+    const onScreeningError = vi.fn();
+    const screen = createScreener({
+      apiOrigin: API_ORIGIN,
+      onScreeningError
+    });
+
+    await screen(ADDRESS);
+    await screen(ADDRESS);
+    expect(fetchFn).toHaveBeenCalledOnce();
+    expect(onScreeningError).not.toHaveBeenCalled();
   });
 });

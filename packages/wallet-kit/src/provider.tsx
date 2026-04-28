@@ -1,25 +1,27 @@
 import type { QueryClient } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
-import type { EIP1193Provider, Hex } from 'viem';
+import type { Hex } from 'viem';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo } from 'react';
 import {
   useConnection,
   useConnectionEffect,
   useDisconnect,
-  useSwitchChain,
-  usePublicClient
+  usePublicClient,
+  useSwitchChain
 } from 'wagmi';
 
 import type { CreateConfigOptions } from '@0xsequence/connect';
 
 import { SequenceConnect, createConfig, useOpenConnectModal } from '@0xsequence/connect';
 
-import type { PolygonWallet, WalletInfo } from './context.ts';
-import type { CheckOptions, ScreeningConfig, Screener } from './screening.ts';
+import type { PolygonWallet } from './context.ts';
+import type { ScreeningConfig, ScreeningErrorEvent, Screener } from './screening.ts';
 
 import { WalletKitContext } from './context.ts';
-import { detectSmartWallet } from './detect-smart-wallet.ts';
+import { useResolvedProvider } from './hooks/use-resolved-provider.ts';
+import { useSanctionsScreening } from './hooks/use-sanctions-screening.ts';
+import { useSmartWalletDetection } from './hooks/use-smart-wallet-detection.ts';
 import { createScreener } from './screening.ts';
 import { isSequenceV3Connector, supportsWalletTransactionForSend } from './sequence-v3.ts';
 
@@ -46,6 +48,8 @@ export interface WalletKitProviderProps {
   onSanctioned?: (address: Hex) => void;
   /** Routes EIP1193 provider-resolution failures to telemetry. Defaults to `console.error`; provide to suppress. */
   onProviderError?: (error: unknown) => void;
+  /** Routes screening (prescreen + TRM) failures to telemetry. Defaults to `console.error`; provide to suppress. */
+  onScreeningError?: (event: ScreeningErrorEvent) => void;
   children: ReactNode;
 }
 
@@ -57,6 +61,7 @@ export const WalletKitProvider = ({
   onDisconnect,
   onSanctioned,
   onProviderError,
+  onScreeningError,
   children
 }: WalletKitProviderProps) => {
   const sequenceConfig = useMemo(() => createConfig(sequence), [sequence]);
@@ -69,6 +74,7 @@ export const WalletKitProvider = ({
         onDisconnect={onDisconnect}
         onSanctioned={onSanctioned}
         onProviderError={onProviderError}
+        onScreeningError={onScreeningError}
       >
         {children}
       </WalletKitInner>
@@ -82,6 +88,7 @@ interface WalletKitInnerProps {
   onDisconnect: (() => void) | undefined;
   onSanctioned: ((address: Hex) => void) | undefined;
   onProviderError: ((error: unknown) => void) | undefined;
+  onScreeningError: ((event: ScreeningErrorEvent) => void) | undefined;
   children: ReactNode;
 }
 
@@ -96,6 +103,7 @@ const WalletKitInner = ({
   onDisconnect,
   onSanctioned,
   onProviderError,
+  onScreeningError,
   children
 }: WalletKitInnerProps) => {
   const { address, status, connector, chainId } = useConnection();
@@ -104,42 +112,23 @@ const WalletKitInner = ({
   const { setOpenConnectModal } = useOpenConnectModal();
   const publicClient = usePublicClient({ chainId });
 
-  const [walletProvider, setWalletProvider] = useState<EIP1193Provider | undefined>(undefined);
-  const [isSmartContractWallet, setIsSmartContractWallet] = useState(false);
-  const [sanctionedAddress, setSanctionedAddress] = useState<Hex | null>(null);
-  const sanctionsAutoDisconnectInFlightRef = useRef(false);
+  const screener = useMemo<Screener>(() => {
+    if (!screening) return async () => false;
+    return createScreener({ ...screening, onScreeningError });
+  }, [screening, onScreeningError]);
+
+  const walletProvider = useResolvedProvider(connector, onProviderError);
+  const isSmartContractWallet = useSmartWalletDetection(address, publicClient);
+  const { isWalletSanctioned, refreshScreening, screenAddress } = useSanctionsScreening({
+    address,
+    screener,
+    onSanctioned,
+    disconnect
+  });
 
   const isSequenceWallet = isSequenceV3Connector(connector);
   const isExternalSmartContractWallet = isSmartContractWallet && !isSequenceWallet;
   const requiresApproveInsteadOfPermit = isSmartContractWallet || isSequenceWallet;
-  const isWalletSanctioned = sanctionedAddress !== null;
-
-  const screener = useMemo<Screener>(() => {
-    if (!screening) return async () => false;
-    return createScreener(screening);
-  }, [screening]);
-
-  const applyConnectedScreeningResult = useCallback(
-    (checkedAddress: Hex, sanctioned: boolean) => {
-      if (!sanctioned) {
-        setSanctionedAddress(null);
-        return;
-      }
-
-      setSanctionedAddress(toLowerCaseHex(checkedAddress));
-      onSanctioned?.(checkedAddress);
-      sanctionsAutoDisconnectInFlightRef.current = true;
-      disconnect();
-    },
-    [disconnect, onSanctioned]
-  );
-
-  const screenAddress = useCallback(
-    async (targetAddress: Hex, options?: CheckOptions): Promise<boolean> => {
-      return screener(targetAddress, options);
-    },
-    [screener]
-  );
 
   useConnectionEffect({
     onConnect(ctx) {
@@ -162,68 +151,9 @@ const WalletKitInner = ({
       })();
     },
     onDisconnect() {
-      setIsSmartContractWallet(false);
-      if (sanctionsAutoDisconnectInFlightRef.current) {
-        sanctionsAutoDisconnectInFlightRef.current = false;
-      } else {
-        setSanctionedAddress(null);
-      }
-      setWalletProvider(undefined);
       onDisconnect?.();
     }
   });
-
-  useEffect(() => {
-    let cancelled = false;
-    void resolveConnectorProvider(connector, onProviderError).then((resolved) => {
-      if (!cancelled) setWalletProvider(resolved);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [connector, onProviderError]);
-
-  useEffect(() => {
-    setIsSmartContractWallet(false);
-    if (!address || !publicClient) {
-      return;
-    }
-    let cancelled = false;
-    void detectSmartWallet({ client: publicClient, address })
-      .then((result) => {
-        if (!cancelled) setIsSmartContractWallet(result);
-      })
-      .catch(() => {
-        if (!cancelled) setIsSmartContractWallet(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [address, publicClient]);
-
-  useEffect(() => {
-    if (!address) {
-      return;
-    }
-    const normalizedAddress = toLowerCaseHex(address);
-    setSanctionedAddress((current) =>
-      current !== null && current !== normalizedAddress ? null : current
-    );
-    let cancelled = false;
-    void screener(address)
-      .then((sanctioned) => {
-        if (cancelled) return;
-        applyConnectedScreeningResult(address, sanctioned);
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setSanctionedAddress(null);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [address, screener, applyConnectedScreeningResult]);
 
   const switchChain = useCallback(
     async (targetChainId: number): Promise<boolean> => {
@@ -246,87 +176,26 @@ const WalletKitInner = ({
     disconnect();
   }, [disconnect]);
 
-  const refreshScreening = useCallback(async (): Promise<boolean> => {
-    if (!address) return false;
-    const sanctioned = await screenAddress(address, { forceRefresh: true });
-    applyConnectedScreeningResult(address, sanctioned);
-    return sanctioned;
-  }, [address, screenAddress, applyConnectedScreeningResult]);
-
-  const walletInfo = useMemo<WalletInfo | undefined>(
-    () =>
-      connector
-        ? {
-            name: connector.name,
-            icon: connector.icon
-          }
-        : undefined,
-    [connector]
-  );
-
-  const value = useMemo<PolygonWallet>(
-    () => ({
-      address: address ?? null,
-      status,
-      isConnected: status === 'connected' && address !== undefined,
-      chainId,
-      switchChain,
-      walletInfo,
-      walletProvider,
-      isSequenceWallet,
-      isSmartContractWallet,
-      isExternalSmartContractWallet,
-      requiresApproveInsteadOfPermit,
-      isWalletSanctioned,
-      connect,
-      disconnect: disconnectAction,
-      screenAddress,
-      refreshScreening
-    }),
-    [
-      address,
-      status,
-      chainId,
-      switchChain,
-      walletInfo,
-      walletProvider,
-      isSequenceWallet,
-      isSmartContractWallet,
-      isExternalSmartContractWallet,
-      requiresApproveInsteadOfPermit,
-      isWalletSanctioned,
-      connect,
-      disconnectAction,
-      screenAddress,
-      refreshScreening
-    ]
-  );
+  const value: PolygonWallet = {
+    address: address ?? null,
+    status,
+    isConnected: status === 'connected' && address !== undefined,
+    chainId,
+    switchChain,
+    walletInfo: connector ? { name: connector.name, icon: connector.icon } : undefined,
+    walletProvider,
+    isSequenceWallet,
+    isSmartContractWallet,
+    isExternalSmartContractWallet,
+    requiresApproveInsteadOfPermit,
+    isWalletSanctioned,
+    connect,
+    disconnect: disconnectAction,
+    screenAddress,
+    refreshScreening
+  };
 
   return <WalletKitContext.Provider value={value}>{children}</WalletKitContext.Provider>;
-};
-
-// Safe via WalletConnect attaches `getProvider` lazily during the session
-// handshake — calling it on a freshly-emitted connector throws `is not a
-// function` synchronously and crashes the React tree. Treat a missing
-// `getProvider` as "not ready yet"; wagmi re-emits the connector once the
-// SDK finishes wiring it.
-export const resolveConnectorProvider = async (
-  connector: { getProvider?: () => Promise<unknown> } | undefined,
-  onError?: (error: unknown) => void
-): Promise<EIP1193Provider | undefined> => {
-  if (!connector || typeof connector.getProvider !== 'function') {
-    return undefined;
-  }
-  try {
-    return (await connector.getProvider()) as EIP1193Provider;
-  } catch (error) {
-    if (onError) {
-      onError(error);
-    } else {
-      console.error('[wallet-kit] Failed to get wallet provider:', error);
-    }
-    return undefined;
-  }
 };
 
 export const enableWalletTransactionForSend = async (
@@ -341,5 +210,3 @@ export const enableWalletTransactionForSend = async (
     // Sequence surfaces provider failures through its own connection UI.
   }
 };
-
-const toLowerCaseHex = (value: Hex): Hex => value.toLowerCase() as Hex;

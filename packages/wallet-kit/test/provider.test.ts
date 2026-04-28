@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { enableWalletTransactionForSend, resolveConnectorProvider } from '../src/provider.tsx';
+import { resolveConnectorProvider } from '../src/hooks/use-resolved-provider.ts';
+import { enableWalletTransactionForSend } from '../src/provider.tsx';
 
 describe('enableWalletTransactionForSend', () => {
   it('enables Sequence wallet transaction mode when the provider supports it', async () => {

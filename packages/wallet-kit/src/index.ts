@@ -7,9 +7,13 @@ export {
 export type { SequenceV3Provider } from './sequence-v3.ts';
 export { detectSmartWallet } from './detect-smart-wallet.ts';
 export type { DetectSmartWalletArgs, GetCodeClient } from './detect-smart-wallet.ts';
-export type { CheckOptions, ScreeningConfig } from './screening.ts';
+export type {
+  CheckOptions,
+  ScreeningConfig,
+  ScreeningErrorEvent,
+  ScreeningErrorSource
+} from './screening.ts';
 export { WalletKitProvider } from './provider.tsx';
 export type { ScreeningProp, WalletConnectEvent, WalletKitProviderProps } from './provider.tsx';
-export { usePolygonWallet, useSmartWalletDisclaimer } from './hooks.ts';
-export type { UseSmartWalletDisclaimerResult } from './hooks.ts';
+export { usePolygonWallet } from './hooks/use-polygon-wallet.ts';
 export type { PolygonWallet, WalletInfo } from './context.ts';
