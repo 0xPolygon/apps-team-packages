@@ -201,4 +201,30 @@ describe('registry plugin emit', () => {
     );
     expect(src).not.toMatch(/getCodecObjectTransformer.*z\.union/);
   });
+
+  it('does not import or emit anything for parameter-only schemas', () => {
+    // The fixture registry registers `itemId` as a path parameter (lower-case
+    // by design). zod-to-openapi v8 lifts the parameter's schema into both
+    // `components.parameters.itemId` and `components.schemas.itemId` — the
+    // latter would have tripped the original audit, which walked the entire
+    // `components.schemas` map and demanded a Zod export under every name.
+    //
+    // The corrected audit walks only response `$ref`s, so a registered
+    // parameter (with no Zod export under that name) must not produce any
+    // emit in the generated client.
+    const src = readGenerated();
+    expect(src).not.toMatch(/import \{[^}]*\bitemId\b[^}]*\}/);
+    expect(src).not.toMatch(/typeof itemId\b/);
+    expect(src).not.toMatch(/\bitemId\.parseAsync/);
+  });
+
+  it('still emits the response-side transformer for an operation with a registered parameter', () => {
+    // `getItemWithRegisteredParam` returns ScalarString. The audit narrowing
+    // must not regress the emit for the response side — only filter the
+    // parameter out of the audit set.
+    const src = readGenerated();
+    expect(src).toMatch(
+      /export const getItemWithRegisteredParamTransformer = async \(data: unknown\): Promise<z\.output<typeof ScalarString>> => await ScalarString\.parseAsync\(data\);/
+    );
+  });
 });

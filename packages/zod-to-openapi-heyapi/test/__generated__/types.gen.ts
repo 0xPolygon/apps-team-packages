@@ -224,6 +224,16 @@ export type ResourceCreated = {
     createdAt: string;
 };
 
+/**
+ * Item identifier
+ */
+export type ItemId = string;
+
+/**
+ * Item identifier
+ */
+export type ItemId2 = ItemId;
+
 export type GetScalarStringData = {
     body?: never;
     path?: never;
@@ -808,3 +818,24 @@ export type GetErrorsOnlyErrors = {
 };
 
 export type GetErrorsOnlyError = GetErrorsOnlyErrors[keyof GetErrorsOnlyErrors];
+
+export type GetItemWithRegisteredParamData = {
+    body?: never;
+    path: {
+        /**
+         * Item identifier
+         */
+        itemId: ItemId;
+    };
+    query?: never;
+    url: '/fixtures/items/{itemId}';
+};
+
+export type GetItemWithRegisteredParamResponses = {
+    /**
+     * ok
+     */
+    200: ScalarString;
+};
+
+export type GetItemWithRegisteredParamResponse = GetItemWithRegisteredParamResponses[keyof GetItemWithRegisteredParamResponses];

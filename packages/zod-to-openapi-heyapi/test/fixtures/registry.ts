@@ -10,9 +10,8 @@
 
 import { OpenAPIRegistry, OpenApiGeneratorV3 } from '@asteasolutions/zod-to-openapi';
 
-import type { z } from './zod.ts';
-
 import * as schemas from './schemas.ts';
+import { z } from './zod.ts';
 
 interface RouteSpec {
   operationId: string;
@@ -192,10 +191,44 @@ fixtureRegistry.registerPath({
   }
 });
 
+// Operation with a registered path parameter. zod-to-openapi v8's
+// OpenApiGeneratorV3 lifts the parameter's schema into both
+// `components.parameters.<key>` and (deliberately, as a $ref target for the
+// parameter object) `components.schemas.<key>`. The plugin's audit must NOT
+// demand a Zod export under that name — the generated client never imports
+// parameter schemas, only response schemas.
+//
+// Registered under a deliberately lower-cased key (`itemId`) so a strict
+// "every name in components.schemas needs a matching export" audit would
+// trip on it. The fixture exists for one reason: to prove the audit
+// narrowing keeps the codegen green here.
+const itemIdParam = fixtureRegistry.registerParameter(
+  'itemId',
+  z.string().openapi({ param: { name: 'itemId', in: 'path' }, description: 'Item identifier' })
+);
+
+fixtureRegistry.registerPath({
+  method: 'get',
+  path: '/fixtures/items/{itemId}',
+  operationId: 'getItemWithRegisteredParam',
+  request: {
+    params: z.object({ itemId: itemIdParam })
+  },
+  responses: {
+    200: {
+      description: 'ok',
+      content: {
+        'application/json': { schema: registerOnce('ScalarString', schemas.ScalarString) }
+      }
+    }
+  }
+});
+
 export const fixtureOperationIds = [
   ...routeSpecs.map((r) => r.operationId),
   'createOrFetchResource',
-  'getErrorsOnly'
+  'getErrorsOnly',
+  'getItemWithRegisteredParam'
 ];
 
 /** Generate the OpenAPI document for the registry. */

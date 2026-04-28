@@ -48,7 +48,6 @@
   },
   "devDependencies": {
     "@asteasolutions/zod-to-openapi": "^8.5.0",
-    "@hey-api/client-fetch": "^0.13.0",
     "@hey-api/openapi-ts": "^0.95.0",
     "@polygonlabs/apps-team-lint": "workspace:*",
     "@polygonlabs/zod-codecs": "workspace:*",

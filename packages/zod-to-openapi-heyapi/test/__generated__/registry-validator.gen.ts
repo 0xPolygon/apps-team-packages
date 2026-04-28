@@ -290,3 +290,11 @@ export type GetErrorsOnlyErrors = {
 };
 
 export type GetErrorsOnlyError = GetErrorsOnlyErrors[keyof GetErrorsOnlyErrors];
+
+export type GetItemWithRegisteredParamResponses = {
+    200: z.output<typeof ScalarString>;
+};
+
+export type GetItemWithRegisteredParamResponse = GetItemWithRegisteredParamResponses[keyof GetItemWithRegisteredParamResponses];
+
+export const getItemWithRegisteredParamTransformer = async (data: unknown): Promise<z.output<typeof ScalarString>> => await ScalarString.parseAsync(data);
