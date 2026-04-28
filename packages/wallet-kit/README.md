@@ -8,7 +8,7 @@ The package owns the parts that drift easily across UIs:
 - Sequence v3 transaction-send mode
 - connected-wallet state from wagmi
 - EIP-7702-aware smart-contract-wallet detection
-- TRM sanctions screening with cache, timeout, optional prescreen, and fail-open behavior
+- TRM sanctions screening with timeout, optional prescreen, and fail-open behavior
 - small wallet classification booleans used by SCW UX and permit-flow gating
 
 Apps still own app-specific wrappers: chain catalogs, Redux or app context shape, modals,
@@ -83,18 +83,18 @@ wallet.connect();
 wallet.disconnect();
 const switched = await wallet.switchChain(1);
 await wallet.screenAddress(destinationAddress);
-await wallet.refreshScreening();
+await wallet.screenConnectedWallet();
 ```
 
-`screenAddress(address, options)` screens any address with the provider's configured TRM
-resolver. It does not disconnect the connected wallet or mutate `isWalletSanctioned`. Results
-share the same 90-day localStorage cache as the connected-wallet screen, so screening 50
-destination addresses in a session does not produce 50 TRM calls. Pass `{ forceRefresh: true }`
-to bypass the cache.
+`screenAddress(address)` screens any address with the provider's configured TRM resolver. It
+does not disconnect the connected wallet or mutate `isWalletSanctioned`.
 
-`refreshScreening()` is only for the connected wallet. It force-refreshes screening, sets
+`screenConnectedWallet()` is only for the connected wallet. It screens the current address, sets
 `isWalletSanctioned`, calls `onSanctioned`, and disconnects when the connected wallet is
 sanctioned.
+
+Wallet-kit does not cache screening results in browser storage. If screening responses are
+cached, that is handled behind the configured API/gateway.
 
 After a sanctions-triggered disconnect, `isWalletSanctioned` stays `true` so app-owned
 modals can remain visible after `address` clears. A later clean connected-wallet screening

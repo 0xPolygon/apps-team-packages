@@ -119,7 +119,7 @@ const WalletKitInner = ({
 
   const walletProvider = useResolvedProvider(connector, onProviderError);
   const isSmartContractWallet = useSmartWalletDetection(address, publicClient);
-  const { isWalletSanctioned, refreshScreening, screenAddress } = useSanctionsScreening({
+  const { isWalletSanctioned, screenAddress, screenConnectedWallet } = useSanctionsScreening({
     address,
     screener,
     onSanctioned,
@@ -192,7 +192,7 @@ const WalletKitInner = ({
     connect,
     disconnect: disconnectAction,
     screenAddress,
-    refreshScreening
+    screenConnectedWallet
   };
 
   return <WalletKitContext.Provider value={value}>{children}</WalletKitContext.Provider>;

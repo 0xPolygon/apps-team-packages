@@ -104,8 +104,8 @@ function AppWalletAdapter({ children }: { readonly children: ReactNode }) {
 }
 ```
 
-Do not screen a mocked/debug address for compliance. `refreshScreening()` always
-screens the connected wallet address owned by wallet-kit.
+Do not screen a mocked/debug address for compliance. `screenConnectedWallet()`
+always screens the connected wallet address owned by wallet-kit.
 
 ### Step 5 - Replace shared helper calls
 
@@ -114,10 +114,10 @@ Use wallet-kit primitives directly from transaction hooks and UI controls.
 ```diff
 -const { screenWalletAddress, validateAndSwitchNetwork } = useWallet();
 +const { appNetwork } = useWallet();
-+const { refreshScreening, switchChain } = usePolygonWallet();
++const { screenConnectedWallet, switchChain } = usePolygonWallet();
 
 -if (await screenWalletAddress(true)) {
-+if (await refreshScreening()) {
++if (await screenConnectedWallet()) {
    return { success: false, error: new Error('Wallet restricted') };
  }
 
@@ -132,9 +132,8 @@ For app-network menus:
 +await switchChain(chainId);
 ```
 
-For arbitrary destination checks, use `screenAddress(address)`. It shares the
-same cache but does not disconnect the connected wallet or mutate
-`isWalletSanctioned`.
+For arbitrary destination checks, use `screenAddress(address)`. It does not
+disconnect the connected wallet or mutate `isWalletSanctioned`.
 
 ### External-SCW disclaimer modals
 
@@ -161,7 +160,7 @@ inside wallet-kit.
 
 Once the adapter and call sites are moved, delete app-local copies of:
 
-- TRM API client, response schemas, localStorage cache, and timeout handling
+- TRM API client, response schemas, and timeout handling
 - EIP-7702 bytecode-prefix checks
 - generic smart-contract-wallet bytecode detection
 - Sequence v3 connector-id checks
@@ -175,11 +174,13 @@ the app.
 
 - `switchChain(chainId)` resolves `true` when already on the requested chain or
   after a successful switch, and `false` when the wallet switch fails.
-- `refreshScreening()` force-refreshes the connected-wallet screen. If the wallet
-  is sanctioned, wallet-kit sets `isWalletSanctioned`, calls `onSanctioned`, and
+- `screenConnectedWallet()` screens the connected wallet. If the wallet is
+  sanctioned, wallet-kit sets `isWalletSanctioned`, calls `onSanctioned`, and
   disconnects.
 - `screenAddress(address)` screens arbitrary addresses without disconnecting the
   connected wallet.
+- Wallet-kit does not write screening results to browser storage. Caching, if
+  any, is handled behind the configured API/gateway.
 - Sequence v3 wallets are identified separately from generic smart-contract
   wallets. They should not show the external-SCW warning, but should still avoid
   ERC20 permit paths when `requiresApproveInsteadOfPermit` is true.
@@ -196,8 +197,8 @@ the app.
 - Confirm external SCWs still show the app-owned SCW warning and timeout UX.
 - Confirm sanctioned connected wallets disconnect and keep the app-owned
   sanctions modal visible.
-- Confirm transaction flows call `refreshScreening()` before writes that require
-  connected-wallet compliance.
+- Confirm transaction flows call `screenConnectedWallet()` before writes that
+  require connected-wallet compliance.
 - Confirm permit-enabled flows use approve/direct-call paths for SCWs and
   Sequence v3 wallets.
 - Confirm any debug mock-address feature changes displayed account data only and

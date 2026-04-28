@@ -3,7 +3,7 @@ import type { Hex } from 'viem';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useConnectionEffect } from 'wagmi';
 
-import type { CheckOptions, Screener } from '../screening.ts';
+import type { Screener } from '../screening.ts';
 
 interface UseSanctionsScreeningArgs {
   address: Hex | undefined;
@@ -14,8 +14,8 @@ interface UseSanctionsScreeningArgs {
 
 interface UseSanctionsScreeningResult {
   isWalletSanctioned: boolean;
-  refreshScreening: () => Promise<boolean>;
-  screenAddress: (address: Hex, options?: CheckOptions) => Promise<boolean>;
+  screenAddress: (address: Hex) => Promise<boolean>;
+  screenConnectedWallet: () => Promise<boolean>;
 }
 
 const toLowerCaseHex = (value: Hex): Hex => value.toLowerCase() as Hex;
@@ -51,8 +51,8 @@ export const useSanctionsScreening = ({
   );
 
   const screenAddress = useCallback(
-    async (targetAddress: Hex, options?: CheckOptions): Promise<boolean> => {
-      return screener(targetAddress, options);
+    async (targetAddress: Hex): Promise<boolean> => {
+      return screener(targetAddress);
     },
     [screener]
   );
@@ -91,16 +91,16 @@ export const useSanctionsScreening = ({
     };
   }, [address, screener, applyConnectedScreeningResult]);
 
-  const refreshScreening = useCallback(async (): Promise<boolean> => {
+  const screenConnectedWallet = useCallback(async (): Promise<boolean> => {
     if (!address) return false;
-    const sanctioned = await screenAddress(address, { forceRefresh: true });
+    const sanctioned = await screenAddress(address);
     applyConnectedScreeningResult(address, sanctioned);
     return sanctioned;
   }, [address, screenAddress, applyConnectedScreeningResult]);
 
   return {
     isWalletSanctioned: sanctionedAddress !== null,
-    refreshScreening,
-    screenAddress
+    screenAddress,
+    screenConnectedWallet
   };
 };

@@ -2,8 +2,6 @@ import type { EIP1193Provider, Hex } from 'viem';
 
 import { createContext } from 'react';
 
-import type { CheckOptions } from './screening.ts';
-
 export interface WalletInfo {
   name: string;
   icon?: string;
@@ -24,8 +22,8 @@ export interface PolygonWallet {
   isWalletSanctioned: boolean;
   connect: () => void;
   disconnect: () => void;
-  screenAddress: (address: Hex, options?: CheckOptions) => Promise<boolean>;
-  refreshScreening: () => Promise<boolean>;
+  screenAddress: (address: Hex) => Promise<boolean>;
+  screenConnectedWallet: () => Promise<boolean>;
 }
 
 export const WalletKitContext = createContext<PolygonWallet | null>(null);

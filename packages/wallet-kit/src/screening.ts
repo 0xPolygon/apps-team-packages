@@ -1,9 +1,6 @@
 import type { Hex } from 'viem';
 
-const DEFAULT_CACHE_TTL_DAYS = 90;
-const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const DEFAULT_TIMEOUT_MS = 10_000;
-const CACHE_KEY = 'polygon-wallet-kit:wallet-screening';
 
 const DEFAULT_API_ORIGIN = 'https://api-gateway.polygon.technology';
 
@@ -29,11 +26,7 @@ export interface ScreeningConfig {
   onScreeningError?: (event: ScreeningErrorEvent) => void;
 }
 
-export interface CheckOptions {
-  forceRefresh?: boolean;
-}
-
-export type Screener = (address: Hex, options?: CheckOptions) => Promise<boolean>;
+export type Screener = (address: Hex) => Promise<boolean>;
 
 const defaultOnScreeningError = (event: ScreeningErrorEvent): void => {
   console.error('[wallet-kit] Screening failed:', event.error);
@@ -41,29 +34,16 @@ const defaultOnScreeningError = (event: ScreeningErrorEvent): void => {
 
 export const createScreener = (config: ScreeningConfig): Screener => {
   const enabled = config.enabled ?? true;
-  const ttlMs = DEFAULT_CACHE_TTL_DAYS * MS_PER_DAY;
   const onScreeningError = config.onScreeningError ?? defaultOnScreeningError;
 
-  return async (address, options) => {
+  return async (address) => {
     if (!enabled) return false;
     const normalizedAddress = normalizeAddress(address);
-
-    const cache = readCache();
-    const entry = cache[normalizedAddress];
-    const forceRefresh = options?.forceRefresh === true;
-
-    if (!forceRefresh && entry !== undefined && isFresh(entry.timestamp, ttlMs)) {
-      return entry.value;
-    }
 
     if (config.prescreen) {
       try {
         const flagged = await config.prescreen(normalizedAddress);
         if (flagged) {
-          writeCache({
-            ...cache,
-            [normalizedAddress]: { value: true, timestamp: Date.now() }
-          });
           return true;
         }
       } catch (error) {
@@ -78,10 +58,6 @@ export const createScreener = (config: ScreeningConfig): Screener => {
         apiOrigin: config.apiOrigin ?? DEFAULT_API_ORIGIN,
         apiKey: config.apiKey
       });
-      writeCache({
-        ...cache,
-        [normalizedAddress]: { value: sanctioned, timestamp: Date.now() }
-      });
       return sanctioned;
     } catch (error) {
       onScreeningError({ source: 'trm', address: normalizedAddress, error });
@@ -89,44 +65,6 @@ export const createScreener = (config: ScreeningConfig): Screener => {
       return false;
     }
   };
-};
-
-interface CacheEntry {
-  value: boolean;
-  timestamp: number;
-}
-
-type Cache = Record<string, CacheEntry>;
-
-const readCache = (): Cache => {
-  try {
-    const raw = globalThis.localStorage.getItem(CACHE_KEY);
-    if (raw === null) return {};
-    const parsed: unknown = JSON.parse(raw);
-    if (parsed === null || typeof parsed !== 'object') return {};
-    return Object.entries(parsed).reduce<Cache>((cache, [address, entry]) => {
-      return isCacheEntry(entry) ? { ...cache, [address]: entry } : cache;
-    }, {});
-  } catch {
-    // Corrupt or unreadable cache should behave like a cold cache.
-    return {};
-  }
-};
-
-const writeCache = (cache: Cache): void => {
-  try {
-    globalThis.localStorage.setItem(CACHE_KEY, JSON.stringify(cache));
-  } catch {
-    // Cache writes are best-effort; quota/private-mode failures should not block screening.
-  }
-};
-
-const isFresh = (timestamp: number, ttlMs: number): boolean => Date.now() - timestamp < ttlMs;
-
-const isCacheEntry = (value: unknown): value is CacheEntry => {
-  if (value === null || typeof value !== 'object') return false;
-  const candidate = value as Partial<CacheEntry>;
-  return typeof candidate.value === 'boolean' && typeof candidate.timestamp === 'number';
 };
 
 interface CallTrmArgs {

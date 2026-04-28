@@ -7,17 +7,6 @@ import { createScreener } from '../src/screening.ts';
 const ADDRESS = '0xAbabababababababababababababababababAbAb' as Hex;
 const LOWER = ADDRESS.toLowerCase() as Hex;
 const API_ORIGIN = 'https://trm.example.test';
-const CACHE_KEY = 'polygon-wallet-kit:wallet-screening';
-
-const memoryStorage = (): Pick<Storage, 'getItem' | 'setItem'> => {
-  const store = new Map<string, string>();
-  return {
-    getItem: (key) => store.get(key) ?? null,
-    setItem: (key, value) => {
-      store.set(key, value);
-    }
-  };
-};
 
 const mockResponse = (payload: unknown, init: { ok?: boolean; status?: number } = {}) =>
   new Response(JSON.stringify(payload), {
@@ -47,10 +36,6 @@ describe('createScreener', () => {
   beforeEach(() => {
     fetchFn = vi.fn();
     vi.stubGlobal('fetch', fetchFn);
-    Object.defineProperty(globalThis, 'localStorage', {
-      configurable: true,
-      value: memoryStorage()
-    });
     // Default screening error handler is `console.error`; silence it
     // by default so fail-open tests don't pollute output.
     consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -126,17 +111,7 @@ describe('createScreener', () => {
     );
   });
 
-  it('caches the result and skips TRM on a second call within TTL', async () => {
-    fetchFn.mockResolvedValueOnce(mockResponse(sanctionedPayload));
-    const screen = createScreener({
-      apiOrigin: API_ORIGIN
-    });
-    expect(await screen(ADDRESS)).toBe(true);
-    expect(await screen(ADDRESS)).toBe(true);
-    expect(fetchFn).toHaveBeenCalledOnce();
-  });
-
-  it('forceRefresh re-queries TRM even with a fresh cache entry', async () => {
+  it('queries TRM on every call so cache policy stays behind the API layer', async () => {
     fetchFn
       .mockResolvedValueOnce(mockResponse(cleanPayload))
       .mockResolvedValueOnce(mockResponse(sanctionedPayload));
@@ -145,21 +120,8 @@ describe('createScreener', () => {
     });
 
     expect(await screen(ADDRESS)).toBe(false);
-    expect(await screen(ADDRESS, { forceRefresh: true })).toBe(true);
-    expect(fetchFn).toHaveBeenCalledTimes(2);
-  });
-
-  it('treats cache entries older than TTL as stale', async () => {
-    fetchFn.mockResolvedValueOnce(mockResponse(sanctionedPayload));
-    const screen = createScreener({ apiOrigin: API_ORIGIN });
-
-    const stale = {
-      [LOWER]: { value: false, timestamp: Date.now() - 91 * 24 * 60 * 60 * 1000 }
-    };
-    globalThis.localStorage.setItem(CACHE_KEY, JSON.stringify(stale));
-
     expect(await screen(ADDRESS)).toBe(true);
-    expect(fetchFn).toHaveBeenCalledOnce();
+    expect(fetchFn).toHaveBeenCalledTimes(2);
   });
 
   it('returns false on TRM network error (fail-open)', async () => {
@@ -210,99 +172,10 @@ describe('createScreener', () => {
     expect(fetchFn).toHaveBeenCalledOnce();
   });
 
-  it('lowercases the address for cache keys and TRM payload', async () => {
-    fetchFn.mockResolvedValueOnce(mockResponse(sanctionedPayload));
-    const screen = createScreener({ apiOrigin: API_ORIGIN });
-    await screen(ADDRESS);
-    const cached = JSON.parse(globalThis.localStorage.getItem(CACHE_KEY) ?? '{}');
-    expect(cached).property(LOWER);
-    expect(cached).not.property(ADDRESS);
-  });
-
-  it('returns the TRM result when cache writes fail', async () => {
-    fetchFn.mockResolvedValueOnce(mockResponse(sanctionedPayload));
-    Object.defineProperty(globalThis, 'localStorage', {
-      configurable: true,
-      value: {
-        getItem: () => null,
-        setItem: () => {
-          throw new Error('QuotaExceeded');
-        }
-      } satisfies Pick<Storage, 'getItem' | 'setItem'>
-    });
-
-    const screen = createScreener({ apiOrigin: API_ORIGIN });
-    await expect(screen(ADDRESS)).resolves.toBe(true);
-  });
-
-  it('ignores malformed cache entries', async () => {
-    fetchFn.mockResolvedValueOnce(mockResponse(cleanPayload));
-    globalThis.localStorage.setItem(
-      CACHE_KEY,
-      JSON.stringify({
-        [LOWER]: { value: 'bad', timestamp: 'bad' }
-      })
-    );
-
-    const screen = createScreener({ apiOrigin: API_ORIGIN });
-    await expect(screen(ADDRESS)).resolves.toBe(false);
-    expect(fetchFn).toHaveBeenCalledOnce();
-  });
-
-  it('ignores localStorage.getItem errors', async () => {
-    fetchFn.mockResolvedValueOnce(mockResponse(cleanPayload));
-    Object.defineProperty(globalThis, 'localStorage', {
-      configurable: true,
-      value: {
-        getItem: () => {
-          throw new Error('unavailable');
-        },
-        setItem: vi.fn()
-      } satisfies Pick<Storage, 'getItem' | 'setItem'>
-    });
-
-    const screen = createScreener({ apiOrigin: API_ORIGIN });
-    await expect(screen(ADDRESS)).resolves.toBe(false);
-    expect(fetchFn).toHaveBeenCalledOnce();
-  });
-
-  it('returns false when localStorage is unavailable', async () => {
-    fetchFn.mockResolvedValueOnce(mockResponse(cleanPayload));
-    Object.defineProperty(globalThis, 'localStorage', {
-      configurable: true,
-      value: undefined
-    });
-
-    const screen = createScreener({ apiOrigin: API_ORIGIN });
-    await expect(screen(ADDRESS)).resolves.toBe(false);
-    expect(fetchFn).toHaveBeenCalledOnce();
-  });
-
   it('treats malformed TRM payloads as clean', async () => {
     fetchFn.mockResolvedValueOnce(mockResponse({ nope: true }));
     const screen = createScreener({ apiOrigin: API_ORIGIN });
     await expect(screen(ADDRESS)).resolves.toBe(false);
-  });
-
-  it('returns the prescreen result when cache writes fail', async () => {
-    Object.defineProperty(globalThis, 'localStorage', {
-      configurable: true,
-      value: {
-        getItem: () => null,
-        setItem: () => {
-          throw new Error('QuotaExceeded');
-        }
-      } satisfies Pick<Storage, 'getItem' | 'setItem'>
-    });
-
-    const prescreen = vi.fn().mockResolvedValue(true);
-    const screen = createScreener({
-      apiOrigin: API_ORIGIN,
-      prescreen
-    });
-
-    await expect(screen(ADDRESS)).resolves.toBe(true);
-    expect(fetchFn).not.toHaveBeenCalled();
   });
 
   it('fails open when fetch is unavailable', async () => {
@@ -376,19 +249,5 @@ describe('createScreener', () => {
       '[wallet-kit] Screening failed:',
       expect.any(Error)
     );
-  });
-
-  it('does not invoke onScreeningError on cache hits', async () => {
-    fetchFn.mockResolvedValueOnce(mockResponse(sanctionedPayload));
-    const onScreeningError = vi.fn();
-    const screen = createScreener({
-      apiOrigin: API_ORIGIN,
-      onScreeningError
-    });
-
-    await screen(ADDRESS);
-    await screen(ADDRESS);
-    expect(fetchFn).toHaveBeenCalledOnce();
-    expect(onScreeningError).not.toHaveBeenCalled();
   });
 });
