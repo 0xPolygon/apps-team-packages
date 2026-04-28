@@ -42,6 +42,31 @@ interface RegistryLike {
 /** Minimal structural type for the generated document. */
 interface GeneratedDocument {
   components?: { schemas?: Record<string, unknown> };
+  paths?: Record<string, GeneratedPath | undefined>;
+}
+
+/** A single path in the OpenAPI document — the methods we walk. */
+interface GeneratedPath {
+  get?: GeneratedOperation;
+  post?: GeneratedOperation;
+  put?: GeneratedOperation;
+  patch?: GeneratedOperation;
+  delete?: GeneratedOperation;
+  head?: GeneratedOperation;
+  options?: GeneratedOperation;
+  trace?: GeneratedOperation;
+}
+
+interface GeneratedOperation {
+  responses?: Record<string, GeneratedResponse | undefined>;
+}
+
+interface GeneratedResponse {
+  content?: Record<string, GeneratedMediaType | undefined>;
+}
+
+interface GeneratedMediaType {
+  schema?: { $ref?: string } & Record<string, unknown>;
 }
 
 /** Minimal structural type for the generator class. */
@@ -137,33 +162,44 @@ export async function registryPlugin({
   });
   const registrySchemaNames = new Set(Object.keys(doc.components?.schemas ?? {}));
 
-  // Codegen-time audit: dynamic-import schemasFrom and verify every registered
-  // schema is exported under the same name. Throws a single aggregated error
-  // listing all mismatches so the user can fix them in one pass instead of one
-  // round-trip per typo.
+  // The plugin only emits `import { <Name> } from '<schemasFrom>'` for schemas
+  // that appear as a `$ref` in a route response. Building blocks, request
+  // bodies, and registered path/query parameters surface in
+  // `components.schemas` without ever being referenced by a generated
+  // transformer — auditing them was an over-approximation that demanded
+  // matching exports for names like `network` (path param) or `LoginRequest`
+  // (request body) that the generated client never imports. zod-to-openapi
+  // v8's OpenApiGeneratorV3 lifts parameter schemas into components.schemas
+  // alongside `components.parameters`, so this trips up any route that uses
+  // `registerParameter`.
+  //
+  // Audit only against the actually-emitted import set: the schemas the
+  // plugin's handler will reach via `ensureSchemaImport`. That set is
+  // precisely the response-`$ref` schemas, intersected with the registered
+  // ones (a `$ref` to an unregistered schema is a malformed spec).
+  const auditableSchemaNames = new Set<string>();
+  for (const name of collectResponseRefSchemaNames(doc)) {
+    if (registrySchemaNames.has(name)) auditableSchemaNames.add(name);
+  }
+
+  // Codegen-time audit: dynamic-import schemasFrom and verify every
+  // response-referenced schema is exported under the same name. Throws a
+  // single aggregated error listing all mismatches so the user can fix them
+  // in one pass instead of one round-trip per typo.
   let schemasModule: Record<string, unknown>;
   try {
     schemasModule = (await import(schemasFrom)) as Record<string, unknown>;
   } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
-    throw new Error(
-      `[zod-to-openapi-heyapi] Could not import schemasFrom='${schemasFrom}'. ` +
-        `Cause: ${detail}\n\n` +
-        `schemasFrom must be a specifier that resolves from the plugin's perspective at codegen time — ` +
-        `a package specifier (\`@org/pkg\`), a package.json imports alias (\`#schemas\`), or a file:// URL. ` +
-        `Relative paths like '../schemas' don't work because they mean different things to the plugin vs. the generated client. ` +
-        `Use an imports alias for local schemas: add \`"imports": { "#schemas": "./src/schemas/index.ts" }\` to your package.json ` +
-        `and pass \`schemasFrom: '#schemas'\`.`
-    );
+    throw new Error(buildSchemasFromImportError(schemasFrom, err));
   }
 
   const errors: string[] = [];
-  for (const name of registrySchemaNames) {
+  for (const name of auditableSchemaNames) {
     if (!(name in schemasModule)) {
       errors.push(
-        `'${name}' is registered in the OpenAPIRegistry but is not a named export of '${schemasFrom}'. ` +
+        `'${name}' is referenced as a response schema but is not a named export of '${schemasFrom}'. ` +
           `The plugin emits \`import { ${name} } from '${schemasFrom}'\`, which will fail at consumer build time. ` +
-          `Either export ${name} from that module, or unregister it.`
+          `Either export ${name} from that module under that exact name, or unregister it.`
       );
       continue;
     }
@@ -376,6 +412,92 @@ function uniqueSchemaNames(entries: StatusEntry[]): string[] {
 }
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
+
+const HTTP_METHODS = [
+  'get',
+  'post',
+  'put',
+  'patch',
+  'delete',
+  'head',
+  'options',
+  'trace'
+] as const satisfies ReadonlyArray<keyof GeneratedPath>;
+
+/**
+ * Walk the generated document's `paths` and collect every schema name
+ * referenced via `$ref` from a route response's media-type schema.
+ *
+ * This is the authoritative set of schemas the plugin will emit
+ * `import { Name } from '<schemasFrom>'` for. Schemas that only appear in
+ * `components.schemas` because of a request body or a registered path /
+ * query parameter never reach the generated client and are deliberately
+ * excluded.
+ */
+function collectResponseRefSchemaNames(doc: GeneratedDocument): Set<string> {
+  const names = new Set<string>();
+  const paths = doc.paths ?? {};
+  for (const path of Object.values(paths)) {
+    if (!path) continue;
+    for (const method of HTTP_METHODS) {
+      const op = path[method];
+      if (!op) continue;
+      const responses = op.responses ?? {};
+      for (const response of Object.values(responses)) {
+        const content = response?.content ?? {};
+        for (const mediaType of Object.values(content)) {
+          const ref = mediaType?.schema?.$ref;
+          if (typeof ref !== 'string') continue;
+          const name = ref.split('/').pop();
+          if (name) names.add(name);
+        }
+      }
+    }
+  }
+  return names;
+}
+
+/**
+ * Compose the error thrown when `await import(schemasFrom)` fails. The cause
+ * is almost always one of:
+ *
+ * 1. The schemas package isn't installed (specifier wrong).
+ * 2. The package is installed but the runtime entrypoint resolves to a
+ *    `dist/` that hasn't been built — common in monorepos that use a
+ *    custom export condition for build-free dev (e.g. `@polygonlabs/source`).
+ *    Run `node` with that condition active or build the schemas package
+ *    before regenerating.
+ * 3. The user passed a relative path like `'../schemas'` — these don't
+ *    work because the plugin's resolution origin (its install location in
+ *    `node_modules`) differs from the generated client's.
+ */
+function buildSchemasFromImportError(schemasFrom: string, err: unknown): string {
+  const detail = err instanceof Error ? err.message : String(err);
+  const isModuleNotFound =
+    err instanceof Error &&
+    'code' in err &&
+    (err as { code?: unknown }).code === 'ERR_MODULE_NOT_FOUND';
+
+  let hint =
+    `\`schemasFrom\` must be a specifier that resolves from the plugin's perspective at codegen time — ` +
+    `a package specifier (\`@org/pkg\`, \`@org/pkg/zod\`), a package.json imports alias (\`#schemas\`) ` +
+    `for schemas living inside this same package, or a \`file://\` URL. ` +
+    `Relative paths like \`'../schemas'\` don't work because they mean different things to the plugin ` +
+    `and the generated client.`;
+
+  if (isModuleNotFound) {
+    hint +=
+      `\n\nERR_MODULE_NOT_FOUND usually means one of:\n` +
+      `  • The schemas package isn't installed in the consumer's \`node_modules\`.\n` +
+      `  • The package is installed, but its runtime entrypoint resolves to a \`dist/\` ` +
+      `that hasn't been built yet. If you're using a custom export condition for build-free ` +
+      `dev (e.g. \`@polygonlabs/source\`), either run \`node --conditions=<your-condition>\` ` +
+      `before \`openapi-ts\`, or build the schemas package first.\n` +
+      `  • You passed a relative path. Use a package specifier or a \`#imports\` alias instead.`;
+  }
+
+  return `[zod-to-openapi-heyapi] Could not import schemasFrom='${schemasFrom}'. Cause: ${detail}\n\n${hint}`;
+}
 
 /**
  * Duck-type check for Zod schemas. Avoids an `instanceof ZodType` dependency

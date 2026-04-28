@@ -232,9 +232,6 @@ importers:
       '@asteasolutions/zod-to-openapi':
         specifier: ^8.5.0
         version: 8.5.0(zod@4.3.6)
-      '@hey-api/client-fetch':
-        specifier: ^0.13.0
-        version: 0.13.1(@hey-api/openapi-ts@0.95.0(typescript@5.9.3))
       '@hey-api/openapi-ts':
         specifier: ^0.95.0
         version: 0.95.0(typescript@5.9.3)
@@ -634,12 +631,6 @@ packages:
     resolution: {integrity: sha512-K4wyxfUZx2ux5o+b6BtTqouYFVILohLZmSbA2tKUueJstNcBnoGPVhllCaOvbQ3ZrXdUxUC/fyrSWSCqHhdOPg==}
     peerDependencies:
       '@opentelemetry/api': ^1.9.0
-
-  '@hey-api/client-fetch@0.13.1':
-    resolution: {integrity: sha512-29jBRYNdxVGlx5oewFgOrkulZckpIpBIRHth3uHFn1PrL2ucMy52FvWOY3U3dVx2go1Z3kUmMi6lr07iOpUqqA==}
-    deprecated: Starting with v0.73.0, this package is bundled directly inside @hey-api/openapi-ts.
-    peerDependencies:
-      '@hey-api/openapi-ts': < 2
 
   '@hey-api/codegen-core@0.7.4':
     resolution: {integrity: sha512-DGd9yeSQzflOWO3Y5mt1GRXkXH9O/yIMgbxPjwLI3jwu/3nAjoXXD26lEeFb6tclYlg0JAqTIs5d930G/qxHeA==}
@@ -3898,10 +3889,6 @@ snapshots:
       minimatch: 10.2.4
     transitivePeerDependencies:
       - supports-color
-
-  '@hey-api/client-fetch@0.13.1(@hey-api/openapi-ts@0.95.0(typescript@5.9.3))':
-    dependencies:
-      '@hey-api/openapi-ts': 0.95.0(typescript@5.9.3)
 
   '@hey-api/codegen-core@0.7.4':
     dependencies:

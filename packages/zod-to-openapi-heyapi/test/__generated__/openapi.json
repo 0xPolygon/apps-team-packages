@@ -787,9 +787,23 @@
           "id",
           "createdAt"
         ]
+      },
+      "itemId": {
+        "type": "string",
+        "description": "Item identifier"
       }
     },
-    "parameters": {}
+    "parameters": {
+      "itemId": {
+        "schema": {
+          "$ref": "#/components/schemas/itemId"
+        },
+        "required": true,
+        "description": "Item identifier",
+        "name": "itemId",
+        "in": "path"
+      }
+    }
   },
   "paths": {
     "/fixtures/getScalarString": {
@@ -1430,6 +1444,28 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ServerError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/fixtures/items/{itemId}": {
+      "get": {
+        "operationId": "getItemWithRegisteredParam",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/itemId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScalarString"
                 }
               }
             }
