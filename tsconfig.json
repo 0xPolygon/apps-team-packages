@@ -8,6 +8,7 @@
     { "path": "packages/apps-team-lint" },
     { "path": "packages/express" },
     { "path": "packages/logger" },
-    { "path": "packages/verror" }
+    { "path": "packages/verror" },
+    { "path": "packages/zod-codecs" }
   ]
 }
