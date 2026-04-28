@@ -76,14 +76,14 @@ describe('createScreener', () => {
     expect(await screen(ADDRESS)).toBe(true);
     expect(fetchFn).toHaveBeenCalledOnce();
     const [url, init] = fetchFn.mock.calls[0];
-    expect(url).to.equal(`${API_ORIGIN}/screen-addresses`);
-    expect(init).to.include({ method: 'POST' });
-    expect(init.headers).to.deep.equal({
+    expect(url).equal(`${API_ORIGIN}/screen-addresses`);
+    expect(init).include({ method: 'POST' });
+    expect(init.headers).deep.equal({
       'content-type': 'application/json',
       'x-api-key': 'test-key'
     });
     const body = JSON.parse(init.body);
-    expect(body[0]).to.deep.equal({
+    expect(body[0]).deep.equal({
       address: LOWER,
       chain: 'ethereum',
       accountExternalId: null,
@@ -116,7 +116,7 @@ describe('createScreener', () => {
     fetchFn.mockResolvedValueOnce(mockResponse(cleanPayload));
     const screen = createScreener({});
     await screen(ADDRESS);
-    expect(fetchFn.mock.calls[0][0]).to.equal(
+    expect(fetchFn.mock.calls[0][0]).equal(
       'https://api-gateway.polygon.technology/screen-addresses'
     );
   });
@@ -210,8 +210,8 @@ describe('createScreener', () => {
     const screen = createScreener({ apiOrigin: API_ORIGIN });
     await screen(ADDRESS);
     const cached = JSON.parse(globalThis.localStorage.getItem(CACHE_KEY) ?? '{}');
-    expect(cached).to.have.property(LOWER);
-    expect(cached).not.to.have.property(ADDRESS);
+    expect(cached).property(LOWER);
+    expect(cached).not.property(ADDRESS);
   });
 
   it('returns the TRM result when cache writes fail', async () => {
