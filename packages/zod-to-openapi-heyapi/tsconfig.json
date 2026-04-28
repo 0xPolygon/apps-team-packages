@@ -1,0 +1,12 @@
+{
+  "extends": ["@tsconfig/node24", "@tsconfig/node-ts"],
+  "compilerOptions": {
+    "noEmit": true,
+    "customConditions": ["@polygonlabs/source"],
+    "noUncheckedSideEffectImports": true,
+    // hey-api's generated client.gen.ts references DOM-side fetch globals
+    // (BodyInit, RequestInit) — base lib stops at ES2024, add DOM.
+    "lib": ["es2024", "DOM"]
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts", "vitest.config.ts"]
+}

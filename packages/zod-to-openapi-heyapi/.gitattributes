@@ -1,0 +1,5 @@
+# Test snapshot — emitted by `pnpm run codegen`. Marked linguist-generated so
+# GitHub collapses it in PR diff views and excludes it from language stats.
+# Refresh with `pnpm --filter @polygonlabs/zod-to-openapi-heyapi run codegen`
+# whenever fixtures, the plugin source, or the hey-api dep version changes.
+test/__generated__/** linguist-generated=true
