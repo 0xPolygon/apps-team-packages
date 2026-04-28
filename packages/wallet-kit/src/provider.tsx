@@ -114,7 +114,7 @@ const WalletKitInner = ({
 
   const screener = useMemo<Screener>(() => {
     if (!screening) return async () => false;
-    return createScreener({ ...screening, onScreeningError });
+    return createScreener(screening, onScreeningError);
   }, [screening, onScreeningError]);
 
   const walletProvider = useResolvedProvider(connector, onProviderError);

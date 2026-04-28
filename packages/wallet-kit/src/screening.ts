@@ -17,24 +17,21 @@ export interface ScreeningConfig {
   apiKey?: string;
   enabled?: boolean;
   prescreen?: (address: Hex) => Promise<boolean>;
-  /**
-   * Notified for prescreen and TRM failures. The screener still falls back
-   * to TRM (prescreen) or fails open (TRM) — this callback is purely for
-   * observability. Defaults to `console.error` so failures aren't swallowed
-   * silently when no callback is provided.
-   */
-  onScreeningError?: (event: ScreeningErrorEvent) => void;
 }
 
 export type Screener = (address: Hex) => Promise<boolean>;
 
-const defaultOnScreeningError = (event: ScreeningErrorEvent): void => {
+export type OnScreeningError = (event: ScreeningErrorEvent) => void;
+
+const defaultOnScreeningError: OnScreeningError = (event) => {
   console.error('[wallet-kit] Screening failed:', event.error);
 };
 
-export const createScreener = (config: ScreeningConfig): Screener => {
+export const createScreener = (
+  config: ScreeningConfig,
+  onScreeningError: OnScreeningError = defaultOnScreeningError
+): Screener => {
   const enabled = config.enabled ?? true;
-  const onScreeningError = config.onScreeningError ?? defaultOnScreeningError;
 
   return async (address) => {
     if (!enabled) return false;

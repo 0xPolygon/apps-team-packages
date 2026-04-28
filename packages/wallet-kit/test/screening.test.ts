@@ -192,11 +192,7 @@ describe('createScreener', () => {
     fetchFn.mockResolvedValueOnce(mockResponse(cleanPayload));
     const onScreeningError = vi.fn();
     const prescreen = vi.fn().mockRejectedValue(new Error('firestore unreachable'));
-    const screen = createScreener({
-      apiOrigin: API_ORIGIN,
-      prescreen,
-      onScreeningError
-    });
+    const screen = createScreener({ apiOrigin: API_ORIGIN, prescreen }, onScreeningError);
 
     await expect(screen(ADDRESS)).resolves.toBe(false);
     expect(onScreeningError).toHaveBeenCalledOnce();
@@ -211,10 +207,7 @@ describe('createScreener', () => {
   it('reports TRM rejection via onScreeningError and fails open', async () => {
     fetchFn.mockRejectedValueOnce(new Error('network'));
     const onScreeningError = vi.fn();
-    const screen = createScreener({
-      apiOrigin: API_ORIGIN,
-      onScreeningError
-    });
+    const screen = createScreener({ apiOrigin: API_ORIGIN }, onScreeningError);
 
     await expect(screen(ADDRESS)).resolves.toBe(false);
     expect(onScreeningError).toHaveBeenCalledOnce();
@@ -228,10 +221,7 @@ describe('createScreener', () => {
   it('reports TRM non-2xx status via onScreeningError', async () => {
     fetchFn.mockResolvedValueOnce(mockResponse({}, { ok: false }));
     const onScreeningError = vi.fn();
-    const screen = createScreener({
-      apiOrigin: API_ORIGIN,
-      onScreeningError
-    });
+    const screen = createScreener({ apiOrigin: API_ORIGIN }, onScreeningError);
 
     await expect(screen(ADDRESS)).resolves.toBe(false);
     expect(onScreeningError).toHaveBeenCalledWith({
