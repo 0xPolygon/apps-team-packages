@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "composite": true,
+    "noEmit": false,
+    "outDir": "dist",
+    "rootDir": "src",
+    "sourceMap": true,
+    "declaration": true,
+    "declarationMap": true,
+    // Library consumed by bundlers (Vite, Next.js, Turbopack) — override
+    // the node24 application defaults so the emitted JS is bundler-friendly.
+    // JSX + DOM lib are inherited from tsconfig.json.
+    "module": "preserve",
+    "moduleResolution": "bundler"
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx"]
+}
