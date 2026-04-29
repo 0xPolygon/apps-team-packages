@@ -1,5 +1,5 @@
 ---
-'@polygonlabs/wallet-kit': minor
+'@polygonlabs/wallet-kit': major
 ---
 
 Initial release of `@polygonlabs/wallet-kit`: shared React wallet integration for Polygon Apps Team frontends.
