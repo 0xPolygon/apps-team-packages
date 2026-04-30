@@ -18,12 +18,14 @@ published to npm under the `@polygonlabs` scope.
 
 ## Adding a New Package
 
-After scaffolding the package under `packages/`, two root files must be updated:
+After scaffolding the package under `packages/`, three root files must be updated:
 
 - **`tsconfig.json`** — add a `references` entry pointing to the new package directory
 - **`packages/<name>/eslint.config.js`** — pass `tsconfigRootDir: import.meta.dirname` to
   `typescript()` so `typescript-eslint` can resolve the correct tsconfig when ESLint runs
   from the repo root rather than the package directory
+- **`README.md`** — add a row to the Packages table (kept alphabetised by package name)
+  with the npm version badge and a row blurb in the same register as its neighbours
 
 ## `exports` shape in this repo
 
