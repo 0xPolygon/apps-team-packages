@@ -1,6 +1,6 @@
 {
   "name": "@polygonlabs/express",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "Shared Express middleware for Polygon Apps Team services: per-request child logger, global error handler with ethers fetch-error sanitisation, and a uniform 404 handler.",
   "type": "module",
   "repository": {
@@ -68,7 +68,7 @@
   "peerDependencies": {
     "@asteasolutions/zod-to-openapi": "^8.0.0",
     "@polygonlabs/logger": "^2.1.0",
-    "@polygonlabs/openapi-registry": "^1.0.0",
+    "@polygonlabs/openapi-registry": "^1.0.1",
     "@polygonlabs/verror": "^1.0.3",
     "express": ">=5",
     "zod": "^4.0.0"
