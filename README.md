@@ -48,7 +48,10 @@ pnpm --filter <package-name> run <script>
 3. Pass `tsconfigRootDir: import.meta.dirname` to `typescript()` in the package's
    `eslint.config.js` — without this, `typescript-eslint` cannot resolve the correct
    tsconfig when ESLint runs from the repo root
-4. Run `pnpm install` from the repo root to wire up the workspace
+4. Add a row to the [Packages](#packages) table above (kept alphabetised by package
+   name) with the npm version badge and a row blurb in the same register as its
+   neighbours
+5. Run `pnpm install` from the repo root to wire up the workspace
 
 ## Releases
 
