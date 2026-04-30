@@ -1,6 +1,6 @@
 {
   "name": "@polygonlabs/express",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Shared Express middleware for Polygon Apps Team services: per-request child logger, global error handler with ethers fetch-error sanitisation, and a uniform 404 handler.",
   "type": "module",
   "repository": {
