@@ -87,8 +87,11 @@ Per release, one line:
 | `[match] <tag>` | Current body and title already byte-match the canonical extraction; nothing to do. |
 | `[would-update] <tag>` | Dry-run; body or title would change. Followed by a diff of current vs. proposed. |
 | `[updated] <tag>` | `--apply` mode; body was rewritten. |
+| `[would-create] <tag>` | Dry-run; no GitHub release exists for this tag yet but the underlying git tag does. Followed by the proposed body. (`release` subcommand only.) |
+| `[created] <tag>` | `--apply` mode; a new GitHub release was created from `CHANGELOG.md`. (`release` subcommand only.) |
 | `[skip: no changelog match] <tag>` | Either no package matches the tag's `<name>@<version>` parse, or the package's `CHANGELOG.md` has no `## <version>` section. Skipped to avoid clobbering a real body with empty notes. |
 | `[skip: tag unparseable] <tag>` | Tag is not in `<name>@<version>` or `@scope/name@version` form (e.g. `v1.0.0`). |
+| `[error] tag '<tag>' not found … and no matching git tag` | `release` subcommand only. The tag has no GitHub release and no underlying git tag — likely a typo. |
 
 A per-repo summary is printed at the end.
 

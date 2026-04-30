@@ -60,19 +60,23 @@ interface CliOptions {
   tag?: string;
 }
 
-interface PendingUpdate {
-  owner: string;
-  repoName: string;
-  releaseId: number;
-  tag: string;
-  proposedBody: string;
-}
+type PendingAction =
+  | {
+      kind: 'update';
+      owner: string;
+      repoName: string;
+      releaseId: number;
+      tag: string;
+      proposedBody: string;
+    }
+  | { kind: 'create'; owner: string; repoName: string; tag: string; proposedBody: string };
 
 interface RepoSummary {
   repo: string;
   inspected: number;
   pending: number;
   updated: number;
+  created: number;
   errors: number;
   skippedNoMatch: number;
   skippedUnparseable: number;
@@ -273,7 +277,7 @@ const processRepo = async (
   repo: string,
   octokit: Octokit,
   token: string,
-  pending: PendingUpdate[],
+  pending: PendingAction[],
   showDiff: boolean,
   tagFilter?: string
 ): Promise<RepoSummary> => {
@@ -285,6 +289,7 @@ const processRepo = async (
     inspected: 0,
     pending: 0,
     updated: 0,
+    created: 0,
     errors: 0,
     skippedNoMatch: 0,
     skippedUnparseable: 0,
@@ -310,10 +315,59 @@ const processRepo = async (
   if (tagFilter !== undefined) {
     releases = allReleases.filter((r) => r.tag_name === tagFilter);
     if (releases.length === 0) {
-      log(
-        `  [error] tag '${tagFilter}' not found among ${allReleases.length} release(s) in ${repo}`
-      );
-      summary.errors++;
+      // No GitHub release exists for this tag. If the underlying git tag
+      // exists (most common after `pnpm exec changeset publish` followed by
+      // `git push --follow-tags`, where the npm publish lands but no GitHub
+      // release was ever created), build the body from CHANGELOG.md and
+      // propose a `[would-create]`. Otherwise it's a genuine error.
+      let gitTagExists = false;
+      try {
+        await octokit.git.getRef({ owner, repo: name, ref: `tags/${tagFilter}` });
+        gitTagExists = true;
+      } catch {
+        // 404 — not a git tag either
+      }
+      if (!gitTagExists) {
+        log(
+          `  [error] tag '${tagFilter}' not found among ${allReleases.length} release(s) and no matching git tag in ${repo}`
+        );
+        summary.errors++;
+        return summary;
+      }
+
+      summary.inspected++;
+      const parsed = splitTag(tagFilter);
+      if (!parsed) {
+        log(`  [skip: tag unparseable] ${tagFilter}`);
+        summary.skippedUnparseable++;
+        return summary;
+      }
+      const { name: pkgName, version } = parsed;
+      const changelogPath = changelogMap.get(pkgName);
+      if (!changelogPath) {
+        log(
+          `  [skip: no changelog match] ${tagFilter} (no package '${pkgName}' with CHANGELOG.md)`
+        );
+        summary.skippedNoMatch++;
+        return summary;
+      }
+      const changelogText = readFileSync(changelogPath, 'utf8');
+      const proposedBody = extractChangelogEntry(changelogText, version);
+      if (!proposedBody) {
+        log(
+          `  [skip: no changelog match] ${tagFilter} (no '## ${version}' section in ${relative(repoRoot, changelogPath)})`
+        );
+        summary.skippedNoMatch++;
+        return summary;
+      }
+
+      log(`  [would-create] ${tagFilter}`);
+      if (showDiff) {
+        console.log('  +++ proposed (new release)');
+        for (const line of proposedBody.split('\n')) console.log(`  + ${line}`);
+      }
+      pending.push({ kind: 'create', owner, repoName: name, tag: tagFilter, proposedBody });
+      summary.pending++;
       return summary;
     }
   }
@@ -357,7 +411,14 @@ const processRepo = async (
 
     log(`  [would-update] ${tag}`);
     if (showDiff) printDiff(currentBody, proposedBody);
-    pending.push({ owner, repoName: name, releaseId: release.id, tag, proposedBody });
+    pending.push({
+      kind: 'update',
+      owner,
+      repoName: name,
+      releaseId: release.id,
+      tag,
+      proposedBody
+    });
     summary.pending++;
   }
 
@@ -372,7 +433,7 @@ const processRepo = async (
  */
 const applyUpdates = async (
   octokit: Octokit,
-  pending: PendingUpdate[],
+  pending: PendingAction[],
   summaries: RepoSummary[]
 ): Promise<void> => {
   log('\n=== Applying ===');
@@ -380,17 +441,32 @@ const applyUpdates = async (
     const repoKey = `${u.owner}/${u.repoName}`;
     const s = summaries.find((x) => x.repo === repoKey);
     try {
-      await octokit.repos.updateRelease({
-        owner: u.owner,
-        repo: u.repoName,
-        release_id: u.releaseId,
-        name: u.tag,
-        body: u.proposedBody
-      });
-      log(`  [updated] ${repoKey} ${u.tag}`);
-      if (s) {
-        s.updated++;
-        s.pending--;
+      if (u.kind === 'update') {
+        await octokit.repos.updateRelease({
+          owner: u.owner,
+          repo: u.repoName,
+          release_id: u.releaseId,
+          name: u.tag,
+          body: u.proposedBody
+        });
+        log(`  [updated] ${repoKey} ${u.tag}`);
+        if (s) {
+          s.updated++;
+          s.pending--;
+        }
+      } else {
+        await octokit.repos.createRelease({
+          owner: u.owner,
+          repo: u.repoName,
+          tag_name: u.tag,
+          name: u.tag,
+          body: u.proposedBody
+        });
+        log(`  [created] ${repoKey} ${u.tag}`);
+        if (s) {
+          s.created++;
+          s.pending--;
+        }
       }
     } catch (err) {
       log(`  [error]   ${repoKey} ${u.tag}: ${err instanceof Error ? err.message : err}`);
@@ -406,7 +482,7 @@ const printSummary = (summaries: RepoSummary[]): void => {
   log('\n=== Summary ===');
   for (const s of summaries) {
     log(
-      `${s.repo}: inspected=${s.inspected} match=${s.alreadyMatch} pending=${s.pending} updated=${s.updated} errors=${s.errors} skip-no-match=${s.skippedNoMatch} skip-unparseable=${s.skippedUnparseable}`
+      `${s.repo}: inspected=${s.inspected} match=${s.alreadyMatch} pending=${s.pending} updated=${s.updated} created=${s.created} errors=${s.errors} skip-no-match=${s.skippedNoMatch} skip-unparseable=${s.skippedUnparseable}`
     );
   }
 };
@@ -463,7 +539,7 @@ const run_ = async ({
   log(`Targets: ${repos.join(', ')}`);
 
   const summaries: RepoSummary[] = [];
-  const pending: PendingUpdate[] = [];
+  const pending: PendingAction[] = [];
   for (const repo of repos) {
     try {
       summaries.push(await processRepo(repo, octokit, token, pending, !summaryOnly, tag));
