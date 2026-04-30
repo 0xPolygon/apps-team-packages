@@ -223,7 +223,7 @@ export const ReadonlyArrayField = z.object({
 });
 
 // z.brand() — branded primitive
-export const BrandedId = z.string().brand<'UserId'>();
+const BrandedId = z.string().brand<'UserId'>();
 export const BrandedField = z.object({
   userId: BrandedId
 });

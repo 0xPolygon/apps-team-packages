@@ -354,18 +354,6 @@ fixtureRegistry.registerPath({
   }
 });
 
-export const fixtureOperationIds = [
-  ...routeSpecs.map((r) => r.operationId),
-  'createOrFetchResource',
-  'getErrorsOnly',
-  'getItemWithRegisteredParam',
-  'lookupBlock',
-  'listRecentEvents',
-  'createOrder',
-  'updateOrder',
-  'submitForReview'
-];
-
 /** Generate the OpenAPI document for the registry. */
 export function generateFixtureSpec(): object {
   return new OpenApiGeneratorV3(fixtureRegistry.definitions).generateDocument({

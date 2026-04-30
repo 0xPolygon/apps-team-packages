@@ -29,7 +29,7 @@ import { OpenApiGeneratorV3, fixtureRegistry, generateFixtureSpec } from './fixt
 
 const here = dirname(fileURLToPath(import.meta.url));
 export const generatedDir = resolve(here, '__generated__');
-export const generatedSpecFile = resolve(generatedDir, 'openapi.json');
+const generatedSpecFile = resolve(generatedDir, 'openapi.json');
 
 export async function setup(): Promise<void> {
   rmSync(generatedDir, { recursive: true, force: true });
