@@ -94,9 +94,9 @@ const capture = (cmd: string, args: string[], cwd?: string): string =>
     cwd
   });
 
-// Pre-flight check that a required external binary is on PATH. The two
-// shell-outs (`gh repo clone`, `git fetch && git reset`) raise an opaque
-// `spawnSync ENOENT` deep inside processRepo otherwise; catch it up front
+// Pre-flight check that a required external binary is on PATH. The
+// shell-outs (`git clone`, `git fetch`, `pnpm m ls`) would otherwise raise
+// an opaque `spawnSync ENOENT` deep inside processRepo; catch it up front
 // so the user gets a clear message and an install hint.
 const requireBinary = (name: string, installHint: string): void => {
   try {
@@ -114,23 +114,47 @@ const requireBinary = (name: string, installHint: string): void => {
 const CLONES_DIR = join(tmpdir(), 'sync-github-releases', 'repos');
 
 /**
+ * Pass `GH_TOKEN` to `git` via an HTTPS Authorization header so private
+ * repos clone without `gh auth` set up. The header is set per-invocation
+ * via `-c http.<base>.extraheader` rather than written into `.git/config`,
+ * so the token never persists on disk.
+ *
+ * For consumers with `url.git@github.com:.insteadof=https://github.com/`
+ * in their git config, the HTTPS URL we pass transparently rewrites to
+ * SSH and SSH key auth handles it — the extraheader is HTTP-only config
+ * and is silently ignored. Both setups work without per-environment branching.
+ */
+const githubAuthArgs = (token: string): string[] => [
+  '-c',
+  `http.https://github.com/.extraheader=AUTHORIZATION: bearer ${token}`
+];
+
+/**
  * Idempotently produce a fresh shallow checkout for a repo. Reuses an
  * existing clone when present — re-runs do `git fetch && git reset` against
  * the default branch instead of re-cloning.
  */
-const ensureClone = (repo: string, defaultBranch: string): string => {
+const ensureClone = (repo: string, defaultBranch: string, token: string): string => {
   const [owner, name] = repo.split('/');
   if (!owner || !name) throw new Error(`Invalid --repo value: '${repo}' (expected owner/name)`);
   const path = join(CLONES_DIR, `${owner}-${name}`);
+  const url = `https://github.com/${owner}/${name}.git`;
 
   if (!existsSync(path)) {
     log(`[${repo}] cloning into ${path}`);
-    run('gh', ['repo', 'clone', repo, path, '--', '--depth=1', `--branch=${defaultBranch}`]);
+    run('git', [
+      ...githubAuthArgs(token),
+      'clone',
+      '--depth=1',
+      `--branch=${defaultBranch}`,
+      url,
+      path
+    ]);
     return path;
   }
 
   log(`[${repo}] refreshing existing clone at ${path}`);
-  run('git', ['fetch', '--depth=1', 'origin', defaultBranch], path);
+  run('git', [...githubAuthArgs(token), 'fetch', '--depth=1', 'origin', defaultBranch], path);
   run('git', ['reset', '--hard', `origin/${defaultBranch}`], path);
   return path;
 };
@@ -248,6 +272,7 @@ const printDiff = (current: string, proposed: string): void => {
 const processRepo = async (
   repo: string,
   octokit: Octokit,
+  token: string,
   pending: PendingUpdate[],
   showDiff: boolean,
   tagFilter?: string
@@ -270,7 +295,7 @@ const processRepo = async (
 
   const { data: repoData } = await octokit.repos.get({ owner, repo: name });
   const defaultBranch = repoData.default_branch;
-  const repoRoot = ensureClone(repo, defaultBranch);
+  const repoRoot = ensureClone(repo, defaultBranch, token);
 
   const changelogMap = buildPackageChangelogMap(repoRoot);
   log(`[${repo}] discovered ${changelogMap.size} package(s) with CHANGELOG.md`);
@@ -406,7 +431,6 @@ const run_ = async ({
     process.exit(1);
   }
 
-  requireBinary('gh', '  brew install gh    # or see https://cli.github.com/');
   requireBinary('git', '  brew install git   # or see https://git-scm.com/');
   requireBinary(
     'pnpm',
@@ -442,7 +466,7 @@ const run_ = async ({
   const pending: PendingUpdate[] = [];
   for (const repo of repos) {
     try {
-      summaries.push(await processRepo(repo, octokit, pending, !summaryOnly, tag));
+      summaries.push(await processRepo(repo, octokit, token, pending, !summaryOnly, tag));
     } catch (err) {
       console.error(`\nERROR processing ${repo}:`, err instanceof Error ? err.message : err);
     }
