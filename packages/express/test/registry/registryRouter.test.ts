@@ -8,7 +8,11 @@
  * casts.
  */
 
+import type { RouteConfig } from '@asteasolutions/zod-to-openapi';
+
 import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi';
+import express from 'express';
+import supertest from 'supertest';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
@@ -75,5 +79,58 @@ describe('createRegistryRouter', () => {
       }
     });
     expect(() => (router.toExpress as () => unknown)()).toThrow(/array-form request\.headers/);
+  });
+
+  // Defends against the regression that fell out of asteasolutions's `Method`
+  // union covering more verbs (`head`, `options`, `trace`) than the
+  // mounting switch knew about. Before the fix the switch had no
+  // matching case for these and no `default`, so the route silently
+  // mounted nothing and returned 404 at request time. We register one
+  // route per verb that the union supports and verify each is actually
+  // reachable — supertest's verb methods cover all eight.
+  it('mounts every method in asteasolutions Method union', async () => {
+    const verbs = ['get', 'post', 'put', 'patch', 'delete', 'head', 'options', 'trace'] as const;
+
+    const registry: TypedRegistry = new TypedRegistry();
+    const handlers: Record<
+      string,
+      (_req: unknown, res: { json: (b: unknown) => unknown }) => void
+    > = {};
+    for (const verb of verbs) {
+      const opId = `${verb}Hello`;
+      registry.registerPath({
+        operationId: opId,
+        // The cast aligns the literal type with `RouteConfig['method']` —
+        // `verbs` is a tuple of literals; without it TS widens to `string`.
+        method: verb as RouteConfig['method'],
+        path: `/${verb}`,
+        responses: okResponse
+      });
+      handlers[opId] = (_req, res) => {
+        res.json({ message: verb });
+      };
+    }
+
+    const router = createRegistryRouter({ registry });
+    // The cast bypasses the type-level handler-map narrowing; the runtime
+    // bag covers every operationId so `.toExpress()` mounts cleanly.
+    const expressRouter = (router.implement as (h: unknown) => { toExpress: () => express.Router })(
+      handlers
+    ).toExpress();
+
+    const app = express();
+    app.use(express.json());
+    app.use(expressRouter);
+
+    for (const verb of verbs) {
+      const r = await supertest(app)[verb](`/${verb}`);
+      // HEAD must not return a body (Node strips it); the others should
+      // round-trip the verb name through the handler. A 404 here means
+      // the switch silently dropped the route.
+      expect(r.status, `${verb} /${verb} should not 404`).not.toBe(404);
+      if (verb !== 'head') {
+        expect(r.body).toEqual({ message: verb });
+      }
+    }
   });
 });

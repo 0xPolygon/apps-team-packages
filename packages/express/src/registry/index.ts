@@ -234,6 +234,13 @@ export class RegistryRouter<
         handler as unknown as RequestHandler
       );
 
+      // The cases must cover every member of asteasolutions's `Method` union
+      // (`get` | `post` | `put` | `delete` | `patch` | `head` | `options` |
+      // `trace`). The `default` branch is an exhaustiveness gate: if the
+      // upstream union grows, the `_exhaustive: never` assignment fails to
+      // compile and the runtime throw fires defence-in-depth. Without it,
+      // an unhandled method would silently mount nothing and the route
+      // would 404 at request time.
       switch (op.method) {
         case 'get':
           router.get(expressPath, ...middlewares);
@@ -250,6 +257,21 @@ export class RegistryRouter<
         case 'delete':
           router.delete(expressPath, ...middlewares);
           break;
+        case 'head':
+          router.head(expressPath, ...middlewares);
+          break;
+        case 'options':
+          router.options(expressPath, ...middlewares);
+          break;
+        case 'trace':
+          router.trace(expressPath, ...middlewares);
+          break;
+        default: {
+          const _exhaustive: never = op.method;
+          throw new Error(
+            `RegistryRouter: operation '${op.operationId}' uses unsupported method '${_exhaustive as string}'`
+          );
+        }
       }
     }
 
