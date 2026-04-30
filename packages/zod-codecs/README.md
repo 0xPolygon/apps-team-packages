@@ -71,22 +71,41 @@ await z.encode(Trade, parsed);
 
 ## OpenAPI metadata
 
-Codecs ship without `.openapi()` metadata baked in. Description, `x-go-type`
-hints, and example values are caller-specific — chain them at the
-registration site:
+Codecs ship without `.openapi()` metadata baked in. Description,
+`x-go-type` hints, and example values are caller-specific — chain them
+at the registration site.
+
+In zod v4, `ZodCodec` is a sibling class of `ZodType` rather than a
+subclass, so `extendZodWithOpenApi` from
+`@asteasolutions/zod-to-openapi` (which patches only
+`ZodType.prototype.openapi`) doesn't reach codecs — chaining
+`.openapi(...)` on a codec throws `TypeError: not a function`. This
+package's `./openapi` entry-point fixes that:
 
 ```ts
-import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi';
 import { z } from 'zod';
+import { extendZodAndCodecsWithOpenApi } from '@polygonlabs/zod-codecs/openapi';
 import { Int64Codec } from '@polygonlabs/zod-codecs';
 
-extendZodWithOpenApi(z);
+extendZodAndCodecsWithOpenApi(z);
 
 const BlockNumber = Int64Codec.openapi({
   description: 'Block height — fits in int64.',
   'x-go-type': 'int64'
 });
 ```
+
+`extendZodAndCodecsWithOpenApi` is a drop-in replacement for
+`extendZodWithOpenApi` — it calls through to the upstream patch and
+additionally extends the same patch to `ZodCodec.prototype`, so codec
+fields and regular fields behave identically (description, example,
+`param: { in, name }` for parameter declarations, refId merging across
+chained calls). Idempotent — safe to call multiple times.
+
+`@asteasolutions/zod-to-openapi` is an **optional** peer dependency:
+the `./openapi` entry-point is the only thing in this package that
+imports it. Codec consumers that don't generate OpenAPI never need it
+installed.
 
 ## Pairs naturally with `@polygonlabs/zod-to-openapi-heyapi`
 
