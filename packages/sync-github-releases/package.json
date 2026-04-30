@@ -1,6 +1,6 @@
 {
   "name": "@polygonlabs/sync-github-releases",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Sync GitHub Release bodies from each package's CHANGELOG.md, mirroring the canonical changesets/action algorithm. Useful after the local recovery publish that follows the standard CI 403 on a brand-new package's first release.",
   "type": "module",
   "repository": {
