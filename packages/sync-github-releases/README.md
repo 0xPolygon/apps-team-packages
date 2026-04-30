@@ -107,5 +107,5 @@ body with an empty one.
 ## Requirements
 
 - Node.js ≥ 24
-- `gh` and `git` on `$PATH` (used for the shallow clones)
+- `git` and `pnpm` on `$PATH` (used to clone target repos and enumerate their workspace packages)
 - `GH_TOKEN` env var with `contents:write` on each target repo
