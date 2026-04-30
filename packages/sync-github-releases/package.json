@@ -1,0 +1,51 @@
+{
+  "name": "@polygonlabs/sync-github-releases",
+  "version": "0.1.0",
+  "description": "Sync GitHub Release bodies from each package's CHANGELOG.md, mirroring the canonical changesets/action algorithm. Useful after the local recovery publish that follows the standard CI 403 on a brand-new package's first release.",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/0xPolygon/apps-team-packages.git",
+    "directory": "packages/sync-github-releases"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "bin": {
+    "sync-github-releases": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "MIGRATION.md"
+  ],
+  "scripts": {
+    "build": "pnpm run typecheck && tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "clean": "rm -rf node_modules dist *.tsbuildinfo",
+    "prepublishOnly": "pnpm run build"
+  },
+  "dependencies": {
+    "@inquirer/prompts": "^7.0.0",
+    "@octokit/plugin-throttling": "^11.0.0",
+    "@octokit/rest": "^22.0.0",
+    "mdast-util-to-string": "^4.0.0",
+    "remark-parse": "^11.0.0",
+    "remark-stringify": "^11.0.0",
+    "unified": "^11.0.5",
+    "yargs": "^18.0.0"
+  },
+  "devDependencies": {
+    "@polygonlabs/apps-team-lint": "workspace:*",
+    "@tsconfig/node-ts": "^23.0.0",
+    "@tsconfig/node24": "^24.0.0",
+    "@types/mdast": "^4.0.4",
+    "@types/node": "^24.0.0",
+    "@types/yargs": "^17.0.33",
+    "eslint": "^10.0.0",
+    "typescript": "^5.9.3"
+  }
+}
