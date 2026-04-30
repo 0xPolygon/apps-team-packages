@@ -8,8 +8,13 @@ import type { Logger } from '@polygonlabs/logger';
 /**
  * Request-scoped logger context, backed by `AsyncLocalStorage`.
  *
- * Every request that runs through `requestContext(rootLogger)` is wrapped in
- * an ALS scope holding a child logger bound with a per-request `requestId`.
+ * `setupLogger(rootLogger)` does two things in one call:
+ *   1. Captures `rootLogger` as the out-of-request fallback returned by
+ *      `getLogger()` when it's called outside an HTTP request (startup
+ *      code, cron jobs, scripts).
+ *   2. Returns Express middleware that wraps every request in an ALS
+ *      scope holding a child logger bound with a per-request `requestId`.
+ *
  * Any code reached from that request — route handlers, service functions,
  * promise continuations, even async tasks that outlive `res.end()` — can
  * call `getLogger()` and receive the same child logger. That gives every
@@ -24,7 +29,7 @@ import type { Logger } from '@polygonlabs/logger';
 const loggerStorage = new AsyncLocalStorage<Logger>();
 
 /**
- * The `rootLogger` passed to the most recent `requestContext()` call. Used
+ * The `rootLogger` passed to the most recent `setupLogger()` call. Used
  * as the fallback return value from `getLogger()` when it's invoked outside
  * an active request scope (startup, top-level cron, one-off scripts).
  *
@@ -36,15 +41,22 @@ const loggerStorage = new AsyncLocalStorage<Logger>();
 let fallbackLogger: Logger | null = null;
 
 /**
- * Express middleware factory. Mount before any route. Takes the root
- * logger, returns a middleware that wraps every request in an ALS scope
- * holding a child logger with a fresh `requestId`.
+ * Configures `getLogger()` for the lifetime of the process and returns
+ * Express middleware that wraps every request in an ALS scope holding a
+ * child logger with a fresh `requestId`.
  *
- * The root logger is also captured for `getLogger()`'s out-of-scope
- * fallback — calling this more than once in a process is supported but
- * only the most recent root logger is retained.
+ * Two side effects in one call: `rootLogger` is captured as the fallback
+ * for `getLogger()` calls made outside any request (startup code, cron
+ * jobs, tests), and the returned middleware — when mounted before any
+ * route — establishes the per-request ALS scope so route and service code
+ * can reach the same child logger via `getLogger()` without threading it
+ * through signatures.
+ *
+ * Calling more than once in a process is supported but only the most
+ * recent root logger is retained — useful for tests that prime the
+ * fallback without ever mounting Express.
  */
-export function requestContext(rootLogger: Logger): RequestHandler {
+export function setupLogger(rootLogger: Logger): RequestHandler {
   fallbackLogger = rootLogger;
   return (_req, _res, next) => {
     const child = rootLogger.child({ requestId: randomUUID() });
@@ -54,12 +66,13 @@ export function requestContext(rootLogger: Logger): RequestHandler {
 
 /**
  * Returns the logger for the current execution context. Inside a request
- * scope established by `requestContext()`, this is the per-request child
- * logger carrying the `requestId` binding. Outside a request scope (server
- * startup, standalone cron, test code that didn't enter a scope), this is
- * the most recently supplied root logger.
+ * scope established by the middleware returned from `setupLogger()`, this
+ * is the per-request child logger carrying the `requestId` binding.
+ * Outside a request scope (server startup, standalone cron, test code
+ * that didn't enter a scope), this is the most recently supplied root
+ * logger.
  *
- * Throws if no `requestContext()` has ever been mounted in this process —
+ * Throws if no `setupLogger()` has ever been called in this process —
  * because in that case we genuinely have no logger to return and silently
  * substituting a no-op would mask configuration errors.
  *
@@ -73,8 +86,8 @@ export function getLogger(): Logger {
   if (scoped) return scoped;
   if (fallbackLogger) return fallbackLogger;
   throw new Error(
-    '@polygonlabs/express: getLogger() called before requestContext() was ever mounted. ' +
-      'Mount `app.use(requestContext(rootLogger))` during server setup, or pass the root logger ' +
-      'to a one-off `requestContext(rootLogger)` call at startup to prime the fallback.'
+    '@polygonlabs/express: getLogger() called before setupLogger() was ever called. ' +
+      'Mount `app.use(setupLogger(rootLogger))` during server setup, or call ' +
+      '`setupLogger(rootLogger)` once at startup to prime the fallback.'
   );
 }

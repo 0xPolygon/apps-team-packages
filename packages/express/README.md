@@ -20,7 +20,7 @@ single `pnpm update @polygonlabs/express` propagates fixes everywhere.
 import express from 'express';
 import { createLogger } from '@polygonlabs/logger';
 import {
-  requestContext,
+  setupLogger,
   getLogger,
   notFoundHandler,
   createErrorHandler
@@ -30,7 +30,7 @@ const logger = await createLogger();
 const app = express();
 
 app.use(express.json());
-app.use(requestContext(logger));
+app.use(setupLogger(logger));
 
 app.get('/users/:id', async (req, res) => {
   getLogger().info({ userId: req.params.id }, 'fetching user');
@@ -44,9 +44,10 @@ app.use(createErrorHandler());
 
 Order matters:
 
-- `requestContext(logger)` **before any route**, so every request is wrapped
+- `setupLogger(logger)` **before any route**, so every request is wrapped
   in an `AsyncLocalStorage` scope holding a child logger tagged with a fresh
-  `requestId`.
+  `requestId`. The same call also primes the out-of-request fallback
+  returned by `getLogger()`.
 - `notFoundHandler` **after all routes**, so only unmatched paths reach it.
 - `createErrorHandler()` **last**, so `HTTPError` subclasses thrown from
   routes — and the `NotFound` thrown by `notFoundHandler` — are formatted
@@ -79,33 +80,32 @@ the handler.
 
 Calls to `getLogger()` outside a request scope (server startup, cron jobs,
 one-off scripts) return the root logger originally passed to
-`requestContext`. That means shared service-layer functions can be called
+`setupLogger`. That means shared service-layer functions can be called
 from both HTTP requests and cron workers without branching on context —
 the callsite always gets a usable logger.
 
 ### Gotcha: prime the fallback before any out-of-request `getLogger()` call
 
-`requestContext(logger)` captures the root logger for the out-of-scope
-fallback as a side effect — but only when the factory is actually invoked.
-If your startup code calls `getLogger()` *before* `app.use(requestContext(logger))`
+`setupLogger(logger)` captures the root logger for the out-of-scope
+fallback as a side effect — but only when the function is actually called.
+If your startup code calls `getLogger()` *before* `setupLogger(logger)`
 runs, the store is empty, the fallback has not been primed, and `getLogger()`
 throws:
 
 ```text
-getLogger() called before requestContext() was ever mounted.
-Mount `app.use(requestContext(rootLogger))` during server setup, or pass
-the root logger to a one-off `requestContext(rootLogger)` call at startup
-to prime the fallback.
+getLogger() called before setupLogger() was ever called.
+Mount `app.use(setupLogger(rootLogger))` during server setup, or call
+`setupLogger(rootLogger)` once at startup to prime the fallback.
 ```
 
 The throw is deliberate: silently substituting a no-op logger would mask a
 real configuration bug. Two remedies:
 
-- **Normal services:** call `app.use(requestContext(logger))` as early as
+- **Normal services:** call `app.use(setupLogger(logger))` as early as
   possible in your server setup — before any code that might call
   `getLogger()` runs.
 - **Tests and scripts that never mount Express:** invoke
-  `requestContext(logger)` once at the top of the test file (or a test
+  `setupLogger(logger)` once at the top of the test file (or a test
   setup hook) to prime the fallback. You don't need to do anything with the
   returned middleware — the side effect of the call is what you want.
 
@@ -113,8 +113,8 @@ real configuration bug. Two remedies:
 
 | Export | Purpose |
 |---|---|
-| `requestContext(logger)` | Middleware that runs each request inside an `AsyncLocalStorage` scope holding a child logger bound with `requestId`. Also captures `logger` as the out-of-scope fallback. |
-| `getLogger()` | Returns the current request's child logger, or the fallback root logger when called outside a request scope. Throws if `requestContext` has never been invoked in this process. |
+| `setupLogger(logger)` | Captures `logger` as the out-of-request fallback for `getLogger()` and returns Express middleware that runs each request inside an `AsyncLocalStorage` scope holding a child logger bound with `requestId`. |
+| `getLogger()` | Returns the current request's child logger, or the fallback root logger when called outside a request scope. Throws if `setupLogger` has never been invoked in this process. |
 | `notFoundHandler` | Terminal middleware that throws `NotFound(method + path)`. |
 | `createErrorHandler()` | Error-handler middleware: maps `HTTPError.statusCode`, logs 5xx at debug via `getLogger()`, and derives the HTTP response body's `message` from a URL-sanitised view of the error. |
 
