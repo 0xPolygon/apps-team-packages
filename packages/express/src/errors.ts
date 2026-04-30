@@ -48,6 +48,18 @@ export function createErrorHandler(): ErrorRequestHandler {
     const message =
       sanitised?.message ?? (err instanceof Error ? err.message : 'Internal server error');
 
-    res.status(status).json({ error: true, message });
+    const body: Record<string, unknown> = { error: true, message };
+
+    // Surface structured `info` from HTTPError instances so callers can read
+    // it directly off the response body. The author of an HTTPError throw
+    // site has explicitly chosen the error class for client-facing
+    // semantics, so attaching info to the response is opt-in by class
+    // choice. Plain Errors (status 500) and HTTPError without info do not
+    // expose anything beyond `error` and `message`.
+    if (err instanceof HTTPError && err.info && Object.keys(err.info).length > 0) {
+      body.info = err.info;
+    }
+
+    res.status(status).json(body);
   };
 }

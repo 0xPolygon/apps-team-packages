@@ -14,6 +14,10 @@
       ".": {
         "types": "./dist/index.d.ts",
         "import": "./dist/index.js"
+      },
+      "./registry": {
+        "types": "./dist/registry/index.d.ts",
+        "import": "./dist/registry/index.js"
       }
     }
   },
@@ -22,6 +26,11 @@
       "@polygonlabs/source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./registry": {
+      "@polygonlabs/source": "./src/registry/index.ts",
+      "types": "./dist/registry/index.d.ts",
+      "import": "./dist/registry/index.js"
     }
   },
   "files": [
@@ -37,9 +46,12 @@
     "prepublishOnly": "pnpm run build"
   },
   "devDependencies": {
+    "@asteasolutions/zod-to-openapi": "^8.5.0",
     "@polygonlabs/apps-team-lint": "workspace:*",
     "@polygonlabs/logger": "workspace:*",
+    "@polygonlabs/openapi-registry": "workspace:*",
     "@polygonlabs/verror": "workspace:*",
+    "@polygonlabs/zod-codecs": "workspace:*",
     "@tsconfig/node-ts": "^23.0.0",
     "@tsconfig/node24": "^24.0.0",
     "@types/express": "^5.0.0",
@@ -50,11 +62,26 @@
     "express": "^5.0.0",
     "supertest": "^7.2.2",
     "typescript": "^5.9.3",
-    "vitest": "^3.2.3"
+    "vitest": "^3.2.3",
+    "zod": "^4.3.6"
   },
   "peerDependencies": {
+    "@asteasolutions/zod-to-openapi": "^8.0.0",
     "@polygonlabs/logger": "^2.1.0",
+    "@polygonlabs/openapi-registry": "^1.0.0",
     "@polygonlabs/verror": "^1.0.3",
-    "express": ">=5"
+    "express": ">=5",
+    "zod": "^4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@asteasolutions/zod-to-openapi": {
+      "optional": true
+    },
+    "@polygonlabs/openapi-registry": {
+      "optional": true
+    },
+    "zod": {
+      "optional": true
+    }
   }
 }
