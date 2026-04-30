@@ -102,15 +102,24 @@ importers:
 
   packages/express:
     devDependencies:
+      '@asteasolutions/zod-to-openapi':
+        specifier: ^8.5.0
+        version: 8.5.0(zod@4.3.6)
       '@polygonlabs/apps-team-lint':
         specifier: workspace:*
         version: link:../apps-team-lint
       '@polygonlabs/logger':
         specifier: workspace:*
         version: link:../logger
+      '@polygonlabs/openapi-registry':
+        specifier: workspace:*
+        version: link:../openapi-registry
       '@polygonlabs/verror':
         specifier: workspace:*
         version: link:../verror
+      '@polygonlabs/zod-codecs':
+        specifier: workspace:*
+        version: link:../zod-codecs
       '@tsconfig/node-ts':
         specifier: ^23.0.0
         version: 23.6.4
@@ -144,6 +153,9 @@ importers:
       vitest:
         specifier: ^3.2.3
         version: 3.2.4(@types/debug@4.1.13)(@types/node@24.12.0)(jiti@2.6.1)(msw@2.13.6(@types/node@24.12.0)(typescript@5.9.3))(yaml@2.8.3)
+      zod:
+        specifier: ^4.3.6
+        version: 4.3.6
 
   packages/logger:
     dependencies:
@@ -175,6 +187,36 @@ importers:
       vitest:
         specifier: ^3.2.3
         version: 3.2.4(@types/debug@4.1.13)(@types/node@24.12.0)(jiti@2.6.1)(msw@2.13.6(@types/node@24.12.0)(typescript@5.9.3))(yaml@2.8.3)
+
+  packages/openapi-registry:
+    devDependencies:
+      '@asteasolutions/zod-to-openapi':
+        specifier: ^8.5.0
+        version: 8.5.0(zod@4.3.6)
+      '@polygonlabs/apps-team-lint':
+        specifier: workspace:*
+        version: link:../apps-team-lint
+      '@tsconfig/node-ts':
+        specifier: ^23.0.0
+        version: 23.6.4
+      '@tsconfig/node24':
+        specifier: ^24.0.0
+        version: 24.0.4
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.12.0
+      eslint:
+        specifier: ^10.0.0
+        version: 10.1.0(jiti@2.6.1)
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.3
+        version: 3.2.4(@types/debug@4.1.13)(@types/node@24.12.0)(jiti@2.6.1)(msw@2.13.6(@types/node@24.12.0)(typescript@5.9.3))(yaml@2.8.3)
+      zod:
+        specifier: ^4.3.6
+        version: 4.3.6
 
   packages/sync-github-releases:
     dependencies:

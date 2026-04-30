@@ -117,6 +117,7 @@ real configuration bug. Two remedies:
 | `getLogger()` | Returns the current request's child logger, or the fallback root logger when called outside a request scope. Throws if `setupLogger` has never been invoked in this process. |
 | `notFoundHandler` | Terminal middleware that throws `NotFound(method + path)`. |
 | `createErrorHandler()` | Error-handler middleware: maps `HTTPError.statusCode`, logs 5xx at debug via `getLogger()`, and derives the HTTP response body's `message` from a URL-sanitised view of the error. |
+| `@polygonlabs/express/registry` | Subpath: registry-driven Express router. `createRegistryRouter({ registry }).implement(handlers).toExpress()` builds a router whose routes derive entirely from a `TypedRegistry` (from `@polygonlabs/openapi-registry`), with request and response Zod validation that round-trips codecs end-to-end. See the subpath section below. |
 
 No `declare module 'express-serve-static-core'` augmentation, no global
 type mutation on `Request`. Call sites explicitly import `getLogger` from
@@ -144,3 +145,205 @@ compound message, a `WError`'s own text, an `HTTPError` subclass's
 literal — arrives at the client with every URL in it reduced to its
 origin. The handler does not second-guess the service author's choice of
 wrapper; it only ensures the chosen message is URL-free.
+
+## Registry-driven router (`/registry` subpath)
+
+`@polygonlabs/express/registry` lifts the wiring between an
+OpenAPI/Zod registry and an Express app into a single declarative
+step. With a `TypedRegistry` from `@polygonlabs/openapi-registry`
+holding the spec, the consumer writes a typed handler map and gets:
+
+- request validation (params, query, body, headers) decoded into the
+  codec runtime types,
+- response validation that re-encodes the runtime types back to the
+  wire shape via `z.encode` before send,
+- compile-time exhaustiveness — `.implement()` accumulates handlers
+  across calls and `.toExpress()` rejects the call (with the missing
+  operationIds in the diagnostic) until every registered operation is
+  bound,
+- registry-driven auth: declare schemes once on the registry, tag
+  protected operations with `security: [...]`, and `.auth(handlers)`
+  requires a handler for every registered scheme — handler return
+  types flow into per-operation `req.auth[schemeName]` typing.
+
+```ts
+import { createRegistryRouter, defineHandlers } from '@polygonlabs/express/registry';
+
+import { buildRegistry, type Operations } from '@your/schemas';
+
+const registry = buildRegistry();
+
+const router = createRegistryRouter({ registry }).implement({
+  getHello: (_req, res) => {
+    res.json({ message: 'hello' });
+  }
+  // missing operations are a TS error at .toExpress() below.
+});
+
+const app = express();
+app.use(router.toExpress());
+```
+
+### Composing handlers across modules
+
+Real apps don't pile every handler into one literal at the wiring site.
+`.implement()` accepts partial bags and accumulates across calls — handler
+modules export their own bag (typed via `defineHandlers`) and the wiring
+file composes them:
+
+```ts
+// routes/status.ts
+import type { Operations } from '@your/schemas';
+import { defineHandlers } from '@polygonlabs/express/registry';
+
+export const statusHandlers = defineHandlers<Operations>()({
+  getStatus: (_req, res) => res.json({ status: 'ok' }),
+  getHealth: (_req, res) => res.json({ healthy: true })
+});
+
+// routes/management.ts
+import type { Operations } from '@your/schemas';
+import { defineHandlers } from '@polygonlabs/express/registry';
+import type { AppAuthMap } from '../auth.ts';
+
+export const managementHandlers = defineHandlers<Operations, AppAuthMap>()({
+  rebalance: (req, res) => {
+    // req.auth.apiKey is fully typed — flows from AppAuthMap.
+    res.json({ ok: true, tenantId: req.auth.apiKey.tenantId });
+  }
+});
+
+// index.ts — the wiring file
+import { statusHandlers } from './routes/status.ts';
+import { managementHandlers } from './routes/management.ts';
+
+const router = createRegistryRouter({ registry })
+  .auth(authHandlers)
+  .implement(statusHandlers)
+  .implement(managementHandlers);
+//        ^^^^^^^^^^^^^^^^^^^^
+// Type error here if any registered operation is unbound; the message
+// names the missing operationIds. Add a final `.implement({...})` for any
+// remaining ops (or import another module bag).
+
+app.use(router.toExpress());
+```
+
+Each `.implement(bag)` rejects keys that aren't registered operationIds —
+typos fail at the implement site, not the wiring site. The final
+`.toExpress()` is where exhaustiveness is enforced; until every operation
+has been bound across the chain of `.implement()` calls, the call won't
+typecheck.
+
+### Type-safe auth via `.auth(handlers)`
+
+Services with mixed public and protected operations declare security
+schemes on the registry and tag protected routes via OpenAPI's `security`
+field. The router's `.auth(handlers)` method requires a handler for every
+registered scheme — missing keys, surplus keys, and wrong-shape handlers
+are TS errors at the call site.
+
+```ts
+// 1. Schemas package: register the scheme + tag the protected operation.
+import { TypedRegistry } from '@polygonlabs/openapi-registry';
+import { NotAuthenticated } from '@polygonlabs/verror';
+
+const registry: TypedRegistry = new TypedRegistry();
+registry.registerSecurityScheme('apiKey', {
+  type: 'apiKey',
+  name: 'x-api-key',
+  in: 'header'
+});
+
+registry.registerPath({
+  operationId: 'rebalance',
+  method: 'post',
+  path: '/management/rebalance',
+  security: [{ apiKey: [] }],
+  responses: {
+    /* … */
+  }
+});
+
+// 2. Service: provide one handler per registered scheme.
+const router = createRegistryRouter({ registry })
+  .auth({
+    apiKey: async (req) => {
+      const key = req.get('x-api-key');
+      const tenant = await validateApiKey(key);
+      if (!tenant) throw new NotAuthenticated('invalid api key');
+      return tenant; // Awaited<typeof tenant> flows into req.auth.apiKey
+    }
+  })
+  .implement({
+    rebalance: (req, res) => {
+      // req.auth.apiKey is fully typed — IDE autocomplete, no `as` casts.
+      const tenantId = req.auth.apiKey.id;
+      // …
+    }
+    // operations without `security` see no `req.auth` field at all.
+  });
+
+app.use(router.toExpress());
+```
+
+Auth runs before request validation — an unauthenticated request returns
+401 without ever parsing the body. Auth handlers `throw NotAuthenticated`
+/ `Forbidden` from `@polygonlabs/verror`; `createErrorHandler` answers
+401 / 403. Plain `Error` thrown from an auth handler is wrapped to
+`NotAuthenticated` so credential failures don't surface as 500s.
+
+Multi-scheme AND is supported (`security: [{ apiKey: [], bearer: [] }]`
+— both must succeed, both principals land on `req.auth`). OR semantics
+(`security: [{ apiKey: [] }, { bearer: [] }]`) is rejected at
+`toExpress()` setup time.
+
+### Canonical error response schemas
+
+The registry-driven router (in concert with `createErrorHandler`) emits
+two error response shapes. The package exports the Zod schemas so every
+service references the same definition rather than copy-pasting
+`{ error: z.string() }` lookalikes that drift over time:
+
+```ts
+import {
+  ErrorResponseSchema,
+  ValidationErrorResponseSchema
+} from '@polygonlabs/express/registry';
+
+registry.registerPath({
+  // …
+  responses: {
+    200: { /* … */ },
+    400: {
+      description: 'Request validation failed',
+      content: { 'application/json': { schema: ValidationErrorResponseSchema } }
+    },
+    401: {
+      description: 'Missing or invalid credentials',
+      content: { 'application/json': { schema: ErrorResponseSchema } }
+    }
+  }
+});
+```
+
+- **`ErrorResponseSchema`** — generic shape for any `HTTPError` (and the
+  500 path). `{ error: true, message: string, info?: Record<string, unknown> }`.
+- **`ValidationErrorResponseSchema`** — narrowed shape for the 400
+  emitted by `createRequestValidator`. `info` is non-optional and
+  section-keyed: `{ params?: tree, query?: tree, body?: tree, headers?: tree }`,
+  where each tree is the recursive `z.treeifyError` output.
+- **`ZodErrorTreeSchema`** / **`ValidationErrorInfoSchema`** — the
+  building blocks, exported in case a domain-specific error wraps a
+  partial tree.
+
+Each schema is registered with `.openapi('Name', …)` so the
+asteasolutions OpenAPI generator emits it as a `$ref` under
+`components.schemas` rather than inlining the definition at every use
+site. Add the schemas to your responses manually — the package
+deliberately does not auto-augment routes; you stay in control of which
+operations document which error codes.
+
+Peer dependencies: `@polygonlabs/openapi-registry`,
+`@asteasolutions/zod-to-openapi`, `zod` — declared as optional, only
+required when the subpath is imported.
