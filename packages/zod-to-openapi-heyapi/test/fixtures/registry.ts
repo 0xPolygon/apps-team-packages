@@ -224,11 +224,146 @@ fixtureRegistry.registerPath({
   }
 });
 
+// ── Input-codec routes ─────────────────────────────────────────────────────────
+//
+// Routes that exercise the input-side codec encoding pipeline. Each
+// route's `request` block uses the input ZodObject *exported directly*
+// from schemas.ts (which already has `.openapi('Name')` chained). The
+// plugin resolves the slot name by looking up the schema instance in
+// the `Map<ZodType, exportName>` it builds from `schemasFrom` at
+// codegen time — so identity matters: the route must hold the same
+// instance the user exports, not a `register()`-wrapped clone.
+
+// Codec on path: lookupBlock. Returns ScalarString just to give the
+// route a 2xx body — the focus is the `blockNumber` path param running through
+// the input transformer.
+fixtureRegistry.registerPath({
+  method: 'get',
+  path: '/fixtures/blocks/{blockNumber}',
+  operationId: 'lookupBlock',
+  request: {
+    params: schemas.BlockNumberPathParams
+  },
+  responses: {
+    200: {
+      description: 'ok',
+      content: {
+        'application/json': { schema: registerOnce('ScalarString', schemas.ScalarString) }
+      }
+    }
+  }
+});
+
+// Codec on query: listRecentEvents. `since: IsoDateCodec.optional()` is the
+// non-trivial case — `String(date)` produces the locale string, so the
+// plugin's input transformer is required to run `z.encode` and produce an
+// ISO 8601 string the server's parser accepts.
+fixtureRegistry.registerPath({
+  method: 'get',
+  path: '/fixtures/events',
+  operationId: 'listRecentEvents',
+  request: {
+    query: schemas.RecentEventsQuery
+  },
+  responses: {
+    200: {
+      description: 'ok',
+      content: {
+        'application/json': { schema: registerOnce('ScalarString', schemas.ScalarString) }
+      }
+    }
+  }
+});
+
+// Codec on body: createOrder. The request body has both codec and non-codec
+// fields — `z.encode` recursively encodes the schema and produces the
+// wire-shaped object the body serialiser ultimately stringifies.
+//
+// `required: true` on the body — without it asteasolutions defaults to
+// `body?:` in the OpenAPI spec (and hey-api's `${Op}Data` mirrors that),
+// so `${Op}Input.body` ends up optional. For routes where the body is
+// the whole point of the request, mark it explicitly.
+fixtureRegistry.registerPath({
+  method: 'post',
+  path: '/fixtures/orders',
+  operationId: 'createOrder',
+  request: {
+    body: {
+      required: true,
+      content: { 'application/json': { schema: schemas.CreateOrderRequest } }
+    }
+  },
+  responses: {
+    200: {
+      description: 'ok',
+      content: {
+        'application/json': { schema: registerOnce('ScalarString', schemas.ScalarString) }
+      }
+    }
+  }
+});
+
+// Multi-slot route: codec on path AND on body. `updateOrder` exercises
+// the case where `${Op}Input` overrides two slots simultaneously and
+// the wrapper's merged-options spread carries both encoded slot
+// values into the SDK function. This was the biggest gap in coverage —
+// real APIs with `PUT /resource/{id}` patterns hit this constantly.
+fixtureRegistry.registerPath({
+  method: 'put',
+  path: '/fixtures/orders/{orderId}',
+  operationId: 'updateOrder',
+  request: {
+    params: schemas.OrderIdPathParams,
+    body: {
+      required: true,
+      content: { 'application/json': { schema: schemas.UpdateOrderRequest } }
+    }
+  },
+  responses: {
+    200: {
+      description: 'ok',
+      content: {
+        'application/json': { schema: registerOnce('ScalarString', schemas.ScalarString) }
+      }
+    }
+  }
+});
+
+// Default-optional body: no `required: true` flag. asteasolutions
+// emits the body as optional in the spec, hey-api's `${Op}Data.body`
+// becomes `body?:`, and our wrapper should mirror that —
+// `${Op}Input.body?:` and `options?: Options<...>` so the route can be
+// called with no args. Distinct from createOrder which sets the flag
+// explicitly.
+fixtureRegistry.registerPath({
+  method: 'post',
+  path: '/fixtures/reviews',
+  operationId: 'submitForReview',
+  request: {
+    body: {
+      content: { 'application/json': { schema: schemas.SubmitForReviewRequest } }
+    }
+  },
+  responses: {
+    200: {
+      description: 'ok',
+      content: {
+        'application/json': { schema: registerOnce('ScalarString', schemas.ScalarString) }
+      }
+    }
+  }
+});
+
 export const fixtureOperationIds = [
   ...routeSpecs.map((r) => r.operationId),
   'createOrFetchResource',
   'getErrorsOnly',
-  'getItemWithRegisteredParam'
+  'getItemWithRegisteredParam',
+  'lookupBlock',
+  'listRecentEvents',
+  'createOrder',
+  'updateOrder',
+  'submitForReview'
 ];
 
 /** Generate the OpenAPI document for the registry. */

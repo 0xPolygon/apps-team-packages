@@ -70,7 +70,12 @@ export async function setup(): Promise<void> {
       plugin as never,
       '@hey-api/typescript',
       '@hey-api/client-fetch',
-      { name: '@hey-api/sdk', transformer: true }
+      // includeInEntry: false is required — the registry plugin emits
+      // wrappers under the same names as @hey-api/sdk's emissions and
+      // both can't land in the auto-generated entry barrel. The
+      // plugin's pre-flight check throws with the exact config to
+      // write if you forget.
+      { name: '@hey-api/sdk', transformer: true, includeInEntry: false }
     ],
     logs: { level: 'silent' }
   });

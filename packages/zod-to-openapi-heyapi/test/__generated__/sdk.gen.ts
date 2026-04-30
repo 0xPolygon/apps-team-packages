@@ -2,8 +2,8 @@
 
 import { client } from './client.gen.ts';
 import type { Client, Options as Options2, TDataShape } from './client/index.ts';
-import { type CreateOrFetchResourceErrors, type CreateOrFetchResourceResponses, createOrFetchResourceTransformer, type GetArrayOfCodecsResponses, getArrayOfCodecsTransformer, type GetArrayOfScalarsResponses, getArrayOfScalarsTransformer, type GetArrayWithLengthResponses, getArrayWithLengthTransformer, type GetBrandedFieldResponses, getBrandedFieldTransformer, type GetCodecObjectResponses, getCodecObjectTransformer, type GetComposedResponses, getComposedTransformer, type GetConstrainedCodecResponses, getConstrainedCodecTransformer, type GetDateFieldResponses, getDateFieldTransformer, type GetDefaultFieldResponses, getDefaultFieldTransformer, type GetDiscriminatedUnionResponses, getDiscriminatedUnionTransformer, type GetEnumFieldResponses, getEnumFieldTransformer, type GetErrorsOnlyErrors, type GetIntersectionFieldResponses, getIntersectionFieldTransformer, type GetItemWithRegisteredParamResponses, getItemWithRegisteredParamTransformer, type GetLiteralFieldResponses, getLiteralFieldTransformer, type GetMapFieldResponses, getMapFieldTransformer, type GetNestedResponses, getNestedTransformer, type GetNullableFieldResponses, getNullableFieldTransformer, type GetNumberWithRangeResponses, getNumberWithRangeTransformer, type GetOptionalFieldResponses, getOptionalFieldTransformer, type GetOptionalNullableFieldResponses, getOptionalNullableFieldTransformer, type GetPaginatedComposedResponses, getPaginatedComposedTransformer, type GetReadonlyArrayFieldResponses, getReadonlyArrayFieldTransformer, type GetRecordFieldResponses, getRecordFieldTransformer, type GetRefinedFieldResponses, getRefinedFieldTransformer, type GetScalarBigIntResponses, getScalarBigIntTransformer, type GetScalarBooleanResponses, getScalarBooleanTransformer, type GetScalarNumberResponses, getScalarNumberTransformer, type GetScalarStringResponses, getScalarStringTransformer, type GetSetFieldResponses, getSetFieldTransformer, type GetStringWithFormatResponses, getStringWithFormatTransformer, type GetStringWithMinMaxResponses, getStringWithMinMaxTransformer, type GetTupleFieldResponses, getTupleFieldTransformer, type GetUnionFieldResponses, getUnionFieldTransformer, type GetUnionOfLiteralsResponses, getUnionOfLiteralsTransformer } from './registry-validator.gen.ts';
-import type { CreateOrFetchResourceData, GetArrayOfCodecsData, GetArrayOfScalarsData, GetArrayWithLengthData, GetBrandedFieldData, GetCodecObjectData, GetComposedData, GetConstrainedCodecData, GetDateFieldData, GetDefaultFieldData, GetDiscriminatedUnionData, GetEnumFieldData, GetErrorsOnlyData, GetIntersectionFieldData, GetItemWithRegisteredParamData, GetLiteralFieldData, GetMapFieldData, GetNestedData, GetNullableFieldData, GetNumberWithRangeData, GetOptionalFieldData, GetOptionalNullableFieldData, GetPaginatedComposedData, GetReadonlyArrayFieldData, GetRecordFieldData, GetRefinedFieldData, GetScalarBigIntData, GetScalarBooleanData, GetScalarNumberData, GetScalarStringData, GetSetFieldData, GetStringWithFormatData, GetStringWithMinMaxData, GetTupleFieldData, GetUnionFieldData, GetUnionOfLiteralsData } from './types.gen.ts';
+import { type CreateOrderResponses, createOrderTransformer, type CreateOrFetchResourceErrors, type CreateOrFetchResourceResponses, createOrFetchResourceTransformer, type GetArrayOfCodecsResponses, getArrayOfCodecsTransformer, type GetArrayOfScalarsResponses, getArrayOfScalarsTransformer, type GetArrayWithLengthResponses, getArrayWithLengthTransformer, type GetBrandedFieldResponses, getBrandedFieldTransformer, type GetCodecObjectResponses, getCodecObjectTransformer, type GetComposedResponses, getComposedTransformer, type GetConstrainedCodecResponses, getConstrainedCodecTransformer, type GetDateFieldResponses, getDateFieldTransformer, type GetDefaultFieldResponses, getDefaultFieldTransformer, type GetDiscriminatedUnionResponses, getDiscriminatedUnionTransformer, type GetEnumFieldResponses, getEnumFieldTransformer, type GetErrorsOnlyErrors, type GetIntersectionFieldResponses, getIntersectionFieldTransformer, type GetItemWithRegisteredParamResponses, getItemWithRegisteredParamTransformer, type GetLiteralFieldResponses, getLiteralFieldTransformer, type GetMapFieldResponses, getMapFieldTransformer, type GetNestedResponses, getNestedTransformer, type GetNullableFieldResponses, getNullableFieldTransformer, type GetNumberWithRangeResponses, getNumberWithRangeTransformer, type GetOptionalFieldResponses, getOptionalFieldTransformer, type GetOptionalNullableFieldResponses, getOptionalNullableFieldTransformer, type GetPaginatedComposedResponses, getPaginatedComposedTransformer, type GetReadonlyArrayFieldResponses, getReadonlyArrayFieldTransformer, type GetRecordFieldResponses, getRecordFieldTransformer, type GetRefinedFieldResponses, getRefinedFieldTransformer, type GetScalarBigIntResponses, getScalarBigIntTransformer, type GetScalarBooleanResponses, getScalarBooleanTransformer, type GetScalarNumberResponses, getScalarNumberTransformer, type GetScalarStringResponses, getScalarStringTransformer, type GetSetFieldResponses, getSetFieldTransformer, type GetStringWithFormatResponses, getStringWithFormatTransformer, type GetStringWithMinMaxResponses, getStringWithMinMaxTransformer, type GetTupleFieldResponses, getTupleFieldTransformer, type GetUnionFieldResponses, getUnionFieldTransformer, type GetUnionOfLiteralsResponses, getUnionOfLiteralsTransformer, type ListRecentEventsResponses, listRecentEventsTransformer, type LookupBlockResponses, lookupBlockTransformer, type SubmitForReviewResponses, submitForReviewTransformer, type UpdateOrderResponses, updateOrderTransformer } from './registry-validator.gen.ts';
+import type { CreateOrderData, CreateOrFetchResourceData, GetArrayOfCodecsData, GetArrayOfScalarsData, GetArrayWithLengthData, GetBrandedFieldData, GetCodecObjectData, GetComposedData, GetConstrainedCodecData, GetDateFieldData, GetDefaultFieldData, GetDiscriminatedUnionData, GetEnumFieldData, GetErrorsOnlyData, GetIntersectionFieldData, GetItemWithRegisteredParamData, GetLiteralFieldData, GetMapFieldData, GetNestedData, GetNullableFieldData, GetNumberWithRangeData, GetOptionalFieldData, GetOptionalNullableFieldData, GetPaginatedComposedData, GetReadonlyArrayFieldData, GetRecordFieldData, GetRefinedFieldData, GetScalarBigIntData, GetScalarBooleanData, GetScalarNumberData, GetScalarStringData, GetSetFieldData, GetStringWithFormatData, GetStringWithMinMaxData, GetTupleFieldData, GetUnionFieldData, GetUnionOfLiteralsData, ListRecentEventsData, LookupBlockData, SubmitForReviewData, UpdateOrderData } from './types.gen.ts';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -229,4 +229,46 @@ export const getItemWithRegisteredParam = <ThrowOnError extends boolean = false>
     responseTransformer: getItemWithRegisteredParamTransformer,
     url: '/fixtures/items/{itemId}',
     ...options
+});
+
+export const lookupBlock = <ThrowOnError extends boolean = false>(options: Options<LookupBlockData, ThrowOnError>) => (options.client ?? client).get<LookupBlockResponses, unknown, ThrowOnError>({
+    responseTransformer: lookupBlockTransformer,
+    url: '/fixtures/blocks/{blockNumber}',
+    ...options
+});
+
+export const listRecentEvents = <ThrowOnError extends boolean = false>(options?: Options<ListRecentEventsData, ThrowOnError>) => (options?.client ?? client).get<ListRecentEventsResponses, unknown, ThrowOnError>({
+    responseTransformer: listRecentEventsTransformer,
+    url: '/fixtures/events',
+    ...options
+});
+
+export const createOrder = <ThrowOnError extends boolean = false>(options: Options<CreateOrderData, ThrowOnError>) => (options.client ?? client).post<CreateOrderResponses, unknown, ThrowOnError>({
+    responseTransformer: createOrderTransformer,
+    url: '/fixtures/orders',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+export const updateOrder = <ThrowOnError extends boolean = false>(options: Options<UpdateOrderData, ThrowOnError>) => (options.client ?? client).put<UpdateOrderResponses, unknown, ThrowOnError>({
+    responseTransformer: updateOrderTransformer,
+    url: '/fixtures/orders/{orderId}',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+export const submitForReview = <ThrowOnError extends boolean = false>(options?: Options<SubmitForReviewData, ThrowOnError>) => (options?.client ?? client).post<SubmitForReviewResponses, unknown, ThrowOnError>({
+    responseTransformer: submitForReviewTransformer,
+    url: '/fixtures/reviews',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options?.headers
+    }
 });

@@ -261,3 +261,71 @@ export const ResourceFetched = z.object({
   id: z.string(),
   data: z.string()
 });
+
+// ── Input schemas with codecs (request side) ──────────────────────────────────
+//
+// No `.openapi('Name')` chain — these are raw exports. The plugin
+// resolves input slot names via identity lookup against the
+// `schemasFrom` module's named exports, so the only thing that matters
+// is that the *same instance* held by the export is what the route
+// uses in `request.{params, query, body}`. The export name itself
+// becomes the import binding emitted in the generated client.
+//
+// `OpenApiGeneratorV3` inlines per-parameter schemas regardless of
+// `.openapi(...)` metadata, so dropping the chain doesn't change the
+// spec for these path/query slots. Body schemas without `.openapi(...)`
+// also inline rather than `$ref` — fine for the plugin (it only needs
+// identity to find the name).
+//
+// Two codec flavours covered:
+//   - `Int64Codec` on a path param — number-flavoured codec, `String(value)`
+//     happens to match `z.encode`, so this would round-trip end-to-end
+//     even without the plugin's input transformer (kept here as the
+//     ergonomic-typing test case).
+//   - `IsoDateCodec` on a query param and on a body field — non-trivial
+//     `encode` (`d.toISOString()` ≠ locale string). This is the case the
+//     input transformer is specifically designed to make work.
+
+// Codec on a path param.
+export const BlockNumberPathParams = z.object({
+  blockNumber: Int64Codec
+});
+
+// Codec on a query param. Also verifies optionality flows through the
+// runtime → wire encode (an undefined `since` should not enter the URL).
+export const RecentEventsQuery = z.object({
+  since: IsoDateCodec.optional()
+});
+
+// Codec on a body field — exercises the request-body branch of the input
+// transformer. Mixed with non-codec fields to make sure `z.encode` only
+// transforms the codec-bearing parts.
+export const CreateOrderRequest = z.object({
+  reference: z.string().min(1),
+  scheduledFor: IsoDateCodec,
+  priority: Int64Codec
+});
+
+// Path schema for the multi-slot `updateOrder` route. Pairs with
+// `UpdateOrderRequest` to exercise an op that has BOTH a path slot
+// (the resource id) AND a body slot (the partial update) — the most
+// common real-world shape and the one we previously didn't test.
+export const OrderIdPathParams = z.object({
+  orderId: Int64Codec
+});
+
+export const UpdateOrderRequest = z.object({
+  scheduledFor: IsoDateCodec.optional(),
+  priority: Int64Codec.optional()
+});
+
+// Body for the default-optional case: `submitForReview` registers this
+// in `request.body.content.*.schema` WITHOUT `required: true`, so
+// asteasolutions emits an optional body in the spec and hey-api's
+// `${Op}Data.body` is `body?: ...`. We use it to verify that our
+// `${Op}Input.body` and the wrapper's `options?:` correctly mirror
+// hey-api's "default-optional body" emission.
+export const SubmitForReviewRequest = z.object({
+  comment: z.string().optional(),
+  scheduledFor: IsoDateCodec.optional()
+});
