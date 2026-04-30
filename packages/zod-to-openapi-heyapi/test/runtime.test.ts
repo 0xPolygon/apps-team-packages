@@ -227,4 +227,156 @@ describe('registry plugin emit', () => {
       /export const getItemWithRegisteredParamTransformer = async \(data: unknown\): Promise<z\.output<typeof ScalarString>> => await ScalarString\.parseAsync\(data\);/
     );
   });
+
+  // ── Input-side codec encoding ──────────────────────────────────────────────
+
+  it('emits an Input type for ops with a registered path schema', () => {
+    // `lookupBlock` declares `params: BlockNumberPathParams` (registered with
+    // refId 'BlockNumberPathParams'). The Input type overrides `path` with
+    // the runtime shape via `z.output<typeof BlockNumberPathParams>`, so a
+    // caller can pass `{ blockNumber: bigint }` instead of the wire string.
+    const src = readGenerated();
+    expect(src).toMatch(
+      /export type LookupBlockInput = Omit<LookupBlockData, 'path'> & \{\s*path: z\.output<typeof BlockNumberPathParams>;\s*\};/
+    );
+  });
+
+  it('emits an input transformer that runs z.encode on the path slot, guarded against undefined', () => {
+    // Conditional spread handles optional slots — the same emission shape
+    // is used for required slots too (it's a runtime no-op but keeps the
+    // emission uniform).
+    const src = readGenerated();
+    expect(src).toMatch(
+      /export const lookupBlockInputTransformer = async \(input: Pick<LookupBlockInput, 'path'>\) => \(\{ \.\.\.input\.path !== undefined \? \{ path: await z\.encode\(BlockNumberPathParams, input\.path\) \} : \{\} \}\);/
+    );
+  });
+
+  it('emits a same-name SDK wrapper that calls the input transformer before delegating', () => {
+    // The wrapper has the SAME name as the SDK function. With
+    // `includeInEntry: false` set on `@hey-api/sdk`, the auto-barrel only
+    // re-exports our wrapper — and hey-api auto-aliases the SDK plugin's
+    // emission inside this file (`lookupBlock2`) to avoid a local collision.
+    // The merged options is cast to the SDK's wire-shaped Options<${Op}Data>
+    // because the structural type is the union of runtime + wire (the second
+    // spread overrides the first at runtime).
+    const src = readGenerated();
+    expect(src).toMatch(
+      /import \{[^}]*\blookupBlock as lookupBlock2\b[^}]*\} from '\.\/sdk\.gen\.ts'/
+    );
+    expect(src).toMatch(
+      /export const lookupBlock = async <ThrowOnError extends boolean = false>\(options: Options<LookupBlockInput, ThrowOnError>\) => \{\s*const transformed = await lookupBlockInputTransformer\(options\);\s*return await lookupBlock2\(\{ \.\.\.options, \.\.\.transformed \} as Options<LookupBlockData, ThrowOnError>\);\s*\};/
+    );
+  });
+
+  it('preserves slot optionality from the SDK Data type', () => {
+    // `listRecentEvents` uses `query: RecentEventsQuery` with
+    // `IsoDateCodec.optional()`. No query param is required, so hey-api
+    // emits `query?: ...` in `${Op}Data` and we mirror that — caller can
+    // omit the slot entirely.
+    const src = readGenerated();
+    expect(src).toMatch(
+      /export type ListRecentEventsInput = Omit<ListRecentEventsData, 'query'> & \{\s*query\?: z\.output<typeof RecentEventsQuery>;\s*\};/
+    );
+    expect(src).toMatch(
+      /export const listRecentEventsInputTransformer = async \(input: Pick<ListRecentEventsInput, 'query'>\) => \(\{ \.\.\.input\.query !== undefined \? \{ query: await z\.encode\(RecentEventsQuery, input\.query\) \} : \{\} \}\);/
+    );
+  });
+
+  it('emits required slot when the SDK Data declares it required (body with required: true)', () => {
+    // `createOrder`'s route config sets `body: { required: true, ... }`,
+    // so `${Op}Data.body` is required and our override mirrors that.
+    const src = readGenerated();
+    expect(src).toMatch(
+      /export type CreateOrderInput = Omit<CreateOrderData, 'body'> & \{\s*body: z\.output<typeof CreateOrderRequest>;\s*\};/
+    );
+    expect(src).toMatch(
+      /export const createOrderInputTransformer = async \(input: Pick<CreateOrderInput, 'body'>\) => \(\{ \.\.\.input\.body !== undefined \? \{ body: await z\.encode\(CreateOrderRequest, input\.body\) \} : \{\} \}\);/
+    );
+  });
+
+  it('does not emit Input artifacts for ops without a registered input schema', () => {
+    // `getItemWithRegisteredParam` declares `params: z.object({ itemId: ... })`
+    // — anonymous wrapping object with no refId. The plugin must not emit
+    // any Input type / transformer / wrapper for it; consumers continue to
+    // call the raw SDK function for those ops.
+    const src = readGenerated();
+    expect(src).not.toMatch(/export type GetItemWithRegisteredParamInput\b/);
+    expect(src).not.toMatch(/getItemWithRegisteredParamInputTransformer/);
+    // The op's response transformer is still emitted (covered above).
+  });
+
+  it('imports the Options type and per-op SDK function from sdk.gen', () => {
+    const src = readGenerated();
+    expect(src).toMatch(/from '\.\/sdk\.gen\.ts'/);
+    expect(src).toMatch(/type Options/);
+  });
+
+  it('imports the per-op Data type from types.gen', () => {
+    // The Input override needs `${Op}Data` (from types.gen.ts) to do
+    // `Omit<${Op}Data, slot>`. Imports must come through.
+    const src = readGenerated();
+    expect(src).toMatch(/from '\.\/types\.gen\.ts'/);
+  });
+
+  // ── SDK wrapper coverage (pass-through and encoding) ───────────────────────
+
+  it('emits a pass-through wrapper for ops without registered input schemas', () => {
+    // `getCodecObject`, `getScalarString`, etc. have no `request` block in
+    // the fixture registry. The plugin still emits a wrapper so the auto-
+    // generated `index.ts` has a single canonical export name per op
+    // (with `includeInEntry: false` set on `@hey-api/sdk`, the SDK
+    // plugin's emissions don't reach the barrel directly).
+    //
+    // Pass-throughs are zero-overhead `const X = X2` re-bindings — same
+    // call signature as the upstream SDK function.
+    const src = readGenerated();
+    expect(src).toMatch(/^export const getCodecObject = getCodecObject2;$/m);
+    expect(src).toMatch(/^export const getScalarString = getScalarString2;$/m);
+    expect(src).toMatch(/^export const getErrorsOnly = getErrorsOnly2;$/m);
+  });
+
+  // ── Multi-slot routes (path + body) ────────────────────────────────────────
+
+  it('emits Input artifacts for routes with multiple registered input slots', () => {
+    // `updateOrder` declares both `params: OrderIdPathParams` AND
+    // `body: UpdateOrderRequest`. The Input override carries both
+    // codec-typed slots; the transformer's Pick covers both; the
+    // transformer body's spread chain encodes each slot independently.
+    const src = readGenerated();
+    expect(src).toMatch(
+      /export type UpdateOrderInput = Omit<UpdateOrderData, 'path' \| 'body'> & \{\s*path: z\.output<typeof OrderIdPathParams>;\s*body: z\.output<typeof UpdateOrderRequest>;\s*\};/
+    );
+    expect(src).toMatch(
+      /export const updateOrderInputTransformer = async \(input: Pick<UpdateOrderInput, 'path' \| 'body'>\) => \(\{\s*\.\.\.input\.path !== undefined \? \{ path: await z\.encode\(OrderIdPathParams, input\.path\) \} : \{\},\s*\.\.\.input\.body !== undefined \? \{ body: await z\.encode\(UpdateOrderRequest, input\.body\) \} : \{\}\s*\}\);/
+    );
+    // Wrapper carries both encoded slots through the spread; cast targets the
+    // SDK Data type because the merged structural type is the union of
+    // runtime + wire shapes.
+    expect(src).toMatch(
+      /export const updateOrder = async <ThrowOnError extends boolean = false>\(options: Options<UpdateOrderInput, ThrowOnError>\) => \{\s*const transformed = await updateOrderInputTransformer\(options\);\s*return await updateOrder2\(\{ \.\.\.options, \.\.\.transformed \} as Options<UpdateOrderData, ThrowOnError>\);\s*\};/
+    );
+  });
+
+  // ── Default-optional body (no `required: true`) ────────────────────────────
+
+  it('emits an optional body slot when the route omits `required: true`', () => {
+    // `submitForReview` has a body schema but does NOT set
+    // `request.body.required`. asteasolutions defaults to optional in
+    // the spec, hey-api emits `body?:` in `${Op}Data`, and our override
+    // mirrors that. Wrapper's `options?:` follows because no slot is
+    // required, so callers can write `submitForReview()` with no args.
+    const src = readGenerated();
+    expect(src).toMatch(
+      /export type SubmitForReviewInput = Omit<SubmitForReviewData, 'body'> & \{\s*body\?: z\.output<typeof SubmitForReviewRequest>;\s*\};/
+    );
+    expect(src).toMatch(
+      /export const submitForReview = async <ThrowOnError extends boolean = false>\(options\?: Options<SubmitForReviewInput, ThrowOnError>\) => \{/
+    );
+    // Wrapper coalesces undefined options before the transformer call —
+    // `submitForReview()` with no args must not blow up on `input.body`
+    // dereference inside the transformer.
+    expect(src).toMatch(
+      /const transformed = await submitForReviewInputTransformer\(options \?\? \{\}\);/
+    );
+  });
 });

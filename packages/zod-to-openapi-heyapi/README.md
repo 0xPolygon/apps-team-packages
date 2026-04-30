@@ -67,7 +67,13 @@ export default defineConfig({
     })) as never,
     '@hey-api/typescript',
     '@hey-api/client-fetch',
-    { name: '@hey-api/sdk', transformer: true }
+    // `includeInEntry: false` is required: this plugin owns the public
+    // SDK surface and emits a wrapper per operation under the canonical
+    // name. Without it, `@hey-api/sdk`'s same-named raw functions would
+    // collide with the wrappers in the auto-generated `index.ts`. The
+    // plugin's pre-flight check throws with the exact config to write
+    // if you forget.
+    { name: '@hey-api/sdk', transformer: true, includeInEntry: false }
   ]
 });
 ```
@@ -412,6 +418,136 @@ relative paths into the vendored directory.
 | `schemasFrom` | `string` | Module specifier the generated client imports your schemas from. Must be unambiguous from any caller (package name, `#imports` alias, or `file://` URL — not a relative path). See [The `schemasFrom` option](#the-schemasfrom-option). |
 | `generatorClass` | `OpenApiGeneratorV3` | Pass `OpenApiGeneratorV3` from `@asteasolutions/zod-to-openapi` explicitly. Avoids resolution ambiguity in the codegen environment. |
 | `$` | `typeof $` | Pass `$` from `@hey-api/openapi-ts` explicitly. Same reason. |
+
+## SDK wrappers
+
+The plugin emits one canonical SDK function per operation in
+`registry-validator.gen.ts`. With `includeInEntry: false` on
+`@hey-api/sdk` (required, see Usage), these wrappers are the only public
+SDK surface: the auto-generated `index.ts` re-exports them under the
+operation's plain name (`getBlockMetadata`, `createMessage`, …). The raw
+SDK functions in `sdk.gen.ts` are an implementation detail — the wrapper
+delegates to them for HTTP wiring.
+
+For ops without a registered input schema, the wrapper is a thin
+re-binding of the upstream SDK function — same call signature, no
+runtime overhead, just present so every op has a canonical entry in the
+auto-barrel:
+
+```ts
+// Generated registry-validator.gen.ts
+export const getBlockNumber = getBlockNumber2; // re-bind from sdk.gen.ts
+```
+
+For ops whose `request.{params, query, body}` schema is exported from
+`schemasFrom` (any named export — no `.openapi('Name')` chain
+required), the wrapper additionally encodes the runtime → wire
+direction before delegating:
+
+```ts
+// Generated registry-validator.gen.ts
+export type GetBlockMetadataInput = Omit<GetBlockMetadataData, 'path'> & {
+  // Runtime shape (`bigint`), not the wire string `BlockMetadataData.path` declares.
+  path: z.output<typeof BlockNumberPathParams>;
+};
+
+export const getBlockMetadataInputTransformer = async (
+  input: Pick<GetBlockMetadataInput, 'path'>
+) => ({ path: await z.encode(BlockNumberPathParams, input.path) });
+
+export const getBlockMetadata = async <ThrowOnError extends boolean = false>(
+  options: Options<GetBlockMetadataInput, ThrowOnError>
+) => {
+  const transformed = await getBlockMetadataInputTransformer(options);
+  return await getBlockMetadata2({ ...options, ...transformed });
+};
+```
+
+`z.encode(schema, value)` runs the runtime → wire direction of any Zod
+schema, including codecs:
+`Int64Codec.encode = (b) => b.toString()`,
+`IsoDateCodec.encode = (d) => d.toISOString()`. The case this matters
+for is `IsoDateCodec` on a path or query parameter: `String(date)`
+emits the locale string and the server's `z.iso.datetime()` validator
+rejects it, but `z.encode` produces the ISO 8601 string the parser
+accepts. Number-flavoured codecs (`Int64Codec`, `BigIntegerCodec`,
+`DecimalStringCodec`) get the same ergonomic typing on the request side
+as on the response side.
+
+### How input schema names are resolved
+
+The plugin dynamic-imports `schemasFrom` at codegen time (already does
+this for the response audit) and builds a `Map<ZodType-instance,
+exportName>` from the named exports. For each route's input slot, it
+looks up the slot's ZodType in the map. Found → use the export name as
+the import binding. Not found → silently skip input-encoding for that
+slot.
+
+The user-side rule is just: **export the schema, and use that same
+exported instance in the route**.
+
+```ts
+// schemas.ts — plain export, no .openapi('Name') chain required
+export const BlockNumberPathParams = z.object({ blockNumber: Int64Codec });
+
+// routes/blocks.ts — same instance in request.params
+import { BlockNumberPathParams } from '../schemas.ts';
+registry.registerPath({
+  operationId: 'getBlockMetadata',
+  method: 'get',
+  path: '/api/blocks/{blockNumber}',
+  request: { params: BlockNumberPathParams },
+  // ...
+});
+```
+
+`.openapi('Name')` chains are only needed where the OpenAPI generator
+needs them (response schemas that should `$ref` rather than inline,
+body schemas you want named in the spec). For path / query slots,
+`OpenApiGeneratorV3` inlines per-parameter schemas regardless, so a
+chain is purely cosmetic.
+
+Identity matters because `.openapi('Name')` and `register('Name',
+schema)` both *clone* the schema (asteasolutions creates a new
+instance via `new this.constructor(this._def)` so chained metadata
+calls don't accumulate). If you chain `.openapi('Foo')` on the export
+and call `register('Foo', x)` somewhere else, the post-`register`
+clone is a different instance from your export — identity lookup
+won't find it and input encoding silently skips. Pick one source for
+the schema instance (the export) and use it everywhere.
+
+### Per-slot optionality
+
+The plugin mirrors hey-api's `${Op}Data` slot optionality in the
+emitted `${Op}Input` and the wrapper's `options` parameter. A route
+whose query schema has only optional fields (no required query
+params) emits:
+
+```ts
+export type ListMessagesInput = Omit<ListMessagesData, 'query'> & {
+  query?: z.output<typeof RecentMessagesQuery>;
+};
+
+export const listMessages = async <ThrowOnError extends boolean = false>(
+  options?: Options<ListMessagesInput, ThrowOnError>
+) => { ... };
+```
+
+— so callers can write `listMessages()` with no args. Routes with a
+required path slot emit `path: ...` and `(options: ...)` (no `?`),
+demanding the slot at the call site. The detection mirrors hey-api's
+own `hasParameterGroupObjectRequired` for params / query / headers and
+reads `body.required` for the body slot — set
+`body: { required: true, ... }` on the route config if the body should
+be required (asteasolutions defaults to optional otherwise).
+
+### What's not covered
+
+- **Headers**: schema-typed header maps are out of scope. Headers are
+  rarely codec-typed in practice; if they become a need, the plugin
+  recognises a registered headers ZodObject the same way it recognises
+  params / query, but the emit needs verification against
+  `@hey-api/client-fetch`'s header-serialisation surface.
 
 ## What gets emitted
 

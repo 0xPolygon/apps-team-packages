@@ -14,13 +14,18 @@
 import { describe, it } from 'vitest';
 
 import type {
+  CreateOrderInput,
   CreateOrFetchResourceError,
   CreateOrFetchResourceErrors,
   CreateOrFetchResourceResponse,
   CreateOrFetchResourceResponses,
   GetCodecObjectResponse,
   GetCodecObjectResponses,
-  GetDateFieldResponse
+  GetDateFieldResponse,
+  ListRecentEventsInput,
+  LookupBlockInput,
+  SubmitForReviewInput,
+  UpdateOrderInput
 } from './__generated__/registry-validator.gen.ts';
 import type * as schemas from './fixtures/schemas.ts';
 import type { z } from './fixtures/zod.ts';
@@ -78,7 +83,57 @@ type Assertions = [
       | z.output<typeof schemas.NotFoundError>
       | z.output<typeof schemas.ServerError>
     >
-  >
+  >,
+
+  // ── Input-side codec encoding ───────────────────────────────────────────────
+  //
+  // The whole reason this work exists: callers should pass the runtime
+  // shape (e.g. `bigint` for `Int64Codec`, `Date` for `IsoDateCodec`) on
+  // the request side, just as they receive it on the response side. The
+  // plugin's emitted `${Op}Input` types are `z.output<typeof Schema>` for
+  // the slots backed by a registered schema — same machinery as responses,
+  // applied to the request.
+
+  // Path codec: `lookupBlock` declares `params: BlockNumberPathParams`
+  // with `blockNumber: Int64Codec`. Path slot is required in `${Op}Data`
+  // (URL templates need their interpolation values), so the Input slot
+  // is required too. Value type is `bigint`, not the wire `string`.
+  Expect<Equal<LookupBlockInput['path'], z.output<typeof schemas.BlockNumberPathParams>>>,
+  Expect<Equal<LookupBlockInput['path']['blockNumber'], bigint>>,
+
+  // Query codec + optionality preservation: `listRecentEvents` declares
+  // `query: RecentEventsQuery` with `since: IsoDateCodec.optional()`.
+  // Since the only field is optional, no query param is required, so
+  // hey-api emits `query?: ...` in `${Op}Data` — and `${Op}Input` mirrors
+  // that. Caller can omit the slot entirely; doesn't have to pass
+  // `{ query: {} }`.
+  Expect<
+    Equal<NonNullable<ListRecentEventsInput['query']>, z.output<typeof schemas.RecentEventsQuery>>
+  >,
+  // The slot itself is optional — undefined extends the slot type.
+  Expect<undefined extends ListRecentEventsInput['query'] ? true : false>,
+
+  // Body codec + explicit-required: `createOrder`'s route config sets
+  // `body: { required: true, ... }`, so `${Op}Data.body` is required and
+  // `${Op}Input.body` follows. Without `required: true`, asteasolutions
+  // defaults to optional and the slot would carry `undefined` here.
+  Expect<Equal<CreateOrderInput['body'], z.output<typeof schemas.CreateOrderRequest>>>,
+  Expect<Equal<CreateOrderInput['body']['priority'], bigint>>,
+  Expect<Equal<CreateOrderInput['body']['scheduledFor'], Date>>,
+  Expect<Equal<CreateOrderInput['body']['reference'], string>>,
+
+  // Multi-slot route (path + body): `updateOrder` declares both
+  // `params: OrderIdPathParams` (Int64Codec → bigint) and
+  // `body: UpdateOrderRequest`. Both slots get runtime types in
+  // ${Op}Input simultaneously.
+  Expect<Equal<UpdateOrderInput['path']['orderId'], bigint>>,
+  Expect<Equal<NonNullable<UpdateOrderInput['body']>['scheduledFor'], Date | undefined>>,
+  Expect<Equal<NonNullable<UpdateOrderInput['body']>['priority'], bigint | undefined>>,
+
+  // Default-optional body: `submitForReview`'s route config has body
+  // WITHOUT `required: true`, so the slot is optional in ${Op}Input
+  // and the wrapper accepts no args.
+  Expect<undefined extends SubmitForReviewInput['body'] ? true : false>
 ];
 
 const _assertions: Assertions | undefined = undefined;

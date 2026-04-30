@@ -839,3 +839,99 @@ export type GetItemWithRegisteredParamResponses = {
 };
 
 export type GetItemWithRegisteredParamResponse = GetItemWithRegisteredParamResponses[keyof GetItemWithRegisteredParamResponses];
+
+export type LookupBlockData = {
+    body?: never;
+    path: {
+        blockNumber: string;
+    };
+    query?: never;
+    url: '/fixtures/blocks/{blockNumber}';
+};
+
+export type LookupBlockResponses = {
+    /**
+     * ok
+     */
+    200: ScalarString;
+};
+
+export type LookupBlockResponse = LookupBlockResponses[keyof LookupBlockResponses];
+
+export type ListRecentEventsData = {
+    body?: never;
+    path?: never;
+    query?: {
+        since?: string;
+    };
+    url: '/fixtures/events';
+};
+
+export type ListRecentEventsResponses = {
+    /**
+     * ok
+     */
+    200: ScalarString;
+};
+
+export type ListRecentEventsResponse = ListRecentEventsResponses[keyof ListRecentEventsResponses];
+
+export type CreateOrderData = {
+    body: {
+        reference: string;
+        scheduledFor: string;
+        priority: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/fixtures/orders';
+};
+
+export type CreateOrderResponses = {
+    /**
+     * ok
+     */
+    200: ScalarString;
+};
+
+export type CreateOrderResponse = CreateOrderResponses[keyof CreateOrderResponses];
+
+export type UpdateOrderData = {
+    body: {
+        scheduledFor?: string;
+        priority?: string;
+    };
+    path: {
+        orderId: string;
+    };
+    query?: never;
+    url: '/fixtures/orders/{orderId}';
+};
+
+export type UpdateOrderResponses = {
+    /**
+     * ok
+     */
+    200: ScalarString;
+};
+
+export type UpdateOrderResponse = UpdateOrderResponses[keyof UpdateOrderResponses];
+
+export type SubmitForReviewData = {
+    body?: {
+        comment?: string;
+        scheduledFor?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/fixtures/reviews';
+};
+
+export type SubmitForReviewResponses = {
+    /**
+     * ok
+     */
+    200: ScalarString;
+};
+
+export type SubmitForReviewResponse = SubmitForReviewResponses[keyof SubmitForReviewResponses];

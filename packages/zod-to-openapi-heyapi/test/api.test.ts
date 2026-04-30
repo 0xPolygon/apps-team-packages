@@ -13,6 +13,13 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import { client } from './__generated__/client.gen.ts';
 import {
+  createOrder,
+  listRecentEvents,
+  lookupBlock,
+  submitForReview,
+  updateOrder
+} from './__generated__/registry-validator.gen.ts';
+import {
   createOrFetchResource,
   getCodecObject,
   getDateField,
@@ -189,5 +196,169 @@ describe('multi-status responses', () => {
     const { data, error } = await getErrorsOnly();
     expect(data).toBeUndefined();
     expect(error).toMatchObject({ code: 'bad_request' });
+  });
+});
+
+describe('input-side codec encoding via the SDK wrapper', () => {
+  it('encodes a bigint path param to the wire string before URL interpolation', async () => {
+    // Caller passes `bigint`; `Int64Codec.encode = (b) => b.toString()`, so
+    // the URL must contain the digit string. Without the input transformer
+    // the path serialiser would call `String(bigint)` — which happens to
+    // produce the same digits — so this test alone doesn't prove the
+    // transformer runs. The query / date case below does.
+    let url: string | undefined;
+    server.use(
+      http.get(`${BASE_URL}/fixtures/blocks/:blockNumber`, ({ request }) => {
+        url = request.url;
+        return HttpResponse.json({ value: 'ok' });
+      })
+    );
+
+    const { data } = await lookupBlock({ path: { blockNumber: 9007199254740993n } });
+    expect(data).toEqual({ value: 'ok' });
+    expect(url).toContain('/fixtures/blocks/9007199254740993');
+  });
+
+  it('encodes a Date query param to ISO 8601 — the case that fails without the transformer', async () => {
+    // The codec-on-query stress test. `String(date)` emits the locale
+    // string ("Tue Apr 28 2026 14:45:00 GMT+0100 (...)"); only the input
+    // transformer (z.encode → IsoDateCodec.encode → toISOString()) produces
+    // the wire ISO string. If this test passes the encoder is firing.
+    let url: string | undefined;
+    server.use(
+      http.get(`${BASE_URL}/fixtures/events`, ({ request }) => {
+        url = request.url;
+        return HttpResponse.json({ value: 'ok' });
+      })
+    );
+
+    const since = new Date('2026-04-28T13:45:00.000Z');
+    const { data } = await listRecentEvents({ query: { since } });
+    expect(data).toEqual({ value: 'ok' });
+    expect(url).toBeDefined();
+    const parsed = new URL(url!);
+    expect(parsed.searchParams.get('since')).toBe('2026-04-28T13:45:00.000Z');
+  });
+
+  it('omits an optional codec query field when the caller passes undefined', async () => {
+    // `since: IsoDateCodec.optional()` — passing undefined should produce
+    // a URL without `since=...`. `z.encode` of undefined on an optional
+    // schema is undefined, which the query serialiser drops.
+    let url: string | undefined;
+    server.use(
+      http.get(`${BASE_URL}/fixtures/events`, ({ request }) => {
+        url = request.url;
+        return HttpResponse.json({ value: 'ok' });
+      })
+    );
+
+    const { data } = await listRecentEvents({ query: { since: undefined } });
+    expect(data).toEqual({ value: 'ok' });
+    const parsed = new URL(url!);
+    expect(parsed.searchParams.has('since')).toBe(false);
+  });
+
+  it('encodes mixed codec / non-codec body fields before serialising', async () => {
+    // Body: `{ reference: string, scheduledFor: Date, priority: bigint }`.
+    // `JSON.stringify` outright throws on bigint, so without the transformer
+    // this would fail at the serialiser. After encoding: a digit string for
+    // `priority`, an ISO string for `scheduledFor`, and the plain string
+    // for `reference`.
+    let body: unknown;
+    server.use(
+      http.post(`${BASE_URL}/fixtures/orders`, async ({ request }) => {
+        body = await request.json();
+        return HttpResponse.json({ value: 'ok' });
+      })
+    );
+
+    const { data } = await createOrder({
+      body: {
+        reference: 'order-1',
+        scheduledFor: new Date('2026-05-01T09:00:00.000Z'),
+        priority: 9007199254740993n
+      }
+    });
+    expect(data).toEqual({ value: 'ok' });
+    expect(body).toEqual({
+      reference: 'order-1',
+      scheduledFor: '2026-05-01T09:00:00.000Z',
+      priority: '9007199254740993'
+    });
+  });
+
+  it('encodes path AND body simultaneously for multi-slot routes', async () => {
+    // updateOrder has both `path: OrderIdPathParams` (Int64Codec) and
+    // `body: UpdateOrderRequest` (IsoDateCodec + Int64Codec). The
+    // wrapper merges encoded slots from the transformer with options;
+    // both end up wire-shaped at the SDK function boundary.
+    let url: string | undefined;
+    let body: unknown;
+    server.use(
+      http.put(`${BASE_URL}/fixtures/orders/:orderId`, async ({ request }) => {
+        url = request.url;
+        body = await request.json();
+        return HttpResponse.json({ value: 'ok' });
+      })
+    );
+
+    const { data } = await updateOrder({
+      path: { orderId: 9007199254740993n },
+      body: {
+        scheduledFor: new Date('2026-05-01T09:00:00.000Z'),
+        priority: 42n
+      }
+    });
+    expect(data).toEqual({ value: 'ok' });
+    expect(url).toContain('/fixtures/orders/9007199254740993');
+    expect(body).toEqual({
+      scheduledFor: '2026-05-01T09:00:00.000Z',
+      priority: '42'
+    });
+  });
+
+  it('accepts a no-arg call for routes whose only registered slot is an optional body', async () => {
+    // submitForReview's body schema has all-optional fields AND the
+    // route doesn't set `required: true`, so the body slot is optional
+    // and the wrapper is `(options?:)`. Caller can omit everything.
+    let body: unknown = 'not-called';
+    server.use(
+      http.post(`${BASE_URL}/fixtures/reviews`, async ({ request }) => {
+        // Bun/undici parses missing body as undefined; we want to assert
+        // the request reached the handler at all.
+        try {
+          body = await request.json();
+        } catch {
+          body = undefined;
+        }
+        return HttpResponse.json({ value: 'ok' });
+      })
+    );
+
+    const { data, error } = await submitForReview();
+    expect(error).toBeUndefined();
+    expect(data).toEqual({ value: 'ok' });
+    // No body sent (or empty body) — the request is well-formed.
+    expect(body).toBeFalsy();
+  });
+
+  it('rejects via z.encode when the caller passes a value the codec refuses', async () => {
+    // `Int64Codec.encode(b) = b.toString()` — it accepts any bigint. To
+    // force a rejection we pass a primitive that the runtime schema
+    // rejects: `z.encode(IsoDateCodec, 'not a date')` throws because the
+    // input doesn't match the runtime side (a Date instance).
+    let hit = false;
+    server.use(
+      http.get(`${BASE_URL}/fixtures/events`, () => {
+        hit = true;
+        return HttpResponse.json({ value: 'should not run' });
+      })
+    );
+
+    await expect(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      listRecentEvents({ query: { since: 'not-a-date' as any } })
+    ).rejects.toThrow();
+    expect(hit).toBe(false);
   });
 });
