@@ -10,7 +10,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import type { Captured } from './helpers/captureLogger.ts';
 
-import { createErrorHandler, notFoundHandler, requestContext } from '../src/index.ts';
+import { createErrorHandler, notFoundHandler, setupLogger } from '../src/index.ts';
 import { makeCaptureLogger } from './helpers/captureLogger.ts';
 
 const SECRET = 'TEST_SECRET_DO_NOT_LEAK_12345';
@@ -48,7 +48,7 @@ describe('createErrorHandler sanitises ethers fetch errors end-to-end', () => {
 
     const app = express();
     app.use(json());
-    app.use(requestContext(capture.logger));
+    app.use(setupLogger(capture.logger));
 
     app.get('/block-number', async (_req, _res, next) => {
       try {

@@ -1,5 +1,39 @@
 # Migration Guide
 
+## 1.0.0 → 1.0.1
+
+### `requestContext` renamed to `setupLogger`
+
+The `requestContext` export has been renamed to `setupLogger`. The function's
+behaviour is unchanged — only the name. The new name surfaces the actual
+side effect: `setupLogger(logger)` captures `logger` as the out-of-request
+fallback for `getLogger()` *and* returns the per-request middleware. The
+old name read like a no-op middleware factory and hid the priming side
+effect, leading readers to overlook the test/script gotcha documented in
+the README.
+
+```ts
+// Before
+import { requestContext } from '@polygonlabs/express';
+app.use(requestContext(logger));
+
+// After
+import { setupLogger } from '@polygonlabs/express';
+app.use(setupLogger(logger));
+```
+
+This is a breaking import change but is shipped as a patch because no
+service consumes this package yet — the published 1.0.0 was missing
+`dist/notFound.*`, so any consumer attempting the documented import
+graph blew up at module load. Renaming alongside the publish fix avoids
+spending a major bump on a name nobody has used.
+
+The error message from `getLogger()` has been updated to reference
+`setupLogger` instead of `requestContext`. If you have grep-based
+runbooks or log searches on the old text, update them.
+
+---
+
 ## Adopting `@polygonlabs/express` (replacing per-service copies)
 
 Services currently carry their own `src/errors.ts` (the ethers fetch-error
@@ -26,12 +60,12 @@ app.use((req, _res, next) => {
 
 // After
 import {
-  requestContext,
+  setupLogger,
   notFoundHandler,
   createErrorHandler
 } from '@polygonlabs/express';
 
-app.use(requestContext(logger));
+app.use(setupLogger(logger));
 // routes
 app.use(notFoundHandler);
 app.use(createErrorHandler());
@@ -68,7 +102,7 @@ handler sees.
 
 - `src/errors.ts` (sanitiser + global error handler) — replaced by
   `createErrorHandler()` from this package.
-- The `req.log` middleware — replaced by `requestContext()`.
+- The `req.log` middleware — replaced by `setupLogger()`.
 - The `declare module 'express-serve-static-core'` block — no longer
   required. This package does not mutate the `Request` type.
 - `@types/express-serve-static-core` from `devDependencies`, unless you
@@ -76,7 +110,7 @@ handler sees.
 
 ### Step 5 — Prime `getLogger()` in tests or scripts that don't mount Express
 
-`requestContext(logger)` captures the root logger for the out-of-scope
+`setupLogger(logger)` captures the root logger for the out-of-scope
 fallback as a side effect of being called. In production this happens
 automatically during server setup. In test files or scripts that never
 mount the full server but still import code that calls `getLogger()`, add
@@ -85,17 +119,17 @@ a one-off priming call:
 ```ts
 // tests/helpers/agent.ts (or equivalent)
 import { createLogger } from '@polygonlabs/logger';
-import { requestContext } from '@polygonlabs/express';
+import { setupLogger } from '@polygonlabs/express';
 
 const logger = await createLogger();
-requestContext(logger); // primes the fallback; returned middleware unused
+setupLogger(logger); // primes the fallback; returned middleware unused
 ```
 
 Without this, a `getLogger()` call from inside imported service code will
 throw:
 
 ```text
-getLogger() called before requestContext() was ever mounted. ...
+getLogger() called before setupLogger() was ever called. ...
 ```
 
 The throw is deliberate — substituting a no-op would mask real
