@@ -277,6 +277,56 @@ a plain `OpenAPIRegistry` (the OpenAPI generator,
 `OpenApiGeneratorV31`, codegen plugins) sees no behavioural
 difference.
 
+## Canonical error response schemas
+
+The subpath `@polygonlabs/openapi-registry/error-schemas` exports the
+canonical Zod schemas for the standard error response shapes the
+registry-driven Express router (in `@polygonlabs/express`) emits:
+
+- `ErrorResponseSchema` — `{ error: true, message, info? }`. The
+  generic shape `createErrorHandler` emits for `HTTPError` (401, 403,
+  409, …) and non-`HTTPError` 500s.
+- `ValidationErrorResponseSchema` — narrowed shape for the 400s the
+  registry's request validator emits. `info` is keyed by section name
+  (`params` / `query` / `body` / `headers`) with each value the
+  `z.treeifyError` tree for that section.
+- `ZodErrorTreeSchema` / `ValidationErrorInfoSchema` — building blocks
+  for the above.
+
+Use them in `responses[code].content` slots so the served spec
+documents what clients will actually see, with no copy-pasted
+per-service definitions:
+
+```ts
+import { ErrorResponseSchema } from '@polygonlabs/openapi-registry/error-schemas';
+
+registry.registerPath({
+  method: 'post',
+  path: '/cycle/pause',
+  operationId: 'pauseCycle',
+  security: [{ ApiKeyAuth: [] }],
+  responses: {
+    200: {
+      /* … */
+    },
+    401: {
+      description: 'Missing or invalid x-api-key header',
+      content: { 'application/json': { schema: ErrorResponseSchema } }
+    }
+  }
+});
+```
+
+The schemas have zero Express-runtime imports — only `zod` and
+`@asteasolutions/zod-to-openapi` — so a schemas-only package can
+register the canonical 400 / 401 / 5xx response shapes without a
+transitive dep on Express + pino + Sentry.
+
+`@polygonlabs/express/registry` re-exports the same schema instances
+(literal-equal: `===`), so consumers that already import them from
+the express package keep working. New code should prefer the
+openapi-registry path.
+
 ## Migration from `OpenAPIRegistry`
 
 For an existing schemas package:

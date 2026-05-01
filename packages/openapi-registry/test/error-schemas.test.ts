@@ -1,41 +1,23 @@
 /**
- * Back-compat smoke tests for the error response schemas re-exported by
- * `@polygonlabs/express/registry`. The canonical source lives in
- * `@polygonlabs/openapi-registry/error-schemas` (where consumers without
- * an Express runtime can pick them up without dragging in pino/Sentry);
- * the matching tests there cover the schemas' parse semantics
- * exhaustively. This file just pins down the back-compat re-export path
- * so existing consumers importing from `@polygonlabs/express/registry`
- * keep working.
+ * Smoke tests for the canonical error response schemas now living in
+ * `@polygonlabs/openapi-registry`. The express package re-exports these
+ * for back-compat — the matching test in `@polygonlabs/express` covers
+ * the re-export path.
+ *
+ * Each schema parses the shape `@polygonlabs/express`'s `createErrorHandler`
+ * actually emits, and survives `OpenApiGeneratorV3` round-trip as a `$ref`
+ * under `components.schemas`.
  */
 
 import { OpenAPIRegistry, OpenApiGeneratorV3 } from '@asteasolutions/zod-to-openapi';
 import { describe, expect, it } from 'vitest';
 
 import {
-  ErrorResponseSchema as ErrorResponseSchemaFromOpenApiRegistry,
-  ValidationErrorResponseSchema as ValidationErrorResponseSchemaFromOpenApiRegistry,
-  ZodErrorTreeSchema as ZodErrorTreeSchemaFromOpenApiRegistry
-} from '@polygonlabs/openapi-registry/error-schemas';
-
-import {
   ErrorResponseSchema,
   ValidationErrorInfoSchema,
   ValidationErrorResponseSchema,
   ZodErrorTreeSchema
-} from '../../src/registry/index.ts';
-
-describe('back-compat re-exports point at the same schema instances', () => {
-  it('ErrorResponseSchema is the same instance', () => {
-    expect(ErrorResponseSchema).toBe(ErrorResponseSchemaFromOpenApiRegistry);
-  });
-  it('ValidationErrorResponseSchema is the same instance', () => {
-    expect(ValidationErrorResponseSchema).toBe(ValidationErrorResponseSchemaFromOpenApiRegistry);
-  });
-  it('ZodErrorTreeSchema is the same instance', () => {
-    expect(ZodErrorTreeSchema).toBe(ZodErrorTreeSchemaFromOpenApiRegistry);
-  });
-});
+} from '../src/error-schemas.ts';
 
 describe('error response schemas', () => {
   describe('ErrorResponseSchema', () => {
