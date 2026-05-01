@@ -38,7 +38,7 @@
     "MIGRATION.md"
   ],
   "scripts": {
-    "build": "pnpm run typecheck && tsc -p tsconfig.build.json",
+    "build": "pnpm run typecheck && rm -rf dist *.tsbuildinfo && tsc -p tsconfig.build.json && node ../../scripts/verify-dist-exports.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "lint": "eslint .",

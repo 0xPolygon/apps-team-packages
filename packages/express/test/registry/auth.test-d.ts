@@ -27,37 +27,34 @@ const okResponse = {
 // both apiKey AND bearer. The auth handlers' return types are deliberately
 // distinct so we can prove flow-through to per-operation `req.auth`.
 
-function buildRegistry() {
-  const r: TypedRegistry = new TypedRegistry();
-  r.registerSecurityScheme('apiKey', {
-    type: 'apiKey',
-    name: 'x-api-key',
-    in: 'header'
-  });
-  r.registerSecurityScheme('bearer', { type: 'http', scheme: 'bearer' });
-
-  r.registerPath({
-    operationId: 'publicOp',
-    method: 'get',
-    path: '/public',
-    responses: okResponse
-  });
-  r.registerPath({
-    operationId: 'protectedOp',
-    method: 'get',
-    path: '/protected',
-    security: [{ apiKey: [] }],
-    responses: okResponse
-  });
-  r.registerPath({
-    operationId: 'doubleAuthOp',
-    method: 'get',
-    path: '/double',
-    security: [{ apiKey: [], bearer: [] }],
-    responses: okResponse
-  });
-  return r;
-}
+const buildRegistry = () =>
+  new TypedRegistry()
+    .registerSecurityScheme('apiKey', {
+      type: 'apiKey',
+      name: 'x-api-key',
+      in: 'header'
+    })
+    .registerSecurityScheme('bearer', { type: 'http', scheme: 'bearer' })
+    .registerPath({
+      operationId: 'publicOp',
+      method: 'get',
+      path: '/public',
+      responses: okResponse
+    })
+    .registerPath({
+      operationId: 'protectedOp',
+      method: 'get',
+      path: '/protected',
+      security: [{ apiKey: [] }],
+      responses: okResponse
+    })
+    .registerPath({
+      operationId: 'doubleAuthOp',
+      method: 'get',
+      path: '/double',
+      security: [{ apiKey: [], bearer: [] }],
+      responses: okResponse
+    });
 
 const registry = buildRegistry();
 

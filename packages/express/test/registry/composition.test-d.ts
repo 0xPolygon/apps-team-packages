@@ -7,8 +7,9 @@
  *   - Surplus keys (not in `Ops`) are TS errors at the implement site.
  *   - `.toExpress()` is callable only when every operation has been bound;
  *     a missing operation surfaces as a `MissingHandlersError` diagnostic.
- *   - `defineHandlers<Ops, AuthMap>()(bag)` types each handler against its
- *     operation and rejects unknown operationIds at the definition site.
+ *   - Per-domain bags written with `satisfies Partial<HandlerMapFor<F, AuthMap>>`
+ *     type each handler against its operation and reject unknown
+ *     operationIds at the definition site.
  */
 
 import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi';
@@ -16,7 +17,9 @@ import { z } from 'zod';
 
 import { TypedRegistry } from '@polygonlabs/openapi-registry';
 
-import { createRegistryRouter, defineHandlers } from '../../src/registry/index.ts';
+import type { HandlerMapFor } from '../../src/registry/index.ts';
+
+import { createRegistryRouter } from '../../src/registry/index.ts';
 
 extendZodWithOpenApi(z);
 
@@ -25,28 +28,26 @@ const okResponse = {
   200: { description: 'ok', content: { 'application/json': { schema: HelloResponse } } }
 } as const;
 
-function buildRegistry() {
-  const r: TypedRegistry = new TypedRegistry();
-  r.registerPath({
-    operationId: 'getStatus',
-    method: 'get',
-    path: '/status',
-    responses: okResponse
-  });
-  r.registerPath({
-    operationId: 'getHealth',
-    method: 'get',
-    path: '/health',
-    responses: okResponse
-  });
-  r.registerPath({
-    operationId: 'rebalance',
-    method: 'post',
-    path: '/management/rebalance',
-    responses: okResponse
-  });
-  return r;
-}
+const buildRegistry = () =>
+  new TypedRegistry()
+    .registerPath({
+      operationId: 'getStatus',
+      method: 'get',
+      path: '/status',
+      responses: okResponse
+    })
+    .registerPath({
+      operationId: 'getHealth',
+      method: 'get',
+      path: '/health',
+      responses: okResponse
+    })
+    .registerPath({
+      operationId: 'rebalance',
+      method: 'post',
+      path: '/management/rebalance',
+      responses: okResponse
+    });
 
 const registry = buildRegistry();
 
@@ -122,24 +123,24 @@ const registry = buildRegistry();
   router.toExpress();
 }
 
-// === defineHandlers helper =================================================
-
-type Operations =
-  ReturnType<typeof buildRegistry> extends TypedRegistry<infer O, Record<string, true>> ? O : never;
+// === satisfies Partial<HandlerMapFor<F>> for per-domain bags ===============
 
 // Define a partial bag in module-style (e.g. exported from
-// `routes/status.ts`) and confirm it accepts subset bags.
-const statusHandlers = defineHandlers<Operations>()({
+// `routes/status.ts`) and confirm it accepts subset bags. Each handler's
+// `req` / `res` narrows to the operation's typed view via the
+// `Partial<HandlerMapFor<typeof buildRegistry>>` constraint; surplus keys
+// are TS errors at the definition site.
+const statusHandlers = {
   getStatus: (_req, res) => {
     res.json({ message: 'ok' });
   }
-});
+} satisfies Partial<HandlerMapFor<typeof buildRegistry>>;
 
-const managementHandlers = defineHandlers<Operations>()({
+const managementHandlers = {
   rebalance: (_req, res) => {
     res.json({ message: 'rebalanced' });
   }
-});
+} satisfies Partial<HandlerMapFor<typeof buildRegistry>>;
 
 // Composing module-defined bags via chained .implement() — the compose-site
 // equivalent of importing handler bags from per-domain modules.
@@ -162,9 +163,9 @@ const managementHandlers = defineHandlers<Operations>()({
     .toExpress();
 }
 
-// defineHandlers rejects unknown operationIds at the definition site.
+// satisfies-form rejects unknown operationIds at the definition site.
 {
-  defineHandlers<Operations>()({
+  const _bag = {
     getStatus: (_req, res) => {
       res.json({ message: 'ok' });
     },
@@ -172,5 +173,6 @@ const managementHandlers = defineHandlers<Operations>()({
     unknownOp: (_req, res) => {
       res.json({ message: 'huh' });
     }
-  });
+  } satisfies Partial<HandlerMapFor<typeof buildRegistry>>;
+  void _bag;
 }

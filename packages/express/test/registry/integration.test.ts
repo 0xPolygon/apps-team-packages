@@ -54,149 +54,140 @@ const HeaderEcho = z.object({ apiVersion: z.string() });
 
 // === Registry ==============================================================
 
-function buildRegistry() {
-  const registry: TypedRegistry = new TypedRegistry();
-
-  // Plain non-codec response.
-  registry.registerPath({
-    operationId: 'getHello',
-    method: 'get',
-    path: '/hello',
-    responses: {
-      200: { description: 'ok', content: { 'application/json': { schema: HelloResponse } } }
-    }
-  });
-
-  // Top-level codec response (Int64Codec on its own).
-  registry.registerPath({
-    operationId: 'getCounter',
-    method: 'get',
-    path: '/counter',
-    responses: {
-      200: { description: 'ok', content: { 'application/json': { schema: Int64Codec } } }
-    }
-  });
-
-  // Multi-status with codec field on the success body.
-  registry.registerPath({
-    operationId: 'getItem',
-    method: 'get',
-    path: '/items/{id}',
-    request: {
-      params: z.object({ id: Int64Codec })
-    },
-    responses: {
-      200: { description: 'ok', content: { 'application/json': { schema: Item } } },
-      404: { description: 'not found', content: { 'application/json': { schema: NotFoundShape } } }
-    }
-  });
-
-  // Body validation + codec decode on a query param.
-  registry.registerPath({
-    operationId: 'createItem',
-    method: 'post',
-    path: '/items',
-    request: {
-      query: z.object({ tag: z.string().optional() }),
-      body: {
-        content: {
-          'application/json': {
-            schema: z.object({ label: z.string().min(1).max(80), createdAt: IsoDateCodec })
-          }
+const buildRegistry = () =>
+  new TypedRegistry()
+    // Plain non-codec response.
+    .registerPath({
+      operationId: 'getHello',
+      method: 'get',
+      path: '/hello',
+      responses: {
+        200: { description: 'ok', content: { 'application/json': { schema: HelloResponse } } }
+      }
+    })
+    // Top-level codec response (Int64Codec on its own).
+    .registerPath({
+      operationId: 'getCounter',
+      method: 'get',
+      path: '/counter',
+      responses: {
+        200: { description: 'ok', content: { 'application/json': { schema: Int64Codec } } }
+      }
+    })
+    // Multi-status with codec field on the success body.
+    .registerPath({
+      operationId: 'getItem',
+      method: 'get',
+      path: '/items/{id}',
+      request: {
+        params: z.object({ id: Int64Codec })
+      },
+      responses: {
+        200: { description: 'ok', content: { 'application/json': { schema: Item } } },
+        404: {
+          description: 'not found',
+          content: { 'application/json': { schema: NotFoundShape } }
         }
       }
-    },
-    responses: {
-      200: { description: 'ok', content: { 'application/json': { schema: Item } } }
-    }
-  });
-
-  // Header validation.
-  registry.registerPath({
-    operationId: 'echoHeaders',
-    method: 'get',
-    path: '/echo',
-    request: {
-      headers: z.object({
-        // express lowercases header names; openapi-side schema has to match.
-        'x-api-version': z.string()
-      })
-    },
-    responses: {
-      200: { description: 'ok', content: { 'application/json': { schema: HeaderEcho } } }
-    }
-  });
-
-  // Synchronous throw.
-  registry.registerPath({
-    operationId: 'syncBoom',
-    method: 'get',
-    path: '/sync-boom',
-    responses: {
-      200: { description: 'ok', content: { 'application/json': { schema: HelloResponse } } }
-    }
-  });
-
-  // Async (rejected promise) throw.
-  registry.registerPath({
-    operationId: 'asyncBoom',
-    method: 'get',
-    path: '/async-boom',
-    responses: {
-      200: { description: 'ok', content: { 'application/json': { schema: HelloResponse } } }
-    }
-  });
-
-  // Handler returns a body that doesn't satisfy the response schema —
-  // z.encode should fail and route to the error handler.
-  registry.registerPath({
-    operationId: 'badShape',
-    method: 'get',
-    path: '/bad-shape',
-    responses: {
-      200: { description: 'ok', content: { 'application/json': { schema: HelloResponse } } }
-    }
-  });
-
-  // Handler emits a status code that has no schema — should pass through
-  // unchanged via the original res.json (no encode attempted).
-  registry.registerPath({
-    operationId: 'unregisteredStatus',
-    method: 'get',
-    path: '/unregistered-status',
-    responses: {
-      200: { description: 'ok', content: { 'application/json': { schema: HelloResponse } } }
-    }
-  });
-
-  // Multi-section validation: params + headers + body all required, all
-  // can be made to fail in a single request to confirm the validator
-  // aggregates failures across sections rather than short-circuiting on
-  // the first.
-  registry.registerPath({
-    operationId: 'multiCheck',
-    method: 'post',
-    path: '/multi/{id}',
-    request: {
-      params: z.object({ id: Int64Codec }),
-      headers: z.object({ 'x-required': z.string() }),
-      body: {
-        content: {
-          'application/json': {
-            schema: z.object({ label: z.string().min(1) })
+    })
+    // Body validation + codec decode on a query param.
+    .registerPath({
+      operationId: 'createItem',
+      method: 'post',
+      path: '/items',
+      request: {
+        query: z.object({ tag: z.string().optional() }),
+        body: {
+          content: {
+            'application/json': {
+              schema: z.object({ label: z.string().min(1).max(80), createdAt: IsoDateCodec })
+            }
           }
         }
+      },
+      responses: {
+        200: { description: 'ok', content: { 'application/json': { schema: Item } } }
       }
-    },
-    responses: {
-      200: { description: 'ok', content: { 'application/json': { schema: HelloResponse } } }
-    }
-  });
+    })
+    // Header validation.
+    .registerPath({
+      operationId: 'echoHeaders',
+      method: 'get',
+      path: '/echo',
+      request: {
+        headers: z.object({
+          // express lowercases header names; openapi-side schema has to match.
+          'x-api-version': z.string()
+        })
+      },
+      responses: {
+        200: { description: 'ok', content: { 'application/json': { schema: HeaderEcho } } }
+      }
+    })
+    // Synchronous throw.
+    .registerPath({
+      operationId: 'syncBoom',
+      method: 'get',
+      path: '/sync-boom',
+      responses: {
+        200: { description: 'ok', content: { 'application/json': { schema: HelloResponse } } }
+      }
+    })
+    // Async (rejected promise) throw.
+    .registerPath({
+      operationId: 'asyncBoom',
+      method: 'get',
+      path: '/async-boom',
+      responses: {
+        200: { description: 'ok', content: { 'application/json': { schema: HelloResponse } } }
+      }
+    })
+    // Handler returns a body that doesn't satisfy the response schema —
+    // z.encode should fail and route to the error handler.
+    .registerPath({
+      operationId: 'badShape',
+      method: 'get',
+      path: '/bad-shape',
+      responses: {
+        200: { description: 'ok', content: { 'application/json': { schema: HelloResponse } } }
+      }
+    })
+    // Handler emits a status code that has no schema — should pass through
+    // unchanged via the original res.json (no encode attempted).
+    .registerPath({
+      operationId: 'unregisteredStatus',
+      method: 'get',
+      path: '/unregistered-status',
+      responses: {
+        200: { description: 'ok', content: { 'application/json': { schema: HelloResponse } } }
+      }
+    })
+    // Multi-section validation: params + headers + body all required, all
+    // can be made to fail in a single request to confirm the validator
+    // aggregates failures across sections rather than short-circuiting on
+    // the first.
+    .registerPath({
+      operationId: 'multiCheck',
+      method: 'post',
+      path: '/multi/{id}',
+      request: {
+        params: z.object({ id: Int64Codec }),
+        headers: z.object({ 'x-required': z.string() }),
+        body: {
+          content: {
+            'application/json': {
+              schema: z.object({ label: z.string().min(1) })
+            }
+          }
+        }
+      },
+      responses: {
+        200: { description: 'ok', content: { 'application/json': { schema: HelloResponse } } }
+      }
+    });
 
-  return registry;
-}
-
-type Operations = ReturnType<typeof buildRegistry> extends TypedRegistry<infer O> ? O : never;
+import type { OperationsOf } from '@polygonlabs/openapi-registry';
+type Operations = OperationsOf<typeof buildRegistry>;
 
 // === Handlers ==============================================================
 

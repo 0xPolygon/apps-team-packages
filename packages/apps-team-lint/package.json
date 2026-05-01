@@ -27,14 +27,16 @@
     "MIGRATION.md"
   ],
   "scripts": {
-    "build": "pnpm run typecheck && tsc -p tsconfig.build.json",
+    "build": "pnpm run typecheck && rm -rf dist *.tsbuildinfo && tsc -p tsconfig.build.json && node ../../scripts/verify-dist-exports.mjs",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
     "lint": "eslint .",
     "clean": "rm -rf node_modules dist *.tsbuildinfo",
     "prepublishOnly": "pnpm run build"
   },
   "dependencies": {
     "@commitlint/config-conventional": "^19.0.0",
+    "@typescript-eslint/utils": "^8.56.1",
     "eslint-config-prettier": "^10.1.8",
     "eslint-import-resolver-typescript": "^4.4.4",
     "eslint-plugin-import-x": "^4.16.2",
@@ -72,7 +74,9 @@
     "@commitlint/types": "^19.0.0",
     "@tsconfig/node-ts": "^23.0.0",
     "@tsconfig/node24": "^24.0.0",
+    "@typescript-eslint/rule-tester": "8.57.2",
     "markdownlint": "^0.40.0",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.3"
   }
 }

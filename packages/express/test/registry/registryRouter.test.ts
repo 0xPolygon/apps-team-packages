@@ -33,8 +33,7 @@ describe('createRegistryRouter', () => {
     // clear "Missing handlers" diagnostic. The cast bypasses the guard so
     // we can exercise the runtime fallback that fires from inside the
     // operation-mounting loop. Production code never reaches this branch.
-    const registry: TypedRegistry = new TypedRegistry();
-    registry.registerPath({
+    const registry = new TypedRegistry().registerPath({
       operationId: 'getHello',
       method: 'get',
       path: '/hello',
@@ -52,13 +51,12 @@ describe('createRegistryRouter', () => {
     // for runtime validation. The guard converts what would otherwise be a
     // silent skip (no validation, handler sees raw req.headers) into a loud
     // failure at server startup.
-    const registry: TypedRegistry = new TypedRegistry();
     // The asteasolutions `RouteConfig` types `request.headers` as
     // `RouteParameter | ZodType[]`. Our `TypedRegistry.registerPath` only
     // exposes the object form in its public types — the array form is
     // unsupported by design — so cast the headers field through `never`
     // to construct a config we deliberately want the validator to reject.
-    registry.registerPath({
+    const registry = new TypedRegistry().registerPath({
       operationId: 'arrayHeadersOp',
       method: 'get',
       path: '/array-headers',
@@ -91,14 +89,18 @@ describe('createRegistryRouter', () => {
   it('mounts every method in asteasolutions Method union', async () => {
     const verbs = ['get', 'post', 'put', 'patch', 'delete', 'head', 'options', 'trace'] as const;
 
-    const registry: TypedRegistry = new TypedRegistry();
+    let registry: TypedRegistry = new TypedRegistry();
     const handlers: Record<
       string,
       (_req: unknown, res: { json: (b: unknown) => unknown }) => void
     > = {};
     for (const verb of verbs) {
       const opId = `${verb}Hello`;
-      registry.registerPath({
+      // Imperative reassignment is the chainable-API equivalent of the
+      // old discarded-return pattern — keeps the per-verb branch but
+      // captures each chain return so the runtime registry stays in sync
+      // with the type-level narrow.
+      registry = registry.registerPath({
         operationId: opId,
         // The cast aligns the literal type with `RouteConfig['method']` —
         // `verbs` is a tuple of literals; without it TS widens to `string`.

@@ -362,53 +362,20 @@ export function createRegistryRouter<
   );
 }
 
-/**
- * Type-the-bag-and-return-it helper for module files that expose a partial
- * handler bag for later composition via `.implement(...)`. Two-call form
- * because TypeScript can't partial-apply generics — call the outer with
- * `<Operations, AuthMap>` (or just `<Operations>` when there is no auth
- * map) and pass the inline bag to the inner. Each handler's `req` / `res`
- * narrows to the operation's typed view; surplus keys (not present in
- * `Ops`) and wrong handler shapes are TS errors at the definition site.
- *
- *     // routes/management.ts
- *     import type { Operations } from '@your/schemas';
- *     import type { AppAuthMap } from '../auth.ts';
- *     import { defineHandlers } from '@polygonlabs/express/registry';
- *
- *     export const managementHandlers = defineHandlers<Operations, AppAuthMap>()({
- *       rebalance: (req, res) => {
- *         const tenantId = req.auth.apiKey.tenantId;  // typed
- *         res.json({ ok: true, tenantId });
- *       }
- *     });
- *
- *     // index.ts
- *     const router = createRegistryRouter({ registry })
- *       .auth(authHandlers)
- *       .implement(statusHandlers)
- *       .implement(managementHandlers);
- *     app.use(router.toExpress());
- */
-export function defineHandlers<Ops extends OperationsManifest, AuthMap = Record<string, never>>(): <
-  const H extends Partial<HandlerMap<Ops, AuthMap>>
->(
-  handlers: H & { [K in Exclude<keyof H, keyof Ops>]: never }
-) => H {
-  return (handlers) => handlers as never;
-}
-
 export type {
   AuthHandler,
   AuthHandlerMap,
+  AuthHandlerMapFor,
   Handler,
   HandlerMap,
+  HandlerMapFor,
   Operation,
   OperationsManifest,
   TypedRequest,
   TypedResponse
 } from './types.ts';
 export type { MissingHandlersError, ZodErrorTree };
+export type { OperationsOf, SchemesOf } from '@polygonlabs/openapi-registry';
 export {
   ErrorResponseSchema,
   ValidationErrorInfoSchema,

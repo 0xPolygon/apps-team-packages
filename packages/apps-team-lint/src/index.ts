@@ -1,4 +1,5 @@
 export { frontend } from './frontend.ts';
+export { polygonPlugin } from './plugin.ts';
 export { recommended } from './recommended.ts';
 export { typescript } from './typescriptConfig.ts';
 
