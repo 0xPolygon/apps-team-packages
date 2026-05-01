@@ -68,7 +68,7 @@
   "peerDependencies": {
     "@asteasolutions/zod-to-openapi": "^8.0.0",
     "@polygonlabs/logger": "^2.1.0",
-    "@polygonlabs/openapi-registry": "^1.0.1",
+    "@polygonlabs/openapi-registry": "^1.1.0",
     "@polygonlabs/verror": "^1.0.3",
     "express": ">=5",
     "zod": "^4.0.0"

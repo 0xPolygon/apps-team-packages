@@ -16,7 +16,7 @@
 import type { Express } from 'express';
 
 import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi';
-import express from 'express';
+import express, { json } from 'express';
 import supertest from 'supertest';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
@@ -108,7 +108,7 @@ describe('partial-implement composition', () => {
       });
 
     app = express();
-    app.use(express.json());
+    app.use(json());
     app.use(setupLogger(logger));
     app.use(router.toExpress());
     app.use(createErrorHandler());

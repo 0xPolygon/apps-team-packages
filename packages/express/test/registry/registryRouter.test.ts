@@ -11,7 +11,7 @@
 import type { RouteConfig } from '@asteasolutions/zod-to-openapi';
 
 import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi';
-import express from 'express';
+import express, { json } from 'express';
 import supertest from 'supertest';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
@@ -119,7 +119,7 @@ describe('createRegistryRouter', () => {
     ).toExpress();
 
     const app = express();
-    app.use(express.json());
+    app.use(json());
     app.use(expressRouter);
 
     for (const verb of verbs) {
