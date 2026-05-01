@@ -8,6 +8,11 @@
     "sourceMap": true,
     "declaration": true,
     "declarationMap": true,
+    // Override the source-condition resolution inherited from tsconfig.json.
+    // Build-time output must reference workspace deps via their published
+    // dist/.d.ts (Node default resolution), not their src/. Currently zero
+    // diff in emitted output; defends against future drift.
+    "customConditions": [],
     "module": "preserve",
     "moduleResolution": "bundler"
   },
