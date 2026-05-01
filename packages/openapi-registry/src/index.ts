@@ -30,7 +30,7 @@
  *   - `OperationsOf<typeof buildRegistry>` brands the fully-empty case
  *     so a registry that lost every narrow surfaces as a type-level
  *     error at the consumer site.
- *   - `@polygonlabs/apps-team-lint`'s `polygon/no-discarded-chain` rule
+ *   - `@polygonlabs/apps-team-lint`'s `polygon/no-discarded-typed-registry-chain` rule
  *     catches partial mid-chain discards at lint time — the case the
  *     type-level brand can't see. Type-aware, only fires on real
  *     `TypedRegistry` receivers, enabled at `error` in the
@@ -246,7 +246,7 @@ export class TypedRegistry<
  * non-empty manifest.
  */
 export type EmptyOperationsManifestError =
-  '__ERROR_OPERATIONS_EMPTY: registry returned no operations. A chain return value was likely discarded — chain or capture every registration. The polygon/no-discarded-chain lint rule (in @polygonlabs/apps-team-lint) catches partial discards too. See @polygonlabs/openapi-registry README.';
+  '__ERROR_OPERATIONS_EMPTY: registry returned no operations. A chain return value was likely discarded — chain or capture every registration. The polygon/no-discarded-typed-registry-chain lint rule (in @polygonlabs/apps-team-lint) catches partial discards too. See @polygonlabs/openapi-registry README.';
 
 /**
  * Extract the `Ops` accumulator from a registry-builder function's
@@ -262,7 +262,7 @@ export type EmptyOperationsManifestError =
  *
  * Partial discards (some calls chained, some discarded) still
  * under-report — the manifest is non-empty but missing entries. The
- * `polygon/no-discarded-chain` ESLint rule from
+ * `polygon/no-discarded-typed-registry-chain` ESLint rule from
  * `@polygonlabs/apps-team-lint` (enabled at `error` in the
  * `typescript()` preset) catches that case at lint time.
  */

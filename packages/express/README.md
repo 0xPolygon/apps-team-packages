@@ -241,7 +241,7 @@ discarding a chain return (`r.registerPath({…});` with the result
 dropped) loses the type-level narrow even though the runtime
 registration succeeds, leading to `HandlerMapFor` under-reporting which
 operations need handlers. `@polygonlabs/apps-team-lint`'s
-`polygon/no-discarded-chain` rule (enabled at `error` in the
+`polygon/no-discarded-typed-registry-chain` rule (enabled at `error` in the
 `typescript()` preset) catches this at lint time. See
 `@polygonlabs/openapi-registry`'s "The one rule" section for details.
 

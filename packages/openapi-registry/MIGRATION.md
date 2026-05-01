@@ -255,7 +255,7 @@ Two defences:
   worst case (every return discarded — manifest is `{}`) as a
   type-level error.
 - **Lint**: `@polygonlabs/apps-team-lint`'s
-  `polygon/no-discarded-chain` rule catches partial discards at lint
+  `polygon/no-discarded-typed-registry-chain` rule catches partial discards at lint
   time. Type-aware, only fires on real `TypedRegistry` receivers,
   enabled at `error` in the `typescript()` preset.
 

@@ -48,7 +48,7 @@ The asserts-based footguns are gone: no `: TypedRegistry` annotation requirement
 The chainable API has one new failure mode: `r.registerPath({ … });` that drops the return still mutates the underlying registry at runtime, but the type-level narrow is lost. Two complementary defences:
 
 - **`OperationsOf<F>`** brands the worst case (every link discarded → manifest `{}`) as a type-level error string, so downstream consumers see the bug at the `satisfies HandlerMapFor<F>` use site.
-- **`@polygonlabs/apps-team-lint`'s `polygon/no-discarded-chain`** rule (shipped in the same release wave) catches partial discards at lint time — type-aware, only fires on real `TypedRegistry` receivers. Enabled at `error` in the `typescript()` preset, so consuming repos pick it up automatically when they update.
+- **`@polygonlabs/apps-team-lint`'s `polygon/no-discarded-typed-registry-chain`** rule (shipped in the same release wave) catches partial discards at lint time — type-aware, only fires on real `TypedRegistry` receivers. Enabled at `error` in the `typescript()` preset, so consuming repos pick it up automatically when they update.
 
 See README "The one rule".
 

@@ -1,5 +1,5 @@
 /**
- * RuleTester-based unit tests for `polygon/no-discarded-chain`.
+ * RuleTester-based unit tests for `polygon/no-discarded-typed-registry-chain`.
  *
  * The rule is type-aware (it has to look up the receiver's TS symbol
  * name), so the tester is configured with `projectService` pointing at a
@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { RuleTester } from '@typescript-eslint/rule-tester';
 import { afterAll, describe, it } from 'vitest';
 
-import { noDiscardedChain } from '../src/rules/no-discarded-chain.ts';
+import { noDiscardedChain } from '../src/rules/no-discarded-typed-registry-chain.ts';
 
 RuleTester.afterAll = afterAll;
 RuleTester.describe = describe;
@@ -48,7 +48,7 @@ declare class TypedRegistry<Ops = {}, Schemes = {}> {
 }
 `;
 
-ruleTester.run('no-discarded-chain', noDiscardedChain, {
+ruleTester.run('no-discarded-typed-registry-chain', noDiscardedChain, {
   valid: [
     // Chained returns — the standard correct usage.
     {

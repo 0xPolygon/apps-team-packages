@@ -162,8 +162,54 @@ own config automatically.
 | Export | Options | What it configures |
 | --- | --- | --- |
 | `recommended(options?)` | `{ globals?: 'node' \| 'browser' \| Record<string, boolean> }` | Global ignores, import sorting (perfectionist), import-x rules, core rules (`no-param-reassign`, etc.), default-export exemptions for config files, Prettier compatibility, environment globals |
-| `typescript(options?)` | `{ tsconfigRootDir?: string }` — required in monorepo per-package configs | TS-ESLint recommended rules, type-aware linting (`projectService`), TS import resolver, `consistent-type-imports`, `no-floating-promises`, `no-explicit-any` (warn) |
+| `typescript(options?)` | `{ tsconfigRootDir?: string }` — required in monorepo per-package configs | TS-ESLint recommended rules, type-aware linting (`projectService`), TS import resolver, `consistent-type-imports`, `no-floating-promises`, `no-explicit-any` (warn), [`polygon/no-discarded-typed-registry-chain`](#no-discarded-typed-registry-chain) |
 | `frontend()` | none | `no-default-export` exemption for `.tsx` files |
+
+## Custom rules
+
+The `typescript()` preset registers an internal `polygon/*` plugin
+holding rules that catch failure modes specific to other
+`@polygonlabs/*` packages.
+
+### no-discarded-typed-registry-chain
+
+Flags discarded chain returns from `@polygonlabs/openapi-registry`'s
+`TypedRegistry`. The chainable API returns a registry typed with the
+just-registered entry added — `r.registerPath({…});` (with the result
+dropped) still mutates the underlying registry at runtime, but the
+type-level narrow is lost. Downstream
+`OperationsOf<typeof buildRegistry>` then under-reports operations,
+even though the OpenAPI spec contains them.
+
+The rule is type-aware (uses `parserServices` from the
+`projectService: true` setup) so it only fires on real `TypedRegistry`
+receivers — same-named methods on unrelated classes are not flagged.
+The flagged methods are the narrow-carrying ones: `registerPath`,
+`registerSecurityScheme`, and `with`. The forwarded chain methods
+(`registerComponent`, `registerWebhook`, `register`,
+`registerParameter`) don't carry type-level narrows, so discarding
+them is safe and not flagged.
+
+Enabled at `'error'` severity. To opt out for a deliberate fixture
+that demonstrates the failure mode (e.g. an internal test pinning
+runtime side-effect behaviour), add a scoped
+`eslint-disable polygon/no-discarded-typed-registry-chain` directive with a `--`
+comment explaining why.
+
+```ts
+// chain (idiomatic) — no flag
+return r.registerPath(a).registerPath(b);
+
+// capture (acceptable when imperative branching matters) — no flag
+let r1 = r.registerPath(a);
+if (cond) r1 = r1.registerPath(b);
+return r1;
+
+// silent failure — flagged
+r.registerPath(a);                     // return discarded
+r.registerPath(b);                     // return discarded
+return r;                              // type unchanged from input
+```
 
 ## Markdownlint
 

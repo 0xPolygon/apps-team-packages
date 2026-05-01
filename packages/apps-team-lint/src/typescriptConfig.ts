@@ -39,8 +39,8 @@ export function typescript(options?: TypeScriptOptions) {
       ],
       // Catches the partial-discard case in @polygonlabs/openapi-registry's
       // chainable API that the type-level `OperationsOf` brand can't detect.
-      // See @polygonlabs/apps-team-lint/src/rules/no-discarded-chain.ts.
-      'polygon/no-discarded-chain': 'error'
+      // See @polygonlabs/apps-team-lint/src/rules/no-discarded-typed-registry-chain.ts.
+      'polygon/no-discarded-typed-registry-chain': 'error'
     }
   });
 }

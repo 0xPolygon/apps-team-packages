@@ -3,12 +3,12 @@
  * flat config registers under the `polygon` namespace. Rules are referenced
  * downstream as `polygon/<rule-name>`.
  *
- * Currently houses one rule, `no-discarded-chain`, which catches the
+ * Currently houses one rule, `no-discarded-typed-registry-chain`, which catches the
  * partial-discard case of the @polygonlabs/openapi-registry chainable API
  * that the type-level `OperationsOf` brand cannot detect.
  */
 
-import { noDiscardedChain } from './rules/no-discarded-chain.ts';
+import { noDiscardedChain } from './rules/no-discarded-typed-registry-chain.ts';
 
 export const polygonPlugin = {
   meta: {
@@ -16,6 +16,6 @@ export const polygonPlugin = {
     version: '2.0.2'
   },
   rules: {
-    'no-discarded-chain': noDiscardedChain
+    'no-discarded-typed-registry-chain': noDiscardedChain
   }
 };

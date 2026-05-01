@@ -84,9 +84,9 @@ describe('TypedRegistry', () => {
       // surfaces the bug at consumer sites. The eslint-disables scope to
       // exactly the lines that make this test what it is.
       const r = new TypedRegistry();
-      // eslint-disable-next-line polygon/no-discarded-chain -- intentional: this is the failure-mode pin
+      // eslint-disable-next-line polygon/no-discarded-typed-registry-chain -- intentional: this is the failure-mode pin
       r.registerPath({ operationId: 'a', method: 'get', path: '/a', responses: okResponse });
-      // eslint-disable-next-line polygon/no-discarded-chain -- intentional: this is the failure-mode pin
+      // eslint-disable-next-line polygon/no-discarded-typed-registry-chain -- intentional: this is the failure-mode pin
       r.registerPath({ operationId: 'b', method: 'get', path: '/b', responses: okResponse });
 
       expect(registeredOperationIds(r)).toEqual(['a', 'b']);

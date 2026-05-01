@@ -1,5 +1,5 @@
 /**
- * Rule: `no-discarded-chain`.
+ * Rule: `no-discarded-typed-registry-chain`.
  *
  * Flags `<expr>.registerPath(...)` (and the other narrow-carrying chainable
  * methods) on a `TypedRegistry` receiver when the call appears in
@@ -34,13 +34,18 @@ const TARGET_TYPE_NAME = 'TypedRegistry';
 
 const NARROW_CARRYING_METHODS = new Set(['registerPath', 'registerSecurityScheme', 'with']);
 
+// Documentation URL for the rule. Points at the npm package page (public)
+// rather than the source on GitHub — `0xPolygon/apps-team-packages` is a
+// private repo, so a github.com link 404s for external consumers of the
+// publicly-published `@polygonlabs/apps-team-lint`. The npm page renders
+// the package's README; the `#${name}` anchor deep-links to the per-rule
+// section under "Custom rules".
 const createRule = ESLintUtils.RuleCreator(
-  (name) =>
-    `https://github.com/0xPolygon/apps-team-packages/tree/main/packages/apps-team-lint/src/rules/${name}.ts`
+  (name) => `https://www.npmjs.com/package/@polygonlabs/apps-team-lint#${name}`
 );
 
 export const noDiscardedChain = createRule({
-  name: 'no-discarded-chain',
+  name: 'no-discarded-typed-registry-chain',
   meta: {
     type: 'problem',
     docs: {
