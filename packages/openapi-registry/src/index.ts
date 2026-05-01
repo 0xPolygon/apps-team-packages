@@ -2,42 +2,34 @@
  * Type-accumulating OpenAPIRegistry composition.
  *
  * `TypedRegistry` is a drop-in superset of `OpenAPIRegistry` from
- * `@asteasolutions/zod-to-openapi` — same method names, same parameter shapes,
- * same `definitions` getter the OpenAPI generator reads. The additions are
- * type-level: each `registerPath` call narrows `this`'s `Ops` accumulator and
- * each `registerComponent('securitySchemes', name, …)` call narrows `this`'s
- * `SchemeNames` accumulator, both via `asserts this is X`. The registry's
- * type carries every registered operationId and every registered security
- * scheme name by the time it's returned, with no duplication between the
- * spec and the typed handler binding downstream.
+ * `@asteasolutions/zod-to-openapi` — same `definitions` getter the OpenAPI
+ * generator reads, same runtime behaviour for every method. The additions
+ * are type-level: `registerPath` and `registerSecurityScheme` return a
+ * narrower `TypedRegistry` whose `Ops` and `Schemes` accumulators include
+ * the just-registered entry. Composition uses the standard fluent-builder
+ * pattern — chain calls, and the variable holding the final result picks
+ * up the accumulated narrow without any annotation:
  *
- * Compose your registry inside a function (`buildRegistry()`, in the consumer)
- * — wrapping in a function is what preserves the accumulated narrows across
- * the export boundary. The function's return type is inferred from the final
- * value of `registry`, after every register call has narrowed the receiver.
+ *     export const buildRegistry = () =>
+ *       new TypedRegistry()
+ *         .registerSecurityScheme('ApiKeyAuth', { type: 'apiKey', name: 'x-api-key', in: 'header' })
+ *         .with(addCoreRoutes)
+ *         .with(addBlockRoutes);
  *
- * Four preconditions for the asserts narrowing to materialise (skip any one
- * and the narrow silently no-ops):
+ *     export type Operations = OperationsOf<typeof buildRegistry>;
  *
- *   1. **TS2775**: the variable holding the registry must have an EXPLICIT
- *      type annotation: `const registry: TypedRegistry = new TypedRegistry()`.
- *      `asserts this is X` only narrows variables whose type is syntactically
- *      annotated at the declaration. Inferred types — even from a typed
- *      factory function — don't qualify, which is why no `createTypedRegistry`
- *      helper is provided: it can't bypass the rule, only restate it.
- *   2. **`<const O>`** on `registerPath` and `<const N>` on `registerComponent`
- *      force literal-type inference on the route operationId and the scheme
- *      name, so they survive as literal types in the accumulator instead of
- *      widening to `string`.
- *   3. **Function wrapper**: the narrows only survive the export boundary
- *      when the registry is returned from a function. `export const registry
- *      = …` after the calls loses the narrow at the export boundary.
- *   4. **Phantom witnesses (`declare readonly ops` / `declare readonly schemes`)**
- *      anchor variance. Without each generic appearing in a real return
- *      position somewhere in the class, TypeScript treats them as
- *      variance-unused (bivariant), and `asserts this is X` narrowing
- *      doesn't fire. Don't read these at runtime; they're always the empty
- *      manifest. The OpenAPI spec lives in `definitions`.
+ * The narrow flows through inferred return types into downstream consumers
+ * (Express request/response validation and auth binding, codegen audits,
+ * gateway aggregation) without per-step type annotations.
+ *
+ * The single rule the chainable shape relies on: every registration call
+ * returns a value that must be either chained or captured. A discarded
+ * return drops the type-level narrow even though the runtime side effect
+ * still happens. `OperationsOf<typeof buildRegistry>` brands the
+ * fully-empty case so a registry that lost every narrow surfaces as a
+ * type-level error at the consumer site, but a partial mid-chain discard
+ * still under-reports — the lint rule discussed in the README catches
+ * the rest.
  */
 
 import type { OpenAPIRegistry, RouteConfig } from '@asteasolutions/zod-to-openapi';
@@ -56,7 +48,7 @@ export type OperationsManifest = Record<string, RouteWithOpId>;
  * rather than imported from `openapi3-ts` to keep the dependency surface
  * minimal — asteasolutions's runtime `registerComponent` validates the full
  * shape, so this is just a sufficient structural type for the public
- * `registerComponent('securitySchemes', …)` overload.
+ * `registerSecurityScheme` parameter.
  */
 export type SecuritySchemeObject = {
   type: 'apiKey' | 'http' | 'oauth2' | 'openIdConnect';
@@ -76,16 +68,18 @@ export type SecuritySchemeObject = {
 };
 
 /**
- * Drop-in replacement for `OpenAPIRegistry` that accumulates registered
- * operations and security scheme names into the generic parameters via
- * `asserts this is X`.
+ * Fluent OpenAPI registry. `registerPath` and `registerSecurityScheme`
+ * return a `TypedRegistry` typed with the just-registered entry added;
+ * `with(fn)` runs a domain helper and returns the helper's result
+ * intersected with the receiver, so a misbehaving helper that drops
+ * the parent narrow can't reduce the accumulator.
  *
  * Inherits the rest of the OpenAPIRegistry surface (`register`,
- * `registerParameter`, `registerWebhook`, `definitions`). Code that treats
- * this as a regular `OpenAPIRegistry` sees no behavioural difference — only
- * `registerPath` and `registerComponent('securitySchemes', …)` carry the
- * extra type-level effect, and that effect is invisible to callers that
- * don't read the narrowed type.
+ * `registerParameter`, `registerComponent`, `registerWebhook`,
+ * `definitions`). Code that treats this as a regular `OpenAPIRegistry`
+ * sees no behavioural difference — only `registerPath` and
+ * `registerSecurityScheme` carry the extra type-level effect, and that
+ * effect is invisible to callers that don't read the narrowed type.
  */
 /* eslint-disable @typescript-eslint/no-empty-object-type -- the default `{}` is the "no entries yet" identity element for both intersection-based accumulators. `Record<string, never>` would be wrong (forbids any value); `object` doesn't carry the index signature shape we need. */
 export class TypedRegistry<
@@ -96,23 +90,20 @@ export class TypedRegistry<
   private inner: OpenAPIRegistry;
 
   /**
-   * Phantom witness for the `Ops` generic. Required for the
-   * `asserts this is X` narrowing on `registerPath` to actually apply —
-   * without `Ops` appearing in a real return-position somewhere in the
-   * class, TypeScript treats it as variance-unused and the assertion
-   * doesn't narrow `this`. Don't read this at runtime; it's always the
-   * empty manifest. The OpenAPI spec lives in `definitions`.
+   * Type-level accessor for the accumulated operations manifest. Read via
+   * `typeof registry['ops']` or `keyof typeof registry['ops']` from the
+   * narrowed value. Empty at runtime — the OpenAPI spec lives in
+   * `definitions`. The `OperationsOf<typeof buildFn>` helper is the
+   * recommended way to extract this from a builder function, since it
+   * also brands the empty case as a type-level error.
    */
   declare readonly ops: Ops;
 
   /**
-   * Phantom witness for the `Schemes` generic. Same role as `ops` — anchors
-   * variance so the `asserts this is X` narrowing on
-   * `registerSecurityScheme` actually fires. The presence-map shape
-   * (`Record<string, true>`) — rather than a string-union with `never`
-   * default — works around a TypeScript quirk where `never` defaults break
-   * `asserts this is X` narrowing for the second generic. Read scheme
-   * names via `keyof Schemes`. Don't read at runtime.
+   * Type-level accessor for the accumulated security scheme names. Read
+   * via `keyof typeof registry['schemes']` from the narrowed value. The
+   * presence-map shape (`Record<string, true>`) is what downstream
+   * `.auth(handlers)` binding consumes.
    */
   declare readonly schemes: Schemes;
 
@@ -121,89 +112,115 @@ export class TypedRegistry<
   }
 
   /**
-   * Register a path. Same runtime behaviour as `OpenAPIRegistry.registerPath`.
-   * The `<const O>` type parameter forces literal-type inference on the route
-   * so `operationId` and `path` survive as literal types in the accumulator.
-   * The `asserts this is TypedRegistry<...>` narrows the receiver's `Ops` to
-   * include the just-registered operation.
+   * Register a path. Returns this registry typed with `operationId` added
+   * to the `Ops` accumulator. Chain registrations to keep the narrow:
    *
-   * Requires `operationId` on the route — it's the accumulator key. (RouteConfig
-   * upstream types it optional, but every operation that needs typed handler
-   * binding must declare one anyway.)
+   *     new TypedRegistry()
+   *       .registerPath({ operationId: 'a', method: 'get', path: '/a', responses: ... })
+   *       .registerPath({ operationId: 'b', method: 'get', path: '/b', responses: ... })
+   *
+   * The `<const O>` type parameter forces literal-type inference on the
+   * route so `operationId` survives as a literal in the accumulator key
+   * instead of widening to `string`.
+   *
+   * Requires `operationId` on the route — it's the accumulator key.
+   * (RouteConfig upstream types it optional, but every operation that
+   * needs typed handler binding downstream must declare one anyway.)
    */
   registerPath<const O extends RouteWithOpId>(
     route: O
-  ): asserts this is TypedRegistry<Ops & { [K in O['operationId']]: O }, Schemes> {
+  ): TypedRegistry<Ops & { [K in O['operationId']]: O }, Schemes> {
     this.inner.registerPath(route);
+    return this as unknown as TypedRegistry<Ops & { [K in O['operationId']]: O }, Schemes>;
   }
 
   /**
-   * Compose a domain-helper function into this registry. The helper takes
-   * the registry, registers some routes (via `r.registerPath(...)`), and
-   * returns it. The asserts narrows `this` to whatever the helper returned —
-   * so the caller writes:
+   * Register a security scheme. Returns this registry typed with the
+   * literal scheme name added to the `Schemes` accumulator, so downstream
+   * consumers (the Express registry-router's `.auth(handlers)` binding)
+   * can require an exhaustive auth handler map at compile time via
+   * `keyof Schemes`.
    *
-   *     const registry: TypedRegistry = new TypedRegistry();
-   *     registry.extend(addCoreRoutes);
-   *     registry.extend(addBlockRoutes);
-   *     registry.extend(addMessageRoutes);
-   *     return registry;
-   *
-   * with each helper accumulating into the same variable. No chaining,
-   * statement-form, zero per-helper boilerplate. The asserted type derives
-   * from the helper's inferred return — adding or removing a registerPath
-   * inside the helper updates the accumulated type automatically. A
-   * misbehaving helper that drops `Ops` or `SchemeNames` can't actually
-   * reduce the accumulator: `asserts this is X` is intersected with the
-   * current `this`, so existing entries survive.
-   */
-  extend<R extends TypedRegistry<Record<string, RouteWithOpId>, Record<string, true>>>(
-    fn: (r: this) => R
-  ): asserts this is R {
-    fn(this);
-  }
-
-  /**
-   * Register a security scheme. Narrows `SchemeNames` to include the literal
-   * `name`, so downstream consumers (the Express registry-router's `.auth()`
-   * binding) can require an auth handler for every registered scheme at
-   * compile time. Runtime delegates to
-   * `inner.registerComponent('securitySchemes', name, scheme)` — the OpenAPI
-   * generator reads the scheme from `definitions` exactly as it would for a
-   * raw `registerComponent` call.
-   *
-   * Split from `registerComponent` deliberately: the type-level narrow only
-   * fires for the `'securitySchemes'` case, and a dedicated method captures
-   * that intent at the call site rather than hiding it inside an overload's
-   * conditional asserts that gets confused by inference.
+   * Runtime delegates to
+   * `inner.registerComponent('securitySchemes', name, scheme)` — the
+   * OpenAPI generator reads the scheme from `definitions` exactly as it
+   * would for a raw `registerComponent` call. Split from
+   * `registerComponent` deliberately: the type-level narrow only fires
+   * for the `'securitySchemes'` case, and a dedicated method captures
+   * that intent at the call site rather than hiding it inside an
+   * overload's conditional return that gets confused by inference.
    */
   registerSecurityScheme<const N extends string>(
     name: N,
     scheme: SecuritySchemeObject
-  ): asserts this is TypedRegistry<Ops, Schemes & { [K in N]: true }> {
+  ): TypedRegistry<Ops, Schemes & { [K in N]: true }> {
     this.inner.registerComponent('securitySchemes', name, scheme);
+    return this as unknown as TypedRegistry<Ops, Schemes & { [K in N]: true }>;
+  }
+
+  /**
+   * Compose a domain helper into the chain. The helper takes the registry
+   * (already narrowed with everything registered before this `.with`
+   * call), registers more routes, and returns the chained result:
+   *
+   *     // helper:
+   *     const addBlockRoutes = <Ops, Schemes>(r: TypedRegistry<Ops, Schemes>) =>
+   *       r.registerPath({ operationId: 'getBlockNumber', ... })
+   *        .registerPath({ operationId: 'getBlockMetadata', ... });
+   *
+   *     // composition:
+   *     export const buildRegistry = () =>
+   *       new TypedRegistry()
+   *         .with(addCoreRoutes)
+   *         .with(addBlockRoutes);
+   *
+   * Returns `this & R` (the receiver intersected with the helper's
+   * inferred return type) so a misbehaving helper that drops the parent
+   * narrow — say, by ignoring its argument and constructing a fresh
+   * registry — can't actually shrink the accumulator: existing entries
+   * survive via the intersection.
+   *
+   * `void` is rejected at the constraint: a helper that forgets to return
+   * the chain is a TS error at the `.with(fn)` call site, not a silent
+   * empty manifest downstream.
+   */
+  with<R extends TypedRegistry<Record<string, RouteWithOpId>, Record<string, true>>>(
+    fn: (r: this) => R
+  ): this & R {
+    fn(this);
+    return this as this & R;
   }
 
   /**
    * Generic component registration — schemas, parameters, headers, links,
    * callbacks, pathItems, requestBodies, responses, examples. No type-level
    * effect on the registry's accumulators; the OpenAPI generator reads
-   * everything via `definitions`.
+   * everything via `definitions`. Returns the registry for chaining.
    *
    * For security schemes use `registerSecurityScheme`, which carries the
-   * narrowing on `SchemeNames` that downstream `.auth()` binding requires.
+   * narrowing on `Schemes` that downstream `.auth(handlers)` binding
+   * requires.
    */
-  registerComponent(
-    ...args: Parameters<OpenAPIRegistry['registerComponent']>
-  ): ReturnType<OpenAPIRegistry['registerComponent']> {
-    return this.inner.registerComponent(...args);
+  registerComponent(...args: Parameters<OpenAPIRegistry['registerComponent']>): this {
+    this.inner.registerComponent(...args);
+    return this;
   }
 
-  // Forward the rest of the OpenAPIRegistry surface so consumers treating
-  // this as a plain registry (the OpenAPI generator, anything reading
-  // `.definitions`) see no behavioural difference. Return types are inferred
-  // from the inner methods to avoid depending on package-internal type names
-  // that aren't part of the published API.
+  /**
+   * Register a webhook. Returns the registry for chaining.
+   */
+  registerWebhook(webhook: RouteConfig): this {
+    this.inner.registerWebhook(webhook);
+    return this;
+  }
+
+  // `register` and `registerParameter` return the registered schema rather
+  // than the registry — that's the asteasolutions API and it's load-bearing
+  // for typical use:
+  //
+  //     export const Foo = registry.register('Foo', z.object({ ... }));
+  //
+  // They don't chain. Use them as expressions rather than chain steps.
   register<T extends z.ZodType>(refId: string, schema: T): T {
     return this.inner.register(refId, schema);
   }
@@ -212,11 +229,57 @@ export class TypedRegistry<
     return this.inner.registerParameter(refId, schema);
   }
 
-  registerWebhook(webhook: RouteConfig): void {
-    this.inner.registerWebhook(webhook);
-  }
-
   get definitions(): OpenAPIRegistry['definitions'] {
     return this.inner.definitions;
   }
 }
+
+/**
+ * Brand applied by `OperationsOf<F>` when the inferred registry's
+ * operations manifest is empty. Used as a type-level error message that
+ * surfaces in IDE hover and breaks downstream consumers that assume a
+ * non-empty manifest.
+ */
+export type EmptyOperationsManifestError =
+  '__ERROR_OPERATIONS_EMPTY: registry returned no operations. A chain return value was likely discarded; see @polygonlabs/openapi-registry README.';
+
+/**
+ * Extract the `Ops` accumulator from a registry-builder function's
+ * inferred return type, or surface a type-level error if the manifest
+ * is empty.
+ *
+ * The empty-case brand catches the worst silent failure in the chainable
+ * API: a builder where every registration's return was discarded and the
+ * registry stays at its `{}` initial type. Downstream code reading
+ * `OperationsOf<typeof buildRegistry>` sees the brand string instead of
+ * a usable manifest, which surfaces the bug in IDE hover at the consumer
+ * site.
+ *
+ * Partial discards (some calls chained, some discarded) still
+ * under-report — the manifest is non-empty but missing entries. The
+ * `@polygonlabs/openapi-registry/no-discarded-chain` ESLint rule
+ * documented in the README catches that case.
+ */
+export type OperationsOf<
+  F extends () => TypedRegistry<Record<string, RouteWithOpId>, Record<string, true>>
+> =
+  ReturnType<F> extends TypedRegistry<infer O, Record<string, true>>
+    ? keyof O extends never
+      ? EmptyOperationsManifestError
+      : O
+    : never;
+
+/**
+ * Extract the `Schemes` accumulator (a `Record<string, true>` whose keys
+ * are the registered security scheme names) from a registry-builder
+ * function's inferred return type. Downstream `.auth(handlers)` binding
+ * uses `keyof SchemesOf<typeof buildRegistry>` to require an exhaustive
+ * auth handler map.
+ *
+ * No empty-case brand — registries without any security schemes are
+ * legitimate (no auth-gated routes), so an empty `Schemes` here is a
+ * normal state, not an error.
+ */
+export type SchemesOf<
+  F extends () => TypedRegistry<Record<string, RouteWithOpId>, Record<string, true>>
+> = ReturnType<F> extends TypedRegistry<Record<string, RouteWithOpId>, infer S> ? S : never;

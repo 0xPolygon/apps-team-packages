@@ -7,10 +7,10 @@ binding, codegen audits, gateway aggregation) read the accumulated
 operations and security schemes via inferred return types.
 
 The runtime behaviour is byte-compatible with `OpenAPIRegistry`. The
-additions are two type-level accumulators — every `registerPath` call
-narrows the receiver's `Ops`, and every `registerSecurityScheme` call
-narrows the receiver's `Schemes`. The `.extend(fn)` method composes
-per-domain helpers without chaining.
+additions are type-level: `registerPath` and `registerSecurityScheme`
+return a `TypedRegistry` typed with the just-registered entry added.
+Chain registration calls; the chain's final value carries every
+registered operationId and scheme name in its type.
 
 ## Install
 
@@ -25,45 +25,47 @@ Requires Zod v4 and zod-to-openapi v8.
 
 ```ts
 // schemas/registry.ts
-import { TypedRegistry } from '@polygonlabs/openapi-registry';
+import { TypedRegistry, type OperationsOf } from '@polygonlabs/openapi-registry';
 
 import { addBlockRoutes } from './routes/blocks.ts';
 import { addCoreRoutes } from './routes/core.ts';
-import { addMessageRoutes } from './routes/messages.ts';
 
-export function buildRegistry() {
-  // Explicit `: TypedRegistry` annotation is required (TS2775 — see below).
-  const registry: TypedRegistry = new TypedRegistry();
+export const buildRegistry = () =>
+  new TypedRegistry()
+    .registerSecurityScheme('ApiKeyAuth', {
+      type: 'apiKey',
+      in: 'header',
+      name: 'x-api-key'
+    })
+    .with(addCoreRoutes)
+    .with(addBlockRoutes);
 
-  registry.extend(addCoreRoutes);
-  registry.extend(addBlockRoutes);
-  registry.extend(addMessageRoutes);
-
-  return registry;
-}
-
-// The accumulated operations type, derived from buildRegistry's inferred
-// return type. Express services use this for HandlerMap<Operations>.
-export type Operations =
-  ReturnType<typeof buildRegistry> extends TypedRegistry<infer O> ? O : never;
+// Operations manifest derived from buildRegistry's inferred return type.
+// Express services use this for HandlerMap<Operations, AuthMap>.
+export type Operations = OperationsOf<typeof buildRegistry>;
 ```
 
 ```ts
 // schemas/routes/blocks.ts
 import { z } from 'zod';
 
-import type { OperationsManifest, TypedRegistry } from '@polygonlabs/openapi-registry';
+import type { RouteWithOpId, TypedRegistry } from '@polygonlabs/openapi-registry';
 
 import { BlockMetadata, NotFound } from '../schemas.ts';
 
-export function addBlockRoutes<Prev extends OperationsManifest>(r: TypedRegistry<Prev>) {
+// Generic over the parent's accumulators so the helper preserves
+// whatever was registered before `.with(addBlockRoutes)`.
+export const addBlockRoutes = <
+  Ops extends Record<string, RouteWithOpId>,
+  Schemes extends Record<string, true>
+>(
+  r: TypedRegistry<Ops, Schemes>
+) =>
   r.registerPath({
     operationId: 'getBlockMetadata',
     method: 'get',
     path: '/blocks/{blockNumber}',
-    request: {
-      params: z.object({ blockNumber: z.coerce.bigint() })
-    },
+    request: { params: z.object({ blockNumber: z.coerce.bigint() }) },
     responses: {
       200: {
         description: 'Block metadata',
@@ -75,15 +77,51 @@ export function addBlockRoutes<Prev extends OperationsManifest>(r: TypedRegistry
       }
     }
   });
-  return r;
-}
 ```
 
-The helpers stay statement-form. The accumulator narrows on every
-`registerPath` call. Helpers that receive the registry can return it
-verbatim — `.extend(fn)` reads the inferred return type and intersects
-it with the current `this`, so `Operations` carries every registered
-operationId by the time `buildRegistry()` returns.
+The chain's final value is what `buildRegistry()` returns. Each
+`.registerPath` returns a `TypedRegistry` typed with the new operationId
+added; each `.registerSecurityScheme` adds the scheme name to a
+parallel `Schemes` accumulator; `.with(fn)` runs a domain helper and
+returns the helper's chain result intersected with the receiver, so a
+misbehaving helper can't shrink the parent's accumulator.
+
+`registerPath` requires `operationId`. RouteConfig upstream types it
+optional, but the accumulator keys on it — operations without an
+`operationId` are unreachable to typed handler binding downstream.
+Always declare one.
+
+## The one rule: chain or capture every registration
+
+The chainable API has one silent failure mode: `r.registerPath({…});`
+that drops the return value still mutates the underlying registry at
+runtime — the path is registered in the OpenAPI spec — but the
+type-level narrow that the return carries is lost. If a downstream
+consumer reads the operations manifest from a chain where any link
+discarded its return, the accumulated type under-reports.
+
+Always either chain or capture:
+
+```ts
+// chain (idiomatic)
+return r.registerPath(a).registerPath(b);
+
+// capture (acceptable when imperative branching matters)
+let r1 = r.registerPath(a);
+if (cond) r1 = r1.registerPath(b);
+return r1;
+
+// silent failure — DO NOT
+r.registerPath(a);                     // return discarded
+r.registerPath(b);                     // return discarded
+return r;                              // type is unchanged from input
+```
+
+The `OperationsOf<typeof buildRegistry>` brand catches the worst case
+(every link discarded — manifest is `{}`) by resolving to a type-level
+error string, which surfaces in IDE hover at the consumer site.
+Partial discards (some chained, some discarded) under-report without
+the brand firing.
 
 ## Why a TypedRegistry instead of `OpenAPIRegistry` directly
 
@@ -103,144 +141,102 @@ type HandlerMap<Ops> = { [K in keyof Ops]: Handler<Ops[K]> };
 Missing handlers are a TS error at the wiring file, not a runtime drift
 warning.
 
-## Four preconditions for the asserts narrowing
+## Serving the OpenAPI document
 
-`registerPath` is declared as `asserts this is TypedRegistry<…>`. The
-narrowing only materialises if all four of these are true; skip any one
-and the narrow silently no-ops.
-
-### 1. TS2775 — explicit type annotation on the variable
-
-```ts
-//                  vvvvvvvvvvvvvv  required
-const registry: TypedRegistry = new TypedRegistry();
-registry.registerPath({ … });  // narrow applies
-```
+`registry.definitions` is the same getter `OpenAPIRegistry` exposes —
+forwarded verbatim — so `OpenApiGeneratorV3` / `OpenApiGeneratorV31`
+read the registry without any TypedRegistry-specific glue. The single
+source of truth feeds the served spec, the interactive docs, and (via
+the typed `Operations` manifest) the runtime router:
 
 ```ts
-const registry = new TypedRegistry();   // no annotation
-registry.registerPath({ … });           // TS2775 error: assertions require
-                                        // every name in the call target to
-                                        // be declared with an explicit type
-                                        // annotation
-```
+import { OpenApiGeneratorV3 } from '@asteasolutions/zod-to-openapi';
+import { apiReference } from '@scalar/express-api-reference';
+import { Router } from 'express';
 
-This is a TypeScript language rule, not something the package can
-work around with cleverer types — TS2775 checks the variable's
-declaration form, not whether the right-hand side has a known return
-type. A factory function would still need the annotation, so the
-package deliberately doesn't ship one — `new TypedRegistry()` is the
-only construction site.
+import type { TypedRegistry } from '@polygonlabs/openapi-registry';
 
-### 2. `<const O>` on `registerPath` for literal-type preservation
+export function createOpenApiRouter(registry: TypedRegistry): Router {
+  const spec = new OpenApiGeneratorV3(registry.definitions).generateDocument({
+    openapi: '3.0.0',
+    info: { title: 'My service', version: 'v1' },
+    servers: [{ url: '/' }]
+  });
 
-`registerPath<const O extends RouteWithOpId>(route: O)` — the `const`
-modifier (TS 5.0+) tells the compiler to infer `O` with its literal
-types preserved. Without it, `operationId: 'getMessage'` widens to
-`string`, and the accumulator key becomes `[string]` instead of
-`['getMessage']`.
-
-### 3. Function wrapper preserves the narrow across the export boundary
-
-```ts
-// LOSES the narrow at the export boundary:
-export const registry: TypedRegistry = new TypedRegistry();
-registry.registerPath({ operationId: 'a', … });
-// Importers see TypedRegistry<{}> — the narrow that fired locally is gone.
-
-// PRESERVES the narrow:
-export function buildRegistry() {
-  const registry: TypedRegistry = new TypedRegistry();
-  registry.registerPath({ operationId: 'a', … });
-  return registry;
+  const router = Router();
+  router.get('/openapi.json', (_req, res) => res.json(spec));
+  router.use('/docs', apiReference({ content: spec }));
+  return router;
 }
-// The inferred return type of buildRegistry captures the post-narrow type.
-// `ReturnType<typeof buildRegistry>` is TypedRegistry<{ a: … }>.
 ```
 
-This is why all team schemas packages compose inside a function.
-
-### 4. The phantom `declare readonly ops` / `declare readonly schemes` witnesses anchor variance
-
-Without each generic appearing in a real return-position somewhere in
-the class, TypeScript treats it as variance-unused (bivariant), and
-`asserts this is X` doesn't narrow `this`. The `declare readonly ops`
-and `declare readonly schemes` fields exist solely to anchor the
-variance — they're never read at runtime.
-
-If you ever refactor `TypedRegistry` and remove either field, the
-asserts narrowing silently no-ops. Don't.
-
-The `Schemes` accumulator deliberately uses a presence-map shape
-(`Record<string, true>`) keyed by scheme name rather than a string
-union with a `never` default — the latter triggers a TypeScript quirk
-where `asserts this is X` narrowing on the second generic doesn't fire.
-Consumers read scheme names via `keyof Schemes`.
+The `apiReference` import is `@scalar/express-api-reference` — the
+team-standard interactive docs UI. Drop it if you only need the raw
+JSON.
 
 ## Security scheme accumulation
 
 Routes that need authentication declare it via OpenAPI's `security`
 field on the route config. To make those declarations type-safe — both
 in the registry (which schemes exist?) and downstream (does every
-declared scheme have a handler?) — register schemes with the
-dedicated `registerSecurityScheme(name, scheme)` method:
+declared scheme have a handler?) — register schemes with the dedicated
+`registerSecurityScheme(name, scheme)` method:
 
 ```ts
-const registry: TypedRegistry = new TypedRegistry();
-
-registry.registerSecurityScheme('apiKey', {
-  type: 'apiKey',
-  name: 'x-api-key',
-  in: 'header'
-});
-registry.registerSecurityScheme('bearer', { type: 'http', scheme: 'bearer' });
-
-registry.registerPath({
-  operationId: 'rebalance',
-  method: 'post',
-  path: '/management/rebalance',
-  security: [{ apiKey: [] }],
-  // …
-});
+const registry = new TypedRegistry()
+  .registerSecurityScheme('apiKey', { type: 'apiKey', name: 'x-api-key', in: 'header' })
+  .registerSecurityScheme('bearer', { type: 'http', scheme: 'bearer' })
+  .registerPath({
+    operationId: 'rebalance',
+    method: 'post',
+    path: '/management/rebalance',
+    security: [{ apiKey: [] }]
+    // …
+  });
 ```
 
 `registerSecurityScheme` runtime-delegates to
 `inner.registerComponent('securitySchemes', name, scheme)`, so the
 OpenAPI generator picks it up exactly as if it had been registered the
 asteasolutions way. The dedicated method exists for the type-level
-narrow on `Schemes` — it's split out from the generic
-`registerComponent` because TypeScript overload resolution has trouble
-preserving the literal `name` type when the narrow is conditional on
-the component type.
+narrow on `Schemes` — split out from the generic `registerComponent`
+because TypeScript overload resolution has trouble preserving the
+literal `name` type when the narrow is conditional on the component
+type.
 
 Downstream consumers (notably `@polygonlabs/express/registry`'s
-`.auth(handlers)` binding) read `keyof Schemes` to require an exhaustive
-auth handler map at compile time:
+`.auth(handlers)` binding) read `keyof Schemes` to require an
+exhaustive auth handler map at compile time:
 
 ```ts
-type Names = keyof typeof registry['schemes'];  // 'apiKey' | 'bearer'
+type Names = keyof typeof registry['schemes']; // 'apiKey' | 'bearer'
 ```
 
-For non-security components (`'schemas'`, `'parameters'`, etc.) use the
-forwarded `registerComponent(...)` method — same runtime behaviour as
-asteasolutions, no type-level effect on the accumulators.
+For non-security components (`'schemas'`, `'parameters'`, etc.) use
+the forwarded `registerComponent(...)` method — same runtime behaviour
+as asteasolutions, no type-level effect on the accumulators.
 
-## `.extend(fn)` composition
+## `.with(fn)` composition
 
-Per-domain helpers compose without chaining and without per-helper
-`asserts` boilerplate:
+Per-domain helpers compose without per-helper boilerplate. Each helper
+takes the registry, chains registrations, and returns the chain's
+final value:
 
 ```ts
-const registry: TypedRegistry = new TypedRegistry();
-registry.extend(addCoreRoutes);
-registry.extend(addBlockRoutes);
-registry.extend(addMessageRoutes);
+export const buildRegistry = () =>
+  new TypedRegistry()
+    .with(addCoreRoutes)
+    .with(addBlockRoutes)
+    .with(addMessageRoutes);
 ```
 
-`extend(fn)` is declared as `asserts this is R` where `R` is the
-helper's inferred return type. The asserts is intersected with the
-current `this`, so a misbehaving helper that drops Ops can't actually
-reduce the accumulator: existing operations survive.
+`.with(fn)` returns `this & R` (the receiver intersected with the
+helper's inferred return type). A helper that drops the parent
+narrow — say, by ignoring its argument and constructing a fresh
+registry — can't shrink the accumulator: existing entries survive the
+intersection. A helper that returns void (forgot to chain through to
+the return) is a TS error at the `.with(fn)` call site, not a silent
+empty manifest downstream.
 
 ## Compatibility with codec metadata
 
@@ -273,9 +269,17 @@ both transparent to the registry.
 `TypedRegistry` forwards `register`, `registerParameter`,
 `registerComponent`, `registerWebhook`, and the `definitions` getter
 verbatim to the inner `OpenAPIRegistry`. Code reading the registry as
-a plain `OpenAPIRegistry` (the OpenAPI generator,
-`OpenApiGeneratorV31`, codegen plugins) sees no behavioural
-difference.
+a plain `OpenAPIRegistry` (the OpenAPI generator, codegen plugins)
+sees no behavioural difference.
+
+`registerComponent` and `registerWebhook` return `this` so they fit
+into a chain without breaking it. `register` and `registerParameter`
+return the registered schema (matching the asteasolutions API) and so
+don't chain — typical use is
+
+```ts
+export const Foo = registry.register('Foo', z.object({ ... }));
+```
 
 ## Canonical error response schemas
 
@@ -300,15 +304,13 @@ per-service definitions:
 ```ts
 import { ErrorResponseSchema } from '@polygonlabs/openapi-registry/error-schemas';
 
-registry.registerPath({
+new TypedRegistry().registerPath({
   method: 'post',
   path: '/cycle/pause',
   operationId: 'pauseCycle',
   security: [{ ApiKeyAuth: [] }],
   responses: {
-    200: {
-      /* … */
-    },
+    200: { /* … */ },
     401: {
       description: 'Missing or invalid x-api-key header',
       content: { 'application/json': { schema: ErrorResponseSchema } }
@@ -327,23 +329,29 @@ transitive dep on Express + pino + Sentry.
 the express package keep working. New code should prefer the
 openapi-registry path.
 
-## Migration from `OpenAPIRegistry`
+### Re-exporting from a schemas package read by codegen
 
-For an existing schemas package:
+Any schemas package consumed by `@polygonlabs/zod-to-openapi-heyapi`'s
+codegen plugin must satisfy the plugin's audit: every registered
+schema's exported binding name has to match its `.openapi('Name', …)`
+registration name. The canonical schemas register as `ErrorResponse`
+and `ValidationErrorResponse` but their export bindings are
+`ErrorResponseSchema` and `ValidationErrorResponseSchema`. Re-export
+them under matching aliases when surfacing them from a schemas
+package the plugin reads:
 
-1. Swap the import:
+```ts
+// schemas package barrel
+export {
+  ErrorResponseSchema as ErrorResponse,
+  ValidationErrorResponseSchema as ValidationError
+} from '@polygonlabs/openapi-registry/error-schemas';
+```
 
-   ```ts
-   // before
-   import { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
-   // after
-   import { TypedRegistry } from '@polygonlabs/openapi-registry';
-   ```
+This isn't required if you only consume the schemas inside a service
+runtime — the plugin's audit only fires at codegen time.
 
-2. Replace `new OpenAPIRegistry()` with `new TypedRegistry()`.
-3. Add the `: TypedRegistry` annotation on the variable.
-4. Wrap the composition in `buildRegistry()` if it isn't already, and
-   export the function (not the registry instance directly).
+## Migration
 
-The OpenAPI generator and any code reading `.definitions` continues
-to work without modification.
+See [`MIGRATION.md`](./MIGRATION.md) for migration from `OpenAPIRegistry`
+or earlier (asserts-based) `TypedRegistry` shapes.

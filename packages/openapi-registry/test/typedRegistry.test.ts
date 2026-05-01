@@ -35,8 +35,7 @@ function definitionsOfType(r: TypedRegistry, type: string): unknown[] {
 describe('TypedRegistry', () => {
   describe('registerPath', () => {
     it('forwards to the inner OpenAPIRegistry and exposes definitions', () => {
-      const r: TypedRegistry = new TypedRegistry();
-      r.registerPath({
+      const r = new TypedRegistry().registerPath({
         operationId: 'getThing',
         method: 'get',
         path: '/things/{id}',
@@ -45,73 +44,117 @@ describe('TypedRegistry', () => {
       expect(registeredOperationIds(r)).toEqual(['getThing']);
     });
 
-    it('accepts multiple registerPath calls and accumulates definitions', () => {
-      const r: TypedRegistry = new TypedRegistry();
-      r.registerPath({
+    it('returns the same underlying registry on each chain step', () => {
+      // The chainable API mutates `inner` and returns the (now wider-typed)
+      // same instance. Confirm the chain doesn't fork — definitions
+      // accumulate on a single inner registry, not split across copies.
+      const r0 = new TypedRegistry();
+      const r1 = r0.registerPath({
         operationId: 'a',
         method: 'get',
         path: '/a',
         responses: okResponse
       });
-      r.registerPath({
+      const r2 = r1.registerPath({
         operationId: 'b',
         method: 'post',
         path: '/b',
         responses: okResponse
       });
+
+      expect(r0).toBe(r1);
+      expect(r1).toBe(r2);
+      expect(registeredOperationIds(r2)).toEqual(['a', 'b']);
+    });
+
+    it('chained calls accumulate definitions in chain order', () => {
+      const r = new TypedRegistry()
+        .registerPath({ operationId: 'a', method: 'get', path: '/a', responses: okResponse })
+        .registerPath({ operationId: 'b', method: 'post', path: '/b', responses: okResponse })
+        .registerPath({ operationId: 'c', method: 'get', path: '/c', responses: okResponse });
+
+      expect(registeredOperationIds(r)).toEqual(['a', 'b', 'c']);
+    });
+
+    it('discarded chain returns still mutate the underlying registry', () => {
+      // The runtime side effect happens regardless of whether the caller
+      // captures the return — the type-level narrow is what gets dropped.
+      // This test pins the documented behaviour: runtime is unchanged,
+      // and the OperationsOf brand (covered in the type tests) is what
+      // surfaces the bug at consumer sites.
+      const r = new TypedRegistry();
+      r.registerPath({ operationId: 'a', method: 'get', path: '/a', responses: okResponse });
+      r.registerPath({ operationId: 'b', method: 'get', path: '/b', responses: okResponse });
+
       expect(registeredOperationIds(r)).toEqual(['a', 'b']);
     });
   });
 
-  describe('extend', () => {
+  describe('with', () => {
     it('runs the helper against the receiver and accumulates routes', () => {
-      const r: TypedRegistry = new TypedRegistry();
-      r.extend((reg: TypedRegistry) => {
-        reg.registerPath({
-          operationId: 'x',
-          method: 'get',
-          path: '/x',
-          responses: okResponse
-        });
-        reg.registerPath({
-          operationId: 'y',
-          method: 'get',
-          path: '/y',
-          responses: okResponse
-        });
-        return reg;
-      });
+      const r = new TypedRegistry().with((reg) =>
+        reg
+          .registerPath({ operationId: 'x', method: 'get', path: '/x', responses: okResponse })
+          .registerPath({ operationId: 'y', method: 'get', path: '/y', responses: okResponse })
+      );
+
       expect(registeredOperationIds(r)).toEqual(['x', 'y']);
     });
 
     it('composes multiple helpers into the same registry', () => {
-      const r: TypedRegistry = new TypedRegistry();
-      const addA = (reg: TypedRegistry) => {
+      const addA = (reg: TypedRegistry) =>
         reg.registerPath({
           operationId: 'a',
           method: 'get',
           path: '/a',
           responses: okResponse
         });
-        return reg;
-      };
-      const addB = (reg: TypedRegistry) => {
+      const addB = (reg: TypedRegistry) =>
         reg.registerPath({
           operationId: 'b',
           method: 'get',
           path: '/b',
           responses: okResponse
         });
-        return reg;
-      };
-      r.extend(addA);
-      r.extend(addB);
+
+      const r = new TypedRegistry().with(addA).with(addB);
+
       expect(registeredOperationIds(r)).toEqual(['a', 'b']);
+    });
+
+    it('returns the same instance — no fork even with a misbehaving helper', () => {
+      // `.with` returns `this & R`. The runtime returns `this`; the
+      // intersection is a type-level shape. A helper that constructs a
+      // fresh registry and returns it from inside `.with` does not
+      // replace the receiver — its registrations land on whatever
+      // helper-internal registry was constructed and are lost.
+      //
+      // This is documented behaviour: helpers must chain off their
+      // argument and return the chained value, not construct a new one.
+      const r0 = new TypedRegistry().registerPath({
+        operationId: 'parent',
+        method: 'get',
+        path: '/parent',
+        responses: okResponse
+      });
+
+      const r1 = r0.with(() =>
+        new TypedRegistry().registerPath({
+          operationId: 'orphaned',
+          method: 'get',
+          path: '/orphaned',
+          responses: okResponse
+        })
+      );
+
+      // Same instance, only the parent's definition is visible.
+      expect(r0).toBe(r1);
+      expect(registeredOperationIds(r1)).toEqual(['parent']);
     });
   });
 
   describe('forwarded methods', () => {
-    it('register forwards to inner.register and registers the component', () => {
+    it('register forwards to inner.register and registers the schema', () => {
       const r = new TypedRegistry();
       const Schema = z.object({ x: z.string() });
       const out = r.register('Thing', Schema);
@@ -130,37 +173,80 @@ describe('TypedRegistry', () => {
       expect(definitionsOfType(r, 'parameter')).toHaveLength(1);
     });
 
-    it('registerComponent forwards generic OpenAPI components', () => {
-      const r = new TypedRegistry();
-      r.registerComponent('schemas', 'Whatever', { type: 'object' });
-      expect(definitionsOfType(r, 'component')).toHaveLength(1);
-    });
-
-    it('registerSecurityScheme registers the scheme via the inner registry', () => {
-      // Explicit `: TypedRegistry` annotation required for the
-      // `asserts this is X` narrowing — same TS2775 rule that gates
-      // `registerPath`. The narrow itself is covered by the type tests
-      // in typedRegistry.test-d.ts; here we just confirm the runtime
-      // call accumulates the scheme into `definitions` for downstream
-      // OpenAPI generation.
-      const r: TypedRegistry = new TypedRegistry();
-      r.registerSecurityScheme('apiKey', {
-        type: 'apiKey',
-        name: 'x-api-key',
-        in: 'header'
-      });
-      r.registerSecurityScheme('bearer', { type: 'http', scheme: 'bearer' });
+    it('registerComponent forwards generic OpenAPI components and chains', () => {
+      const r = new TypedRegistry()
+        .registerComponent('schemas', 'A', { type: 'object' })
+        .registerComponent('schemas', 'B', { type: 'object' });
       expect(definitionsOfType(r, 'component')).toHaveLength(2);
     });
 
-    it('registerWebhook forwards to inner.registerWebhook', () => {
-      const r = new TypedRegistry();
-      r.registerWebhook({
+    it('registerSecurityScheme registers the scheme and chains', () => {
+      const r = new TypedRegistry()
+        .registerSecurityScheme('apiKey', {
+          type: 'apiKey',
+          name: 'x-api-key',
+          in: 'header'
+        })
+        .registerSecurityScheme('bearer', { type: 'http', scheme: 'bearer' });
+
+      expect(definitionsOfType(r, 'component')).toHaveLength(2);
+    });
+
+    it('registerWebhook forwards to inner.registerWebhook and chains', () => {
+      const r = new TypedRegistry().registerWebhook({
         method: 'post',
         path: '/hook',
         responses: okResponse
       });
+
       expect(definitionsOfType(r, 'webhook')).toHaveLength(1);
+    });
+  });
+
+  describe('end-to-end builder', () => {
+    it('the recommended builder pattern produces the expected definitions', () => {
+      const addCore = <Ops extends Record<string, RouteWithOpId>>(reg: TypedRegistry<Ops>) =>
+        reg.registerPath({
+          operationId: 'getHealthCheck',
+          method: 'get',
+          path: '/health-check',
+          responses: okResponse
+        });
+
+      const addBlocks = <Ops extends Record<string, RouteWithOpId>>(reg: TypedRegistry<Ops>) =>
+        reg
+          .registerPath({
+            operationId: 'getBlockNumber',
+            method: 'get',
+            path: '/block-number',
+            responses: okResponse
+          })
+          .registerPath({
+            operationId: 'getBlockMetadata',
+            method: 'get',
+            path: '/blocks/{id}',
+            security: [{ ApiKeyAuth: [] }],
+            responses: okResponse
+          });
+
+      const buildRegistry = () =>
+        new TypedRegistry()
+          .registerSecurityScheme('ApiKeyAuth', {
+            type: 'apiKey',
+            name: 'x-api-key',
+            in: 'header'
+          })
+          .with(addCore)
+          .with(addBlocks);
+
+      const registry = buildRegistry();
+
+      expect(registeredOperationIds(registry)).toEqual([
+        'getHealthCheck',
+        'getBlockNumber',
+        'getBlockMetadata'
+      ]);
+      expect(definitionsOfType(registry, 'component')).toHaveLength(1);
     });
   });
 });
