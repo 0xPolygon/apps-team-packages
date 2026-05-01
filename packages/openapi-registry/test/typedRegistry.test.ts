@@ -81,9 +81,12 @@ describe('TypedRegistry', () => {
       // captures the return — the type-level narrow is what gets dropped.
       // This test pins the documented behaviour: runtime is unchanged,
       // and the OperationsOf brand (covered in the type tests) is what
-      // surfaces the bug at consumer sites.
+      // surfaces the bug at consumer sites. The eslint-disables scope to
+      // exactly the lines that make this test what it is.
       const r = new TypedRegistry();
+      // eslint-disable-next-line polygon/no-discarded-chain -- intentional: this is the failure-mode pin
       r.registerPath({ operationId: 'a', method: 'get', path: '/a', responses: okResponse });
+      // eslint-disable-next-line polygon/no-discarded-chain -- intentional: this is the failure-mode pin
       r.registerPath({ operationId: 'b', method: 'get', path: '/b', responses: okResponse });
 
       expect(registeredOperationIds(r)).toEqual(['a', 'b']);

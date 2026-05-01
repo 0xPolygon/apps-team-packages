@@ -208,6 +208,7 @@ function dropsParent(_reg: TypedRegistry<Record<string, RouteWithOpId>>) {
 {
   const r = new TypedRegistry();
   // @ts-expect-error helper returns void; `void` does not extend `TypedRegistry<any, any>`
+  // eslint-disable-next-line polygon/no-discarded-chain -- intentional: this case proves the void-return constraint at the call site
   r.with(() => {
     /* forgot to return the chain */
   });
@@ -332,12 +333,18 @@ void emptyBuilder; // referenced as a value so lint sees it used; only typeof ma
 // The chainable API's main silent failure mode: every registration's
 // return is dropped, the registry stays at its initial empty type, and
 // downstream `OperationsOf<typeof buildRegistry>` resolves to the brand.
+//
+// The two `r.registerPath(...)` calls below are exactly what the
+// `polygon/no-discarded-chain` rule flags — the rule should catch this
+// pattern in real code. The disables are scoped to this fixture only.
+/* eslint-disable polygon/no-discarded-chain -- intentional: this fixture exercises the empty-brand on the worst-case discard pattern */
 function discardedReturns() {
   const r = new TypedRegistry();
   r.registerPath({ operationId: 'a', method: 'get', path: '/a', responses: okResponse });
   r.registerPath({ operationId: 'b', method: 'get', path: '/b', responses: okResponse });
   return r;
 }
+/* eslint-enable polygon/no-discarded-chain */
 void discardedReturns;
 
 {
