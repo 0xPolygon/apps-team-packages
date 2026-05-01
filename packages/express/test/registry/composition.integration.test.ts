@@ -5,8 +5,8 @@
  *
  *   - Multiple `.implement()` calls accumulate handlers (Object.assign-merge
  *     at runtime); the resulting router serves all of them.
- *   - Module-style handler bags (typed via `defineHandlers`) compose with
- *     inline bags at the wiring site.
+ *   - Module-style handler bags (typed via `satisfies Partial<HandlerMapFor<F>>`)
+ *     compose with inline bags at the wiring site.
  *   - The exhaustiveness check is type-only: runtime serves whatever has
  *     been bound. Unbound operations would surface as a runtime
  *     "no handler for operation" throw at toExpress time, but with
@@ -23,9 +23,11 @@ import { z } from 'zod';
 
 import { TypedRegistry } from '@polygonlabs/openapi-registry';
 
+import type { HandlerMapFor } from '../../src/registry/index.ts';
+
 import { setupLogger } from '../../src/context.ts';
 import { createErrorHandler } from '../../src/errors.ts';
-import { createRegistryRouter, defineHandlers } from '../../src/registry/index.ts';
+import { createRegistryRouter } from '../../src/registry/index.ts';
 import { makeCaptureLogger } from '../helpers/captureLogger.ts';
 
 extendZodWithOpenApi(z);
@@ -36,55 +38,51 @@ const HelloResponse = z.object({ message: z.string() });
 
 // === Registry ==============================================================
 
-function buildRegistry() {
-  const registry: TypedRegistry = new TypedRegistry();
-  registry.registerPath({
-    operationId: 'getStatus',
-    method: 'get',
-    path: '/status',
-    responses: {
-      200: { description: 'ok', content: { 'application/json': { schema: HelloResponse } } }
-    }
-  });
-  registry.registerPath({
-    operationId: 'getHealth',
-    method: 'get',
-    path: '/health',
-    responses: {
-      200: { description: 'ok', content: { 'application/json': { schema: HelloResponse } } }
-    }
-  });
-  registry.registerPath({
-    operationId: 'rebalance',
-    method: 'post',
-    path: '/management/rebalance',
-    responses: {
-      200: { description: 'ok', content: { 'application/json': { schema: HelloResponse } } }
-    }
-  });
-  return registry;
-}
-
-type Operations =
-  ReturnType<typeof buildRegistry> extends TypedRegistry<infer O, Record<string, true>> ? O : never;
+const buildRegistry = () =>
+  new TypedRegistry()
+    .registerPath({
+      operationId: 'getStatus',
+      method: 'get',
+      path: '/status',
+      responses: {
+        200: { description: 'ok', content: { 'application/json': { schema: HelloResponse } } }
+      }
+    })
+    .registerPath({
+      operationId: 'getHealth',
+      method: 'get',
+      path: '/health',
+      responses: {
+        200: { description: 'ok', content: { 'application/json': { schema: HelloResponse } } }
+      }
+    })
+    .registerPath({
+      operationId: 'rebalance',
+      method: 'post',
+      path: '/management/rebalance',
+      responses: {
+        200: { description: 'ok', content: { 'application/json': { schema: HelloResponse } } }
+      }
+    });
 
 // === Module-style handler bags =============================================
 //
-// These are the real-world shape from the user's question — handler bags
-// defined in per-domain modules (status.ts, management.ts) and composed at
-// the wiring site.
+// These are the real-world shape — handler bags defined in per-domain
+// modules (status.ts, management.ts) and composed at the wiring site.
+// `satisfies Partial<HandlerMapFor<typeof buildRegistry>>` types each
+// handler against its operation; surplus keys fail at the definition site.
 
-const statusHandlers = defineHandlers<Operations>()({
+const statusHandlers = {
   getStatus: (_req, res) => {
     res.json({ message: 'status-ok' });
   }
-});
+} satisfies Partial<HandlerMapFor<typeof buildRegistry>>;
 
-const managementHandlers = defineHandlers<Operations>()({
+const managementHandlers = {
   rebalance: (_req, res) => {
     res.json({ message: 'rebalanced' });
   }
-});
+} satisfies Partial<HandlerMapFor<typeof buildRegistry>>;
 
 // === Tests =================================================================
 

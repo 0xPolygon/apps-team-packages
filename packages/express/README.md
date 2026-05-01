@@ -167,9 +167,9 @@ holding the spec, the consumer writes a typed handler map and gets:
   types flow into per-operation `req.auth[schemeName]` typing.
 
 ```ts
-import { createRegistryRouter, defineHandlers } from '@polygonlabs/express/registry';
+import { createRegistryRouter } from '@polygonlabs/express/registry';
 
-import { buildRegistry, type Operations } from '@your/schemas';
+import { buildRegistry } from '@your/schemas';
 
 const registry = buildRegistry();
 
@@ -188,30 +188,30 @@ app.use(router.toExpress());
 
 Real apps don't pile every handler into one literal at the wiring site.
 `.implement()` accepts partial bags and accumulates across calls — handler
-modules export their own bag (typed via `defineHandlers`) and the wiring
-file composes them:
+modules export their own bag (typed via `satisfies Partial<HandlerMapFor<…>>`)
+and the wiring file composes them:
 
 ```ts
 // routes/status.ts
-import type { Operations } from '@your/schemas';
-import { defineHandlers } from '@polygonlabs/express/registry';
+import type { HandlerMapFor } from '@polygonlabs/express/registry';
+import type { buildRegistry } from '@your/schemas';
 
-export const statusHandlers = defineHandlers<Operations>()({
+export const statusHandlers = {
   getStatus: (_req, res) => res.json({ status: 'ok' }),
   getHealth: (_req, res) => res.json({ healthy: true })
-});
+} satisfies Partial<HandlerMapFor<typeof buildRegistry>>;
 
 // routes/management.ts
-import type { Operations } from '@your/schemas';
-import { defineHandlers } from '@polygonlabs/express/registry';
+import type { HandlerMapFor } from '@polygonlabs/express/registry';
+import type { buildRegistry } from '@your/schemas';
 import type { AppAuthMap } from '../auth.ts';
 
-export const managementHandlers = defineHandlers<Operations, AppAuthMap>()({
+export const managementHandlers = {
   rebalance: (req, res) => {
     // req.auth.apiKey is fully typed — flows from AppAuthMap.
     res.json({ ok: true, tenantId: req.auth.apiKey.tenantId });
   }
-});
+} satisfies Partial<HandlerMapFor<typeof buildRegistry, AppAuthMap>>;
 
 // index.ts — the wiring file
 import { statusHandlers } from './routes/status.ts';
@@ -228,6 +228,13 @@ const router = createRegistryRouter({ registry })
 
 app.use(router.toExpress());
 ```
+
+`HandlerMapFor<typeof buildRegistry, AuthMap>` derives the operations
+manifest from the builder's inferred return type — no separate
+`Operations` import is needed. `Partial<…>` makes per-domain bags
+explicit about not covering every operation; `.implement(...)` chains
+combine them and `.toExpress()`'s exhaustiveness gate catches anything
+unbound.
 
 Each `.implement(bag)` rejects keys that aren't registered operationIds —
 typos fail at the implement site, not the wiring site. The final

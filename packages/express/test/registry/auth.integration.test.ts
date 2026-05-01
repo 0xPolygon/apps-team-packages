@@ -46,85 +46,74 @@ const Tenant = z.object({ tenantId: z.string() });
 
 // === Registry ==============================================================
 
-function buildAuthRegistry() {
-  const registry: TypedRegistry = new TypedRegistry();
-
-  registry.registerSecurityScheme('apiKey', {
-    type: 'apiKey',
-    name: 'x-api-key',
-    in: 'header'
-  });
-  registry.registerSecurityScheme('bearer', { type: 'http', scheme: 'bearer' });
-
-  // Public route — no `security`, no auth required.
-  registry.registerPath({
-    operationId: 'publicHello',
-    method: 'get',
-    path: '/public/hello',
-    responses: {
-      200: { description: 'ok', content: { 'application/json': { schema: HelloResponse } } }
-    }
-  });
-
-  // Protected route — apiKey required. Body validation behind auth so we
-  // can prove auth runs first.
-  registry.registerPath({
-    operationId: 'protectedTenant',
-    method: 'post',
-    path: '/protected/tenant',
-    security: [{ apiKey: [] }],
-    request: {
-      body: {
-        content: {
-          'application/json': { schema: z.object({ note: z.string().min(1) }) }
-        }
+const buildAuthRegistry = () =>
+  new TypedRegistry()
+    .registerSecurityScheme('apiKey', {
+      type: 'apiKey',
+      name: 'x-api-key',
+      in: 'header'
+    })
+    .registerSecurityScheme('bearer', { type: 'http', scheme: 'bearer' })
+    // Public route — no `security`, no auth required.
+    .registerPath({
+      operationId: 'publicHello',
+      method: 'get',
+      path: '/public/hello',
+      responses: {
+        200: { description: 'ok', content: { 'application/json': { schema: HelloResponse } } }
       }
-    },
-    responses: {
-      200: { description: 'ok', content: { 'application/json': { schema: Tenant } } }
-    }
-  });
+    })
+    // Protected route — apiKey required. Body validation behind auth so we
+    // can prove auth runs first.
+    .registerPath({
+      operationId: 'protectedTenant',
+      method: 'post',
+      path: '/protected/tenant',
+      security: [{ apiKey: [] }],
+      request: {
+        body: {
+          content: {
+            'application/json': { schema: z.object({ note: z.string().min(1) }) }
+          }
+        }
+      },
+      responses: {
+        200: { description: 'ok', content: { 'application/json': { schema: Tenant } } }
+      }
+    })
+    // Multi-scheme AND — both apiKey and bearer must succeed.
+    .registerPath({
+      operationId: 'doubleAuth',
+      method: 'get',
+      path: '/protected/double',
+      security: [{ apiKey: [], bearer: [] }],
+      responses: {
+        200: { description: 'ok', content: { 'application/json': { schema: HelloResponse } } }
+      }
+    })
+    // Auth handler that throws a non-HTTP plain Error.
+    .registerPath({
+      operationId: 'apiKeyButBuggyHandler',
+      method: 'get',
+      path: '/protected/buggy',
+      security: [{ apiKey: [] }],
+      responses: {
+        200: { description: 'ok', content: { 'application/json': { schema: HelloResponse } } }
+      }
+    })
+    // Auth handler that throws Forbidden.
+    .registerPath({
+      operationId: 'forbiddenScheme',
+      method: 'get',
+      path: '/protected/forbidden',
+      security: [{ bearer: [] }],
+      responses: {
+        200: { description: 'ok', content: { 'application/json': { schema: HelloResponse } } }
+      }
+    });
 
-  // Multi-scheme AND — both apiKey and bearer must succeed.
-  registry.registerPath({
-    operationId: 'doubleAuth',
-    method: 'get',
-    path: '/protected/double',
-    security: [{ apiKey: [], bearer: [] }],
-    responses: {
-      200: { description: 'ok', content: { 'application/json': { schema: HelloResponse } } }
-    }
-  });
-
-  // Auth handler that throws a non-HTTP plain Error.
-  registry.registerPath({
-    operationId: 'apiKeyButBuggyHandler',
-    method: 'get',
-    path: '/protected/buggy',
-    security: [{ apiKey: [] }],
-    responses: {
-      200: { description: 'ok', content: { 'application/json': { schema: HelloResponse } } }
-    }
-  });
-
-  // Auth handler that throws Forbidden.
-  registry.registerPath({
-    operationId: 'forbiddenScheme',
-    method: 'get',
-    path: '/protected/forbidden',
-    security: [{ bearer: [] }],
-    responses: {
-      200: { description: 'ok', content: { 'application/json': { schema: HelloResponse } } }
-    }
-  });
-
-  return registry;
-}
-
-type Operations =
-  ReturnType<typeof buildAuthRegistry> extends TypedRegistry<infer O, Record<string, true>>
-    ? O
-    : never;
+import type { OperationsOf } from '@polygonlabs/openapi-registry';
+type Operations = OperationsOf<typeof buildAuthRegistry>;
 
 // === Auth handlers =========================================================
 
@@ -286,23 +275,22 @@ describe('registry-driven router auth', () => {
 
 describe('registry-driven router auth — setup-time guards', () => {
   it('throws at toExpress when an operation declares OR-style security', () => {
-    const registry: TypedRegistry = new TypedRegistry();
-    registry.registerSecurityScheme('apiKey', {
-      type: 'apiKey',
-      name: 'x-api-key',
-      in: 'header'
-    });
-    registry.registerSecurityScheme('bearer', { type: 'http', scheme: 'bearer' });
-
-    registry.registerPath({
-      operationId: 'orStyle',
-      method: 'get',
-      path: '/or-style',
-      security: [{ apiKey: [] }, { bearer: [] }],
-      responses: {
-        200: { description: 'ok', content: { 'application/json': { schema: HelloResponse } } }
-      }
-    });
+    const registry = new TypedRegistry()
+      .registerSecurityScheme('apiKey', {
+        type: 'apiKey',
+        name: 'x-api-key',
+        in: 'header'
+      })
+      .registerSecurityScheme('bearer', { type: 'http', scheme: 'bearer' })
+      .registerPath({
+        operationId: 'orStyle',
+        method: 'get',
+        path: '/or-style',
+        security: [{ apiKey: [] }, { bearer: [] }],
+        responses: {
+          200: { description: 'ok', content: { 'application/json': { schema: HelloResponse } } }
+        }
+      });
 
     const router = createRegistryRouter({ registry })
       .auth({

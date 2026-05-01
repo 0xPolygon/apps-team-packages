@@ -150,3 +150,60 @@ export type Handler<Op extends Operation, AuthMap = Record<string, never>> = (
 export type HandlerMap<Ops extends OperationsManifest, AuthMap = Record<string, never>> = {
   [K in keyof Ops]: Handler<Ops[K], AuthMap>;
 };
+
+/**
+ * Handler map for a registry-builder function. Resolves to the
+ * `HandlerMap` keyed by `OperationsOf<F>`, so the consumer doesn't need
+ * to import a separate `Operations` type alias from the schemas package.
+ *
+ * Used with TypeScript's `satisfies` operator for typed per-domain
+ * handler bags:
+ *
+ *     export const messageHandlers = {
+ *       createMessage: (req, res) => {...},
+ *       listMessages: (req, res) => {...}
+ *     } satisfies Partial<HandlerMapFor<typeof buildRegistry, AppAuthMap>>;
+ *
+ * `Partial<...>` permits per-domain bags that don't cover every
+ * operation; the wiring file's `.implement(...)` chain accumulates
+ * coverage and `.toExpress()` enforces exhaustiveness at compile time.
+ *
+ * If the registry returned `{}` for its operations manifest (every
+ * registration's chain return was discarded — see
+ * `@polygonlabs/openapi-registry` README), `OperationsOf<F>` resolves
+ * to a brand string and this type does not produce a usable handler
+ * map; the `satisfies` check fails at the consumer site, surfacing the
+ * upstream bug.
+ */
+export type HandlerMapFor<
+  F extends () => { ops: Record<string, Operation>; schemes: Record<string, true> },
+  AuthMap = Record<string, never>
+> =
+  ReturnType<F> extends { ops: infer Ops }
+    ? Ops extends OperationsManifest
+      ? keyof Ops extends never
+        ? never
+        : HandlerMap<Ops, AuthMap>
+      : never
+    : never;
+
+/**
+ * Auth handler map for a registry-builder function. Resolves to a
+ * record keyed by every security scheme name registered on the
+ * registry — so the consumer doesn't need a separate `SchemeNames`
+ * import:
+ *
+ *     export const buildAuthHandlers = (service: Service) => ({
+ *       ApiKeyAuth: (req: Request) => { ... }
+ *     }) satisfies AuthHandlerMapFor<typeof buildRegistry>;
+ *
+ * The resulting auth-handlers value's `ReturnType` is what consumers
+ * pass as the `AuthMap` generic to `HandlerMapFor` so per-operation
+ * `req.auth[schemeName]` types line up.
+ */
+export type AuthHandlerMapFor<
+  F extends () => { ops: Record<string, Operation>; schemes: Record<string, true> }
+> =
+  ReturnType<F> extends { schemes: infer Schemes }
+    ? AuthHandlerMap<Extract<keyof Schemes, string>>
+    : never;
