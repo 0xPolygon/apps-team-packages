@@ -249,9 +249,17 @@ return r.registerPath(/* … */); // chain
 let r1 = r.registerPath(/* … */); // capture
 ```
 
-`OperationsOf<typeof buildRegistry>` brands the worst case (every
-return discarded — manifest is `{}`) as a type-level error. Partial
-discards still under-report. See the README's "The one rule" section.
+Two defences:
+
+- **Type-level**: `OperationsOf<typeof buildRegistry>` brands the
+  worst case (every return discarded — manifest is `{}`) as a
+  type-level error.
+- **Lint**: `@polygonlabs/apps-team-lint`'s
+  `polygon/no-discarded-chain` rule catches partial discards at lint
+  time. Type-aware, only fires on real `TypedRegistry` receivers,
+  enabled at `error` in the `typescript()` preset.
+
+See the README's "The one rule" section.
 
 **Don't annotate the builder's return type.** Inferred returns flow
 the narrow through; an explicit annotation discards it:

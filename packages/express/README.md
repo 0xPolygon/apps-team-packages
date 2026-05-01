@@ -236,6 +236,15 @@ explicit about not covering every operation; `.implement(...)` chains
 combine them and `.toExpress()`'s exhaustiveness gate catches anything
 unbound.
 
+The chainable `TypedRegistry` API has one silent failure mode upstream:
+discarding a chain return (`r.registerPath({…});` with the result
+dropped) loses the type-level narrow even though the runtime
+registration succeeds, leading to `HandlerMapFor` under-reporting which
+operations need handlers. `@polygonlabs/apps-team-lint`'s
+`polygon/no-discarded-chain` rule (enabled at `error` in the
+`typescript()` preset) catches this at lint time. See
+`@polygonlabs/openapi-registry`'s "The one rule" section for details.
+
 Each `.implement(bag)` rejects keys that aren't registered operationIds —
 typos fail at the implement site, not the wiring site. The final
 `.toExpress()` is where exhaustiveness is enforced; until every operation

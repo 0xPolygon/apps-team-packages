@@ -117,11 +117,26 @@ r.registerPath(b);                     // return discarded
 return r;                              // type is unchanged from input
 ```
 
-The `OperationsOf<typeof buildRegistry>` brand catches the worst case
-(every link discarded — manifest is `{}`) by resolving to a type-level
-error string, which surfaces in IDE hover at the consumer site.
-Partial discards (some chained, some discarded) under-report without
-the brand firing.
+Two complementary defences keep this from silently breaking production:
+
+- **Type-level**: `OperationsOf<typeof buildRegistry>` brands the worst
+  case (every link discarded — manifest is `{}`) by resolving to a
+  type-level error string. Downstream `satisfies HandlerMapFor<F>`
+  fails noisily at the consumer site instead of silently iterating an
+  empty manifest.
+- **Lint**: `@polygonlabs/apps-team-lint`'s
+  [`polygon/no-discarded-chain`](https://github.com/0xPolygon/apps-team-packages/blob/main/packages/apps-team-lint/src/rules/no-discarded-chain.ts)
+  rule catches partial discards (some chained, some discarded) — the
+  case the type-level brand can't see. The rule is type-aware, only
+  fires on real `TypedRegistry` receivers, and is enabled at `error`
+  in the `typescript()` preset, so consuming repos pick it up
+  automatically.
+
+Add a scoped `eslint-disable polygon/no-discarded-chain` directive
+with a `--` comment explaining why if you have a deliberate fixture
+demonstrating the failure mode (the openapi-registry test files have
+a few of these — they exist to pin the runtime side-effect behaviour
+and would be false positives without the disable).
 
 ## Why a TypedRegistry instead of `OpenAPIRegistry` directly
 
