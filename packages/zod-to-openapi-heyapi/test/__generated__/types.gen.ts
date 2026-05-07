@@ -887,6 +887,19 @@ export type CreateOrderData = {
     url: '/fixtures/orders';
 };
 
+export type CreateOrderErrors = {
+    /**
+     * bad request
+     */
+    400: BadRequestError;
+    /**
+     * server error
+     */
+    500: ServerError;
+};
+
+export type CreateOrderError = CreateOrderErrors[keyof CreateOrderErrors];
+
 export type CreateOrderResponses = {
     /**
      * ok

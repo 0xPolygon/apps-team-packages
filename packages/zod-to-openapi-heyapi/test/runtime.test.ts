@@ -320,19 +320,129 @@ describe('registry plugin emit', () => {
 
   // ── SDK wrapper coverage (pass-through and encoding) ───────────────────────
 
-  it('emits a pass-through wrapper for ops without registered input schemas', () => {
+  it('emits a typed-arrow pass-through for ops with no registered input AND no error schemas', () => {
     // `getCodecObject`, `getScalarString`, etc. have no `request` block in
-    // the fixture registry. The plugin still emits a wrapper so the auto-
-    // generated `index.ts` has a single canonical export name per op
-    // (with `includeInEntry: false` set on `@hey-api/sdk`, the SDK
-    // plugin's emissions don't reach the barrel directly).
+    // the fixture registry AND no error responses. The plugin emits a
+    // thin async arrow that forwards `options` to the upstream SDK
+    // function — preserves the SDK's call signature and ThrowOnError
+    // narrowing while keeping `wrapperFn.name === '${opId}'` (the older
+    // `const X = X2` re-bind kept `name === '${opId}2'`, breaking
+    // telemetry that introspects the canonical operation name).
     //
-    // Pass-throughs are zero-overhead `const X = X2` re-bindings — same
-    // call signature as the upstream SDK function.
+    // Ops with error schemas get a real wrapper instead so the wrapper
+    // can decode `result.error` through the registered error schema (see
+    // the error-transformer tests below); errors-only ops like
+    // `getErrorsOnly` are no longer re-bound.
     const src = readGenerated();
-    expect(src).toMatch(/^export const getCodecObject = getCodecObject2;$/m);
-    expect(src).toMatch(/^export const getScalarString = getScalarString2;$/m);
-    expect(src).toMatch(/^export const getErrorsOnly = getErrorsOnly2;$/m);
+    expect(src).toMatch(
+      /export const getCodecObject = async <ThrowOnError extends boolean = false>\(options\?: Options<GetCodecObjectData, ThrowOnError>\) => await getCodecObject2\(options\);/
+    );
+    expect(src).toMatch(
+      /export const getScalarString = async <ThrowOnError extends boolean = false>\(options\?: Options<GetScalarStringData, ThrowOnError>\) => await getScalarString2\(options\);/
+    );
+    expect(src).not.toMatch(/^export const getErrorsOnly = getErrorsOnly2;$/m);
+  });
+
+  it('preserves the canonical operation name on the pass-through wrapper at runtime', async () => {
+    // Critical for telemetry / logging that introspects `fn.name` —
+    // a re-bind form (`const getX = getX2`) keeps the auto-aliased
+    // `getX2` as the function's name, which leaks into log lines and
+    // error traces. The arrow form fixes that. This is a runtime
+    // assertion against the generated client, not a textual check.
+    const { getCodecObject: getCodecObjectWrapper } =
+      await import('./__generated__/registry-validator.gen.ts');
+    expect(getCodecObjectWrapper.name).toBe('getCodecObject');
+  });
+
+  // ── Error transformer + wrapper error decoding ─────────────────────────────
+
+  it('emits an ${opId}ErrorTransformer for ops with declared error schemas', () => {
+    // `createOrFetchResource` declares 400 + 404 + 500 with three distinct
+    // schemas — the transformer must accept any of them, so the body is a
+    // `z.union(...)` parse. Same shape as the response transformer for
+    // multi-schema 2xx routes. The regex is whitespace-tolerant because
+    // prettier may break the z.union(...) call across lines.
+    const src = readGenerated();
+    expect(src).toMatch(
+      /export const createOrFetchResourceErrorTransformer = async \(data: unknown\): Promise<z\.output<typeof BadRequestError> \| z\.output<typeof NotFoundError> \| z\.output<typeof ServerError>> => await z\.union\(\[\s*BadRequestError,\s*NotFoundError,\s*ServerError\s*\]\)\.parseAsync\(data\);/
+    );
+    // `getErrorsOnly` declares two schemas (400, 500) — verify the union
+    // form works there too. Two-element union typically renders inline.
+    expect(src).toMatch(
+      /export const getErrorsOnlyErrorTransformer = async \(data: unknown\): Promise<z\.output<typeof BadRequestError> \| z\.output<typeof ServerError>> => await z\.union\(\[\s*BadRequestError,\s*ServerError\s*\]\)\.parseAsync\(data\);/
+    );
+  });
+
+  it('does not emit an ${opId}ErrorTransformer for ops with no error schemas', () => {
+    // `getCodecObject` only has 200 — no error schemas, no error
+    // transformer.
+    const src = readGenerated();
+    expect(src).not.toMatch(/getCodecObjectErrorTransformer/);
+    expect(src).not.toMatch(/getScalarStringErrorTransformer/);
+  });
+
+  it('emits a real wrapper that decodes result.error through the error transformer', () => {
+    // `createOrFetchResource` has no codec input, but it does declare error
+    // schemas — so the wrapper is no longer a re-bind. The body wraps the
+    // SDK call in try/catch (decoding thrown errors on the throwOnError:
+    // true path) and decodes `result.error` in place after the call returns
+    // (throwOnError: false path).
+    const src = readGenerated();
+    // Wrapper signature (no input encoding, just error decoding).
+    expect(src).toMatch(
+      /export const createOrFetchResource = async <ThrowOnError extends boolean = false>\(options\?: Options<CreateOrFetchResourceData, ThrowOnError>\) => \{/
+    );
+    // Try block assigns to the outer `let result` — declared with `let` so
+    // it survives the catch.
+    expect(src).toMatch(
+      /createOrFetchResource = async[\s\S]*?let result;\s*try \{\s*result = await createOrFetchResource2\(options\);\s*\}\s*catch \(err\) \{/
+    );
+    // Catch block decodes via the error transformer; on parseAsync failure
+    // the original wire-shape err is re-thrown so non-error throws (network
+    // failures, etc.) pass through untouched.
+    expect(src).toMatch(
+      /catch \(err\) \{\s*let typedErr;\s*try \{\s*typedErr = await createOrFetchResourceErrorTransformer\(err\);\s*\}\s*catch \{\s*throw err;\s*\}\s*throw typedErr;\s*\}/
+    );
+    // throwOnError: false path — decode result.error in place. Cast through
+    // a narrow `{ error?: unknown }` view to satisfy the SDK function's
+    // discriminated-union return type.
+    expect(src).toMatch(/const errorBearing = result as \{\s*error\?: unknown;\s*\};/);
+    expect(src).toMatch(
+      /if \(errorBearing\.error !== undefined\) \{\s*try \{\s*errorBearing\.error = await createOrFetchResourceErrorTransformer\(errorBearing\.error\);\s*\}\s*catch \{\s*\}\s*\}/
+    );
+  });
+
+  it('combines input encoding AND error decoding when an op declares both', () => {
+    // `createOrder` is the canonical mixed-pipeline op: it has a codec
+    // body (`CreateOrderRequest` with `IsoDateCodec` + `Int64Codec`)
+    // AND error responses (400 BadRequest, 500 Server). The wrapper's
+    // body must run the input transformer first, then make the SDK
+    // call, then decode the error path. Both transformer calls must
+    // appear, in order.
+    const src = readGenerated();
+    // Both transformers exist for this op.
+    expect(src).toMatch(/export const createOrderInputTransformer = /);
+    expect(src).toMatch(/export const createOrderErrorTransformer = /);
+    // Wrapper body has the input-encode step before the SDK call AND
+    // the error-decode wrapping around it. The regex captures the
+    // skeleton: input transformer assignment → try { result = ... }
+    // → catch with error transformer.
+    expect(src).toMatch(
+      /createOrder = async[\s\S]*?const transformed = await createOrderInputTransformer\(options\);\s*let result;\s*try \{\s*result = await createOrder2\([^)]+\);\s*\}\s*catch \(err\) \{\s*let typedErr;\s*try \{\s*typedErr = await createOrderErrorTransformer\(err\);/
+    );
+  });
+
+  it('does not emit an ErrorTransformer for codec-input ops with no declared errors', () => {
+    // `lookupBlock` is codec-input (path: BlockNumberPathParams) with
+    // ONLY a 200 response — no error schemas. The wrapper has the input
+    // transform but no error-decoding scaffolding.
+    const src = readGenerated();
+    expect(src).not.toMatch(/lookupBlockErrorTransformer/);
+    // Wrapper for lookupBlock is the simple input-encoding form (no
+    // try/catch around the SDK call).
+    expect(src).toMatch(
+      /lookupBlock = async <ThrowOnError extends boolean = false>\(options: Options<LookupBlockInput, ThrowOnError>\) => \{\s*const transformed = await lookupBlockInputTransformer\(options\);\s*return await lookupBlock2\(/
+    );
   });
 
   // ── Multi-slot routes (path + body) ────────────────────────────────────────
@@ -378,5 +488,154 @@ describe('registry plugin emit', () => {
     expect(src).toMatch(
       /const transformed = await submitForReviewInputTransformer\(options \?\? \{\}\);/
     );
+  });
+
+  // ── TanStack Query factory emission ────────────────────────────────────────
+
+  describe('tanstackReactQuery option', () => {
+    it('imports queryOptions and DefaultError from @tanstack/react-query', () => {
+      // Ops with no Errors bucket fall back to DefaultError, so the type is
+      // always referenced; queryOptions is the runtime call. Both must come
+      // from the public package — that's what the consumer's runtime resolves
+      // and what makes adding this option a real peer-dep change.
+      const src = readGenerated();
+      expect(src).toMatch(/import \{[^}]*\bqueryOptions\b[^}]*\} from '@tanstack\/react-query'/);
+      expect(src).toMatch(
+        /import \{[^}]*\btype DefaultError\b[^}]*\} from '@tanstack\/react-query'/
+      );
+    });
+
+    it('emits the QueryKey type alias and createQueryKey utility once', () => {
+      // Single emission only — the per-op factories share both. Multiple
+      // declarations would be a duplicate-export TypeScript error, so the
+      // assertion that there is exactly one of each catches a regression
+      // where the scaffold-on-first-use guard breaks.
+      const src = readGenerated();
+      const queryKeyTypeMatches =
+        src.match(/export type QueryKey<TOptions extends Options> = \[/g) ?? [];
+      expect(queryKeyTypeMatches).toHaveLength(1);
+      const createQueryKeyMatches = src.match(/^const createQueryKey = </gm) ?? [];
+      expect(createQueryKeyMatches).toHaveLength(1);
+    });
+
+    it('does not emit factories for non-codec ops (upstream tanstack owns those)', () => {
+      // The parser-level `isQuery` hook returns false for codec op ids,
+      // so the upstream `@tanstack/react-query` plugin emits factories
+      // for everything else. Our file must not duplicate those — same
+      // names would collide via the entry barrel.
+      const src = readGenerated();
+      expect(src).not.toMatch(/export const getCodecObjectQueryKey\b/);
+      expect(src).not.toMatch(/export const getCodecObjectOptions\b/);
+      expect(src).not.toMatch(/export const getScalarStringQueryKey\b/);
+      expect(src).not.toMatch(/export const getScalarStringOptions\b/);
+    });
+
+    it('upstream tanstack emits factories for non-codec ops in its own file', () => {
+      // The mirror side of the gating: ops we skip must be emitted by
+      // upstream so the consumer ends up with one factory per query op
+      // overall. The upstream plugin's `includeInEntry` is hard-locked
+      // false so its factories live in `@tanstack/react-query.gen.ts`,
+      // separately from our entry barrel — consumers import from there
+      // directly.
+      const upstream = readFileSync(resolve(generatedDir, '@tanstack/react-query.gen.ts'), 'utf8');
+      expect(upstream).toMatch(/export const getCodecObjectQueryKey\b/);
+      expect(upstream).toMatch(/export const getScalarStringQueryKey\b/);
+      // Codec ops are in OUR file, not here — same names, different
+      // file, no collision because upstream skipped them.
+      expect(upstream).not.toMatch(/export const lookupBlockQueryKey\b/);
+      expect(upstream).not.toMatch(/export const createOrderQueryKey\b/);
+    });
+
+    it('emits a codec-aware factory typed against ${Op}Input for input-codec ops', () => {
+      // `lookupBlock` has `params: BlockNumberPathParams` with Int64Codec.
+      // The factory's options parameter is `Options<LookupBlockInput>` so
+      // callers pass `{ blockNumber: bigint }` — the runtime shape — and
+      // the factory pre-encodes to the wire string in the queryKey before
+      // anything reaches `JSON.stringify`-based hashing.
+      const src = readGenerated();
+      expect(src).toMatch(
+        /export const lookupBlockQueryKey = \(options: Options<LookupBlockInput>\) => createQueryKey\('lookupBlock', \{ \.\.\.options, \.\.\.options\?\.path !== undefined \? \{ path: z\.encode\(BlockNumberPathParams, options\?\.path\) \} : \{\} \} as Options<LookupBlockData>\);/
+      );
+      expect(src).toMatch(
+        /export const lookupBlockOptions = \(options: Options<LookupBlockInput>\) => queryOptions<LookupBlockResponse, [^>]*LookupBlockResponse, ReturnType<typeof lookupBlockQueryKey>>\(/
+      );
+    });
+
+    it('uses the Errors type as the queryOptions error generic when one exists', () => {
+      // `lookupBlock` doesn't declare Errors → DefaultError. `createOrder`
+      // (codec on body, plus 400 + 500 error responses in the fixture)
+      // does, so the factory's error generic must be the
+      // `${Op}Error` union — otherwise a caller reading `result.error`
+      // would get `unknown` instead of the typed error body shapes.
+      // `createOrFetchResource` has Errors but no codec input slot, so
+      // its factory comes from upstream tanstack — not the right place
+      // to test our error-generic logic.
+      const src = readGenerated();
+      expect(src).toMatch(
+        /export const createOrderOptions = .* queryOptions<CreateOrderResponse, CreateOrderError, CreateOrderResponse, /
+      );
+    });
+
+    it('encodes every codec-bearing slot for multi-slot routes', () => {
+      // `updateOrder` has BOTH path (Int64Codec) AND body (mixed codecs).
+      // Both slot conditionals must appear in the queryKey arg, otherwise
+      // the unencoded slot's bigint/Date values would land in the
+      // queryKey and trip `JSON.stringify` (or worse, a `String(date)`
+      // locale collision).
+      const src = readGenerated();
+      expect(src).toMatch(
+        /export const updateOrderQueryKey = \(options: Options<UpdateOrderInput>\) => createQueryKey\('updateOrder', \{[\s\S]*\.\.\.options\?\.path !== undefined \? \{ path: z\.encode\(OrderIdPathParams, options\?\.path\) \} : \{\},\s*\.\.\.options\?\.body !== undefined \? \{ body: z\.encode\(UpdateOrderRequest, options\?\.body\) \} : \{\}\s*\} as Options<UpdateOrderData>\);/
+      );
+    });
+
+    it('calls the raw SDK function (alias `${opId}2`) inside queryFn, not the wrapper', () => {
+      // The wrapper would re-encode the already-wire-shaped slots in
+      // queryKey[0], producing nonsense. Confirm we go straight to the
+      // upstream SDK plugin's function.
+      const src = readGenerated();
+      expect(src).toMatch(
+        /lookupBlockOptions = .* queryFn: async \(\{ queryKey, signal \}\) => \{\s*const \{ data \} = await lookupBlock2\(/
+      );
+    });
+
+    it('pins the ThrowOnError generic to true for codec ops to keep `data` non-undefined', () => {
+      // The cast to `Options<${Op}Data>` strips `throwOnError: true`'s
+      // literal narrowing — without pinning ThrowOnError, the SDK function
+      // returns `data: T | undefined` and the queryFn's `Promise<T>`
+      // contract fails. Every factory we emit goes through this path since
+      // approach #2 means we only emit for codec ops.
+      const src = readGenerated();
+      expect(src).toMatch(/await lookupBlock2\([^)]*\} as Options<LookupBlockData, true>\);/);
+      expect(src).toMatch(
+        /await listRecentEvents2\([^)]*\} as Options<ListRecentEventsData, true>\);/
+      );
+      expect(src).toMatch(/await createOrder2\([^)]*\} as Options<CreateOrderData, true>\);/);
+    });
+
+    it('skips factory emission for errors-only operations', () => {
+      // `getErrorsOnly` has no 2xx response, so there's no Response type to
+      // parameterise queryOptions with. A factory that always returns an
+      // error isn't a useful query surface — skip it (the upstream tanstack
+      // plugin does the same via its `isQuery` hook).
+      const src = readGenerated();
+      expect(src).not.toMatch(/export const getErrorsOnlyQueryKey\b/);
+      expect(src).not.toMatch(/export const getErrorsOnlyOptions\b/);
+    });
+
+    it('uses optional `options?` for routes whose ${Op}Data has no required slot', () => {
+      // `submitForReview` has only an optional body — no required slot, so
+      // the factory accepts `submitForReviewOptions()` with no args.
+      const src = readGenerated();
+      expect(src).toMatch(/export const submitForReviewOptions = \(options\?: /);
+      expect(src).toMatch(/export const submitForReviewQueryKey = \(options\?: /);
+    });
+
+    it('uses required `options:` for routes whose ${Op}Data has at least one required slot', () => {
+      // `lookupBlock`'s path slot is required (URL templates demand
+      // interpolation values), so options must be required.
+      const src = readGenerated();
+      expect(src).toMatch(/export const lookupBlockOptions = \(options: /);
+      expect(src).toMatch(/export const lookupBlockQueryKey = \(options: /);
+    });
   });
 });
