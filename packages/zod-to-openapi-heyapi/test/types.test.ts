@@ -14,19 +14,45 @@
 import { describe, it } from 'vitest';
 
 import type {
+  getCodecObjectOptions,
+  getCodecObjectQueryKey
+} from './__generated__/@tanstack/react-query.gen.ts';
+import type {
+  createOrFetchResource,
+  createOrder,
   CreateOrderInput,
   CreateOrFetchResourceError,
   CreateOrFetchResourceErrors,
   CreateOrFetchResourceResponse,
   CreateOrFetchResourceResponses,
+  createOrderOptions,
+  getCodecObject,
   GetCodecObjectResponse,
   GetCodecObjectResponses,
   GetDateFieldResponse,
+  getErrorsOnly,
   ListRecentEventsInput,
+  listRecentEventsOptions,
+  listRecentEventsQueryKey,
+  lookupBlock,
   LookupBlockInput,
+  lookupBlockOptions,
+  lookupBlockQueryKey,
   SubmitForReviewInput,
+  submitForReviewOptions,
   UpdateOrderInput
 } from './__generated__/registry-validator.gen.ts';
+// Raw SDK functions used as the type-level "ground truth" — we want our
+// wrappers' return types to match these exactly, so the codec promises
+// the response transformer makes (success body) and the error
+// transformer makes (error body) reach the caller as-is.
+import type {
+  createOrFetchResource as createOrFetchResourceSdk,
+  createOrder as createOrderSdk,
+  getCodecObject as getCodecObjectSdk,
+  getErrorsOnly as getErrorsOnlySdk,
+  lookupBlock as lookupBlockSdk
+} from './__generated__/sdk.gen.ts';
 import type * as schemas from './fixtures/schemas.ts';
 import type { z } from './fixtures/zod.ts';
 
@@ -133,7 +159,116 @@ type Assertions = [
   // Default-optional body: `submitForReview`'s route config has body
   // WITHOUT `required: true`, so the slot is optional in ${Op}Input
   // and the wrapper accepts no args.
-  Expect<undefined extends SubmitForReviewInput['body'] ? true : false>
+  Expect<undefined extends SubmitForReviewInput['body'] ? true : false>,
+
+  // ── TanStack Query factory parameter typing ─────────────────────────────────
+  //
+  // The point of the factory codegen is that callers pass codec runtime
+  // shapes (bigint, Date) on the request side — same as they receive on
+  // the response side. The factory's `options` parameter type, surfaced as
+  // `Parameters<typeof factory>[0]`, must mirror `${Op}Input` for codec ops
+  // and `${Op}Data` for non-codec ops. If the factory regresses to wire
+  // shapes, callers would have to pre-encode every request to use the
+  // factory, defeating the codec round-trip.
+
+  // Codec on path: bigint flows through to the factory parameter.
+  Expect<
+    Equal<NonNullable<Parameters<typeof lookupBlockQueryKey>[0]>['path']['blockNumber'], bigint>
+  >,
+  Expect<
+    Equal<NonNullable<Parameters<typeof lookupBlockOptions>[0]>['path']['blockNumber'], bigint>
+  >,
+
+  // Codec on query, optional: `since` is `Date | undefined` — runtime shape,
+  // not a wire ISO string. Optional propagates from the underlying ${Op}Data.
+  Expect<
+    Equal<
+      NonNullable<NonNullable<Parameters<typeof listRecentEventsQueryKey>[0]>['query']>['since'],
+      Date | undefined
+    >
+  >,
+  Expect<
+    Equal<
+      NonNullable<NonNullable<Parameters<typeof listRecentEventsOptions>[0]>['query']>['since'],
+      Date | undefined
+    >
+  >,
+
+  // Codec on body: priority is bigint, scheduledFor is Date.
+  Expect<Equal<NonNullable<Parameters<typeof createOrderOptions>[0]>['body']['priority'], bigint>>,
+  Expect<
+    Equal<NonNullable<Parameters<typeof createOrderOptions>[0]>['body']['scheduledFor'], Date>
+  >,
+
+  // No registered input — factory takes `${Op}Data` directly. The slot
+  // shape is whatever the SDK plugin emitted (here, no slots). The
+  // important assertion is that the factory parameter is `Options<...Data>`,
+  // not `Options<...Input>` (which doesn't exist for this op).
+  Expect<undefined extends Parameters<typeof getCodecObjectQueryKey>[0] ? true : false>,
+  Expect<undefined extends Parameters<typeof getCodecObjectOptions>[0] ? true : false>,
+
+  // Routes whose ${Op}Data has no required slot accept a no-arg call.
+  Expect<undefined extends Parameters<typeof submitForReviewOptions>[0] ? true : false>,
+
+  // ── SDK wrapper return-type parity ─────────────────────────────────
+  //
+  // Four flavours of wrapper, all of which must return *exactly* what
+  // the upstream raw SDK function returns — same `ThrowOnError`
+  // overload narrowing, same discriminated union for the
+  // throwOnError: false case, same codec-decoded error shapes. The
+  // SDK function's types are the ground truth (its `${Op}Error` is
+  // already `z.output<…>` from this plugin). If the wrapper's return
+  // type drifts from the SDK's, our codec promises break either on
+  // the success path (`data: T | undefined` instead of `T` when
+  // `throwOnError: true`) or the error path (`error.traceId: string`
+  // instead of `bigint`). Asserting equality between wrapper and SDK
+  // return types catches both regressions.
+
+  // Pass-through (no input, no errors).
+  Expect<
+    Equal<Awaited<ReturnType<typeof getCodecObject>>, Awaited<ReturnType<typeof getCodecObjectSdk>>>
+  >,
+  // Same wrapper with throwOnError: true narrowing.
+  Expect<
+    Equal<
+      Awaited<ReturnType<typeof getCodecObject<true>>>,
+      Awaited<ReturnType<typeof getCodecObjectSdk<true>>>
+    >
+  >,
+
+  // Codec-input wrapper.
+  Expect<
+    Equal<
+      Awaited<ReturnType<typeof lookupBlock<true>>>,
+      Awaited<ReturnType<typeof lookupBlockSdk<true>>>
+    >
+  >,
+
+  // Error-decoding wrapper. Preserving the SDK return type means
+  // `result.error.traceId` is `bigint` (Int64Codec runtime), not
+  // `string` (the wire shape). The runtime test in api.test.ts
+  // proves the runtime decode actually happens; this assertion
+  // proves the type contract the wrapper makes still aligns with
+  // what the SDK function declared.
+  Expect<
+    Equal<
+      Awaited<ReturnType<typeof createOrFetchResource>>,
+      Awaited<ReturnType<typeof createOrFetchResourceSdk>>
+    >
+  >,
+
+  // Combined codec-input + error-decoding op.
+  Expect<
+    Equal<
+      Awaited<ReturnType<typeof createOrder<true>>>,
+      Awaited<ReturnType<typeof createOrderSdk<true>>>
+    >
+  >,
+
+  // Errors-only op.
+  Expect<
+    Equal<Awaited<ReturnType<typeof getErrorsOnly>>, Awaited<ReturnType<typeof getErrorsOnlySdk>>>
+  >
 ];
 
 const _assertions: Assertions | undefined = undefined;

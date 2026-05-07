@@ -283,6 +283,11 @@ fixtureRegistry.registerPath({
 // `body?:` in the OpenAPI spec (and hey-api's `${Op}Data` mirrors that),
 // so `${Op}Input.body` ends up optional. For routes where the body is
 // the whole point of the request, mark it explicitly.
+//
+// The 400 + 500 error responses are here so this codec op exercises
+// the Errors-keyed factory error generic — the only codec op in the
+// fixture set with a registered error bucket. Without them, no test
+// would cover the `errorSymbol` branch in the tanstack factory emit.
 fixtureRegistry.registerPath({
   method: 'post',
   path: '/fixtures/orders',
@@ -299,6 +304,14 @@ fixtureRegistry.registerPath({
       content: {
         'application/json': { schema: registerOnce('ScalarString', schemas.ScalarString) }
       }
+    },
+    400: {
+      description: 'bad request',
+      content: { 'application/json': { schema: errorBadRequest } }
+    },
+    500: {
+      description: 'server error',
+      content: { 'application/json': { schema: errorServer } }
     }
   }
 });

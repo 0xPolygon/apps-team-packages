@@ -389,6 +389,9 @@ importers:
       '@polygonlabs/zod-codecs':
         specifier: workspace:*
         version: link:../zod-codecs
+      '@tanstack/react-query':
+        specifier: ^5.100.1
+        version: 5.100.1(react@19.2.5)
       '@tsconfig/node-ts':
         specifier: ^23.0.0
         version: 23.6.4

@@ -47,6 +47,36 @@ imported or defined inline.
 ## Usage
 
 ```ts
+import { defineRegistryClientConfig } from '@polygonlabs/zod-to-openapi-heyapi';
+import { myRegistry } from './schemas/registry.ts';
+
+export default await defineRegistryClientConfig({
+  registry: myRegistry,
+  schemasFrom: '@my-org/api-schemas',
+  input: './openapi.json',
+  output: './src/generated'
+});
+```
+
+That's the whole config. The factory locks in the plugin order, the
+`@hey-api/sdk` flags this plugin requires (`transformer: true`,
+`includeInEntry: false`), and the resolution-fragile passthroughs (`$`
+and `OpenApiGeneratorV3`) so consumers don't have to wire any of it up
+themselves.
+
+For codec-aware TanStack Query factories alongside the SDK wrappers,
+flip `tanstackReactQuery: true`. See [TanStack Query
+factories](#tanstack-query-factories) below for the full picture.
+`@tanstack/react-query` is an optional peer dependency — only install
+it when you turn the flag on.
+
+### Advanced — composing the plugin yourself
+
+If you need a plugin shape the factory doesn't expose, drop down to
+`registryPlugin` and assemble the config by hand. The factory is the
+recommended path; the lower-level export is the escape hatch.
+
+```ts
 import { OpenApiGeneratorV3 } from '@asteasolutions/zod-to-openapi';
 import { $, defineConfig } from '@hey-api/openapi-ts';
 import { registryPlugin } from '@polygonlabs/zod-to-openapi-heyapi';
@@ -56,9 +86,9 @@ export default defineConfig({
   input: './openapi.json',
   output: { path: './src/generated', clean: true },
   plugins: [
-    // Must be listed BEFORE @hey-api/typescript so the plugin's response-type
-    // symbols are registered first; the SDK plugin queries by metadata key
-    // and takes the first registered match.
+    // Must be listed BEFORE @hey-api/typescript so the plugin's
+    // response-type symbols are registered first; the SDK plugin queries
+    // by metadata key and takes the first registered match.
     (await registryPlugin({
       registry: myRegistry,
       schemasFrom: '@my-org/api-schemas',
@@ -87,7 +117,8 @@ codegen-time audit. `defineConfig`'s plugin slot is typed as
 hey-api evaluates plugins, it has already been awaited. We could chase the
 upstream type to remove the cast, but the surface is unstable enough that
 pinning it would break on every minor hey-api bump. The cast is the
-deliberately boring pin point.
+deliberately boring pin point. (`defineRegistryClientConfig` does this
+cast internally.)
 
 ### Add `src/generated/` to `.gitattributes`
 
@@ -410,7 +441,21 @@ If your `package.json` lists `@hey-api/client-fetch` under `dependencies` or
 goes away, and the generated client keeps working — its imports are
 relative paths into the vendored directory.
 
-## Plugin options
+## `defineRegistryClientConfig` options
+
+| Option | Type | Description |
+|---|---|---|
+| `registry` | `OpenAPIRegistry` | The same registry used to generate the OpenAPI spec. The plugin runs the same generator internally to discover schema names — no hardcoded list. |
+| `schemasFrom` | `string` | Module specifier the generated client imports your schemas from. Must be unambiguous from any caller (package name, `#imports` alias, or `file://` URL — not a relative path). See [The `schemasFrom` option](#the-schemasfrom-option). |
+| `input` | `UserConfig['input']` | OpenAPI spec input — passed through to `createClient`. URL string, filesystem path, or parsed spec object. |
+| `output` | `UserConfig['output']` | Output directory configuration — passed through to `createClient`. Path string or full output object. |
+| `tanstackReactQuery` | `boolean` | When `true`, wires the upstream `@tanstack/react-query` plugin into the config and installs a parser-level `isQuery` hook so this plugin and upstream split factory emission cleanly (codec ops here, everything else upstream). See [TanStack Query factories](#tanstack-query-factories) below. Defaults to `false`. `@tanstack/react-query` is an optional peer dependency. |
+| `parser` | `UserConfig['parser']` | Optional pass-through for the openapi-ts `parser` config (filters, transforms, custom hooks). The factory's own `isQuery` hook composes with whatever you provide here — yours runs after ours. |
+
+## Advanced — `registryPlugin` options
+
+These describe the lower-level `registryPlugin` export. Use the factory
+above unless you have a reason to compose the plugin list yourself.
 
 | Option | Type | Description |
 |---|---|---|
@@ -418,6 +463,7 @@ relative paths into the vendored directory.
 | `schemasFrom` | `string` | Module specifier the generated client imports your schemas from. Must be unambiguous from any caller (package name, `#imports` alias, or `file://` URL — not a relative path). See [The `schemasFrom` option](#the-schemasfrom-option). |
 | `generatorClass` | `OpenApiGeneratorV3` | Pass `OpenApiGeneratorV3` from `@asteasolutions/zod-to-openapi` explicitly. Avoids resolution ambiguity in the codegen environment. |
 | `$` | `typeof $` | Pass `$` from `@hey-api/openapi-ts` explicitly. Same reason. |
+| `tanstackReactQuery` | `boolean` | Emit codec-aware TanStack Query factories for **codec ops only** (operations with a registered input schema). Non-codec ops are deliberately skipped — pair with the upstream `@tanstack/react-query` plugin and a parser-level `isQuery: false` hook for those op ids to avoid name collisions. `defineRegistryClientConfig` automates that wiring. Defaults to `false`. Adds a runtime peer-dep on `@tanstack/react-query` for consumers who use it. |
 
 ## SDK wrappers
 
@@ -429,14 +475,27 @@ operation's plain name (`getBlockMetadata`, `createMessage`, …). The raw
 SDK functions in `sdk.gen.ts` are an implementation detail — the wrapper
 delegates to them for HTTP wiring.
 
-For ops without a registered input schema, the wrapper is a thin
-re-binding of the upstream SDK function — same call signature, no
-runtime overhead, just present so every op has a canonical entry in the
-auto-barrel:
+The wrapper has four flavours, picked by what the op declares:
+
+| Op declares | Wrapper |
+|---|---|
+| Nothing (no input schema, no error schema) | Pass-through arrow |
+| Input schema only | Input-encoding wrapper |
+| Error schema only | Error-decoding wrapper |
+| Both | Combined wrapper (encode in, decode out) |
+
+The pass-through case is the bottom rung — same call signature as the
+upstream SDK function, the wrapper just forwards `options`. We emit it
+as a typed arrow rather than a `const X = X2` re-bind so
+`wrapperFn.name === '${opId}'` for telemetry / logging that
+introspects the canonical operation name (a re-bind would keep
+hey-api's auto-aliased `${opId}2` as the function's `.name`):
 
 ```ts
 // Generated registry-validator.gen.ts
-export const getBlockNumber = getBlockNumber2; // re-bind from sdk.gen.ts
+export const getBlockNumber = async <ThrowOnError extends boolean = false>(
+  options?: Options<GetBlockNumberData, ThrowOnError>
+) => await getBlockNumber2(options);
 ```
 
 For ops whose `request.{params, query, body}` schema is exported from
@@ -541,6 +600,41 @@ reads `body.required` for the body slot — set
 `body: { required: true, ... }` on the route config if the body should
 be required (asteasolutions defaults to optional otherwise).
 
+### Error response decoding
+
+Operations that declare error response schemas get an
+`${opId}ErrorTransformer` (mirrors the success-side `${opId}Transformer`
+shape — `parseAsync` against a single schema or `z.union(...)` for
+multi-status). The SDK wrapper calls it on both error paths so the
+runtime value matches the codec runtime types declared in `${Op}Error`:
+
+- **`throwOnError: false` path** — after the SDK call returns,
+  `result.error` is decoded in place. If `parseAsync` throws (response
+  body doesn't match any registered error schema), the wire-shape
+  value is left in place rather than propagating a `ZodError` to a
+  caller that asked for non-throwing behaviour. The type/runtime gap
+  re-opens *only* on malformed responses; the well-formed case
+  delivers what the type promises.
+- **`throwOnError: true` path** — the SDK function throws the
+  wire-shape body; the wrapper catches, runs `parseAsync`, and
+  re-throws the decoded shape. If `parseAsync` rejects (network-level
+  error or unexpected body), the original error re-throws raw so
+  upstream stack traces aren't replaced with a parse failure.
+
+Why a wrapper at all: hey-api's fetch client only invokes the
+`responseTransformer` on 2xx bodies. Error responses bypass it, so the
+plugin has to take the runtime decode into its own hands — otherwise
+the `${Op}Error` types would claim codec runtime shapes (`bigint`,
+`Date`) while the consumer received wire-shape values. The wrapper
+closes that gap.
+
+Pass-through ops — those with no input schemas AND no error schemas —
+stay re-binds (`export const ${opId} = ${opId}2`) so the auto-barrel
+still exposes a single canonical name with zero overhead. Ops with
+errors but no input get a real wrapper; ops with input but no errors
+get the existing input-encoding wrapper; ops with both get both
+pipelines composed in one wrapper body.
+
 ### What's not covered
 
 - **Headers**: schema-typed header maps are out of scope. Headers are
@@ -626,8 +720,67 @@ export const createOrFetchResourceTransformer = async (
   await z.union([ResourceFetched, ResourceCreated]).parseAsync(data);
 ```
 
-Operations whose only responses are errors get the `Errors`/`Error` types but
-no transformer (there's no success body to decode).
+Operations whose only responses are errors get the `Errors`/`Error` types
+but no success transformer (there's no 2xx body to decode). They still get
+an `${opId}ErrorTransformer` and a wrapper that runs it on the error
+path — see [Error response decoding](#error-response-decoding) above.
+
+## TanStack Query factories
+
+Set `tanstackReactQuery: true` on `defineRegistryClientConfig` to wire
+in the upstream `@tanstack/react-query` plugin AND emit codec-aware
+factories from this plugin. The factory installs everything; the only
+thing you change is the flag.
+
+```ts
+const blockMetadata = useQuery(
+  getBlockMetadataOptions({ path: { blockNumber: 23000000n } })
+);
+```
+
+The factory's `options` parameter for codec ops is typed against
+`${Op}Input` — codec runtime shapes (`bigint`, `Date`, …), exactly as
+callers pass them at the SDK call site. The queryKey carries
+**wire-shape** values for codec slots: the factory runs
+`z.encode(Schema, options.<slot>)` synchronously when building the
+key, so the default `JSON.stringify`-based `queryKeyHashFn` stays
+hash-stable without consumers having to configure a bigint-aware hasher
+on their `QueryClient`. Two distinct `bigint` block heights produce two
+distinct hash-stable keys; cache identity is preserved via the encoded
+string.
+
+The queryFn calls the **raw** SDK function from `sdk.gen.ts`, not the
+SDK wrapper — the wrapper would re-encode the already-wire-shaped slots
+in `queryKey[0]` and produce nonsense. The wire-shape values reach the
+fetch client directly.
+
+The error generic on `queryOptions<...>` is the operation's `${Op}Error`
+union when the route declared error responses, falling back to
+`@tanstack/react-query`'s `DefaultError` otherwise. So a caller reading
+`result.error` against a route with typed errors gets the right body
+shape, not `unknown`.
+
+### How the composition works
+
+Codec ops (operations whose `request.{params, query, body, headers}` is
+a registered Zod schema) get factories from **this plugin**, in the
+same `registry-validator.gen.ts` file as the SDK wrappers. Non-codec
+ops get factories from the **upstream** `@tanstack/react-query` plugin,
+in its own dedicated file. Both halves use the same names
+(`${opId}Options` / `${opId}QueryKey`), so the consumer call site sees
+one naming scheme.
+
+The split is enforced at the parser level via a
+`parser.hooks.operations.isQuery` hook the factory installs: codec op
+ids return `false` there, and the upstream plugin skips them. Without
+this gating both plugins would emit factories under the same names and
+collide in the entry barrel.
+
+Operations without a 2xx response (errors-only ops) and operations
+without registered input schemas neither produce a codec factory from
+this plugin (no codec runtime shape to type against, or no Response
+type to parameterise) — those go through the upstream plugin
+unchanged.
 
 ## Codegen drift
 
@@ -783,6 +936,30 @@ examples.
   in the route response, not the original schema. zod-to-openapi treats the
   original and the named instance as separate schemas; only the named one
   emits a `$ref`.
+
+- **Async codecs in input slots** under `tanstackReactQuery: true`. The
+  generated `${opId}QueryKey` factory pre-encodes codec slots
+  synchronously via `z.encode(Schema, value)` so the resulting key
+  contains wire-shape strings, not the codec runtime values — that's
+  what keeps the default `JSON.stringify`-based `queryKeyHashFn`
+  hash-stable for `bigint` / `Date` inputs without consumer-side
+  ceremony. If a codec's encode side runs an async transform, `z.encode`
+  throws `$ZodAsyncError` at queryKey computation time. The error is
+  clean (the codec name appears in the stack trace, the codegen-time
+  warning isn't needed) but the limit is real: TanStack's queryKey
+  getter can't be async, so an async-input codec is a hard "no" for
+  routes you want to drive through `useQuery(...)`. The team's shipped
+  codecs (`Int64Codec`, `BigIntegerCodec`, `DecimalStringCodec`,
+  `IsoDateCodec`) are all sync and unaffected.
+
+- **Error responses on routes with no `$ref` error schemas.** The
+  plugin emits the error transformer + decoding wrapper only when the
+  registry declares at least one error schema for the operation. Routes
+  with `description: 'unauthorised'` and no schema get the wire-shape
+  body on `result.error` regardless — there's nothing to decode
+  against. Register a schema (e.g. via `ErrorResponse` from
+  `@polygonlabs/openapi-registry/error-schemas`) to get the type/runtime
+  parity treatment.
 
 ## Why `z.output<typeof Schema>` instead of walking the schema
 

@@ -44,13 +44,20 @@
   "peerDependencies": {
     "@asteasolutions/zod-to-openapi": "^8.0.0",
     "@hey-api/openapi-ts": ">=0.95.0",
+    "@tanstack/react-query": "^5.0.0",
     "zod": "^4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@tanstack/react-query": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@asteasolutions/zod-to-openapi": "^8.5.0",
     "@hey-api/openapi-ts": "^0.95.0",
     "@polygonlabs/apps-team-lint": "workspace:*",
     "@polygonlabs/zod-codecs": "workspace:*",
+    "@tanstack/react-query": "^5.100.1",
     "@tsconfig/node-ts": "^23.0.0",
     "@tsconfig/node24": "^24.0.0",
     "@types/node": "^24.0.0",

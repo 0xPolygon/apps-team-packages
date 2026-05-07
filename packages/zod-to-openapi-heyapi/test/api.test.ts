@@ -14,8 +14,13 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { client } from './__generated__/client.gen.ts';
 import {
   createOrder,
+  createOrderOptions,
+  createOrFetchResource as createOrFetchResourceWrapper,
+  getErrorsOnly as getErrorsOnlyWrapper,
   listRecentEvents,
   lookupBlock,
+  lookupBlockOptions,
+  lookupBlockQueryKey,
   submitForReview,
   updateOrder
 } from './__generated__/registry-validator.gen.ts';
@@ -360,5 +365,232 @@ describe('input-side codec encoding via the SDK wrapper', () => {
       listRecentEvents({ query: { since: 'not-a-date' as any } })
     ).rejects.toThrow();
     expect(hit).toBe(false);
+  });
+});
+
+describe('error response codec decoding via the SDK wrapper', () => {
+  // The raw SDK function (in `sdk.gen.ts`) never runs a transformer on
+  // error responses — `client-fetch` only invokes responseTransformer on
+  // 2xx bodies. Without intervention, callers reading `result.error`
+  // would see wire-shape values while the type system promised the codec
+  // runtime shape. The wrapper closes that gap by calling
+  // `${opId}ErrorTransformer` on the error path. These tests exercise
+  // the wrapper directly to verify the runtime now matches the types.
+
+  it('decodes throwOnError: false `result.error` through the registered schema (codec field round-trip)', async () => {
+    // ServerError carries `traceId: Int64Codec` (wire string → runtime
+    // bigint). The wrapper must run parseAsync so the caller reads the
+    // bigint that the type promises.
+    server.use(
+      http.post(`${BASE_URL}/fixtures/createOrFetch`, () =>
+        HttpResponse.json(
+          { code: 'internal_error', message: 'kaboom', traceId: '999999999999' },
+          { status: 500 }
+        )
+      )
+    );
+
+    const { data, error } = await createOrFetchResourceWrapper();
+    expect(data).toBeUndefined();
+    expect(error).toBeDefined();
+    if (error && 'traceId' in error) {
+      expect(typeof error.traceId).toBe('bigint');
+      expect(error.traceId).toBe(999999999999n);
+    } else {
+      throw new Error('expected ServerError branch with traceId');
+    }
+  });
+
+  it('decodes thrown errors on the throwOnError: true path', async () => {
+    // The SDK function throws the wire-shape body when throwOnError: true.
+    // The wrapper catches, decodes via the error transformer, and
+    // re-throws the typed shape so the caller's `catch` block sees the
+    // codec runtime value.
+    server.use(
+      http.post(`${BASE_URL}/fixtures/createOrFetch`, () =>
+        HttpResponse.json(
+          { code: 'internal_error', message: 'kaboom', traceId: '42' },
+          { status: 500 }
+        )
+      )
+    );
+
+    let caught: unknown;
+    try {
+      await createOrFetchResourceWrapper({ throwOnError: true });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeDefined();
+    if (
+      caught &&
+      typeof caught === 'object' &&
+      'traceId' in caught &&
+      typeof (caught as { traceId: unknown }).traceId === 'bigint'
+    ) {
+      expect((caught as { traceId: bigint }).traceId).toBe(42n);
+    } else {
+      throw new Error('expected typed ServerError with bigint traceId');
+    }
+  });
+
+  it('leaves error as wire-shape when parseAsync rejects (non-throwing path)', async () => {
+    // Server returns a body that doesn't match any registered error
+    // schema (no `code` field). The wrapper's error transformer
+    // throws — but the throwOnError: false caller asked for no
+    // throws, so the wrapper swallows the parse error and leaves the
+    // raw value in `result.error`. The type lie returns *only* for
+    // malformed responses, not the typical case.
+    server.use(
+      http.post(`${BASE_URL}/fixtures/createOrFetch`, () =>
+        HttpResponse.json({ unexpected: 'shape' }, { status: 500 })
+      )
+    );
+
+    const { error } = await createOrFetchResourceWrapper();
+    expect(error).toEqual({ unexpected: 'shape' });
+  });
+
+  it('re-throws raw error when parseAsync rejects (throwOnError: true path)', async () => {
+    // Same malformed-body scenario, but throwOnError: true. The wrapper
+    // tries to decode, fails, and re-throws the original wire-shape
+    // body — caller sees what the SDK function would have thrown
+    // without the wrapper, not a confusing ZodError.
+    server.use(
+      http.post(`${BASE_URL}/fixtures/createOrFetch`, () =>
+        HttpResponse.json({ unexpected: 'shape' }, { status: 500 })
+      )
+    );
+
+    let caught: unknown;
+    try {
+      await createOrFetchResourceWrapper({ throwOnError: true });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toEqual({ unexpected: 'shape' });
+  });
+
+  it('decodes errors-only operation result.error', async () => {
+    // `getErrorsOnly` has no 2xx — the wrapper still has full error
+    // decoding because all the schemas are registered. The codec field
+    // (`traceId` on ServerError) round-trips on the only path that
+    // exists for this op.
+    server.use(
+      http.get(`${BASE_URL}/fixtures/errorsOnly`, () =>
+        HttpResponse.json({ code: 'internal_error', message: 'no', traceId: '7' }, { status: 500 })
+      )
+    );
+
+    const { error } = await getErrorsOnlyWrapper();
+    expect(error).toBeDefined();
+    if (error && 'traceId' in error) {
+      expect(typeof error.traceId).toBe('bigint');
+      expect(error.traceId).toBe(7n);
+    } else {
+      throw new Error('expected ServerError branch with bigint traceId');
+    }
+  });
+});
+
+describe('TanStack Query factory queryKey + async codecs', () => {
+  // The queryKey factory body runs `z.encode(Schema, options.<slot>)`
+  // synchronously — TanStack's queryKey getter can't be async (the
+  // QueryClient hashes the key the moment a hook subscribes). For the
+  // codecs the team ships today (Int64Codec, IsoDateCodec,
+  // DecimalStringCodec, BigIntegerCodec) the encode side is sync, so
+  // this is correct.
+  //
+  // For an *async* codec — one whose encode side returns a Promise via
+  // an async refine/transform — `z.encode` throws a `$ZodAsyncError` at
+  // call time rather than silently returning a Promise that ends up in
+  // the queryKey. This test pins that assumption: if zod ever changes
+  // `encode` to silently fall through to the async path, our queryKey
+  // would carry `Promise<…>` values, JSON.stringify would render them
+  // as `{}`, and every distinct codec input would collide on the same
+  // hash. The thrown ZodAsyncError surfaces the limit clearly.
+  it('z.encode throws ZodAsyncError on async-codec input — keeps queryKey hash-safe', async () => {
+    const { z } = await import('./fixtures/zod.ts');
+    const asyncBigIntCodec = z.codec(z.string().regex(/^\d+$/), z.bigint(), {
+      decode: async (s: string) => BigInt(s),
+      encode: async (b: bigint) => b.toString()
+    });
+    expect(() => z.encode(asyncBigIntCodec, 42n)).toThrow();
+  });
+});
+
+describe('TanStack Query factory output (codec round-trip)', () => {
+  it('encodes codec slots into queryKey[0] so JSON.stringify is hash-safe', () => {
+    // The factory's queryKey carries wire-shape values for codec slots —
+    // critical because tanstack's default `queryKeyHashFn` runs
+    // JSON.stringify, which throws on bigint and renders Date as the
+    // locale string (collides for two distinct timestamps in the same
+    // minute on the runtime's local clock). Pre-encoding to the wire
+    // shape sidesteps both issues without forcing the consumer to
+    // configure `queryKeyHashFn` per QueryClient.
+    const key = lookupBlockQueryKey({ path: { blockNumber: 9007199254740993n } });
+    // queryKey is a one-tuple. Slot is post-encode.
+    expect(key).toHaveLength(1);
+    expect(key[0]).toMatchObject({
+      _id: 'lookupBlock',
+      path: { blockNumber: '9007199254740993' }
+    });
+    // Round-trip through the default hash to prove no bigint leaks through.
+    expect(() => JSON.stringify(key)).not.toThrow();
+  });
+
+  it('queryFn calls the raw SDK with wire-shape slots and returns the parsed body', async () => {
+    // Drive the factory the way useQuery would: invoke the queryFn with
+    // the queryKey it built. The queryFn must reach the SDK with the
+    // already-encoded wire shape (not the codec runtime shape) and
+    // return the parsed response body.
+    let url: string | undefined;
+    server.use(
+      http.get(`${BASE_URL}/fixtures/blocks/:blockNumber`, ({ request }) => {
+        url = request.url;
+        return HttpResponse.json({ value: 'ok' });
+      })
+    );
+
+    const opts = lookupBlockOptions({ path: { blockNumber: 9007199254740993n } });
+    // queryFn signature is QueryFunction<TData, TQueryKey> from tanstack —
+    // we don't import the type to avoid pulling tanstack into the test
+    // (the runtime call only needs queryKey and signal).
+    const ctx = {
+      queryKey: opts.queryKey,
+      signal: new AbortController().signal,
+      // tanstack's QueryFunctionContext also has `client` and `meta`; both
+      // unused by the generated queryFn body, so passing undefined-y
+      // values keeps the runtime happy.
+      client: undefined as never,
+      meta: undefined
+    };
+
+    const data = await opts.queryFn!(ctx);
+    expect(data).toEqual({ value: 'ok' });
+    expect(url).toContain('/fixtures/blocks/9007199254740993');
+  });
+
+  it('encodes Date body fields into the queryKey, not the locale string', async () => {
+    // The codec-on-body case is the harder one — JSON.stringify renders
+    // a Date instance as ISO 8601 (which would happen to work), but the
+    // factory needs to produce the same wire shape the SDK request
+    // serialiser uses. Verify the queryKey carries the ISO string the
+    // server expects.
+    const opts = createOrderOptions({
+      body: {
+        reference: 'order-1',
+        scheduledFor: new Date('2026-05-01T09:00:00.000Z'),
+        priority: 9007199254740993n
+      }
+    });
+    expect(opts.queryKey[0]).toMatchObject({
+      _id: 'createOrder',
+      body: {
+        reference: 'order-1',
+        scheduledFor: '2026-05-01T09:00:00.000Z',
+        priority: '9007199254740993'
+      }
+    });
   });
 });
