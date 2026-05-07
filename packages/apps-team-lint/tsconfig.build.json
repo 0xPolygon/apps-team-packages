@@ -4,7 +4,12 @@
     "noEmit": false,
     "outDir": "dist",
     "rootDir": "src",
-    "declaration": true
+    "declaration": true,
+    // Match the team-wide canonical pattern: build configs explicitly opt
+    // out of any inherited custom conditions so workspace deps resolve via
+    // their published dist/.d.ts (Node default resolution). No inherited
+    // condition today; kept for consistency and as future-proofing.
+    "customConditions": []
   },
   "include": ["src/**/*.ts"]
 }

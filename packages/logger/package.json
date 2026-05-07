@@ -30,11 +30,12 @@
   ],
   "scripts": {
     "build": "pnpm run typecheck && tsc -p tsconfig.build.json",
+    "build:clean": "pnpm run typecheck && rm -rf dist *.tsbuildinfo && tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "lint": "eslint .",
     "clean": "rm -rf node_modules dist *.tsbuildinfo",
-    "prepublishOnly": "pnpm run build"
+    "prepublishOnly": "pnpm run build:clean"
   },
   "dependencies": {
     "pino": "^10.3.1"
