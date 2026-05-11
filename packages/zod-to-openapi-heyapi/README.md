@@ -757,6 +757,84 @@ errors but no input get a real wrapper; ops with input but no errors
 get the existing input-encoding wrapper; ops with both get both
 pipelines composed in one wrapper body.
 
+#### Consumer narrowing — the canonical pattern
+
+The codegen-emitted `isTransportError` / `isUnknownError` /
+`isWrapperError` guards plus the wrapper's widened return type ARE
+the consumer narrowing API. The wrapper's return is statically
+`${Op}Error | TransportError | UnknownError | undefined`; once you
+peel off the wrapper-error branches via the predicates, the
+remaining static type is the typed `${Op}Error` — no `as` casts, no
+type hints, no manual narrowing:
+
+```ts
+import {
+  getX,
+  isTransportError,
+  isUnknownError
+} from '@my-org/api-client';
+
+const { data, error } = await getX();
+if (isTransportError(error))      log.network(error.cause);
+else if (isUnknownError(error))   log.schemaDrift({ issues: error.cause.issues, body: error.body });
+else if (error)                   handleTyped(error);   // typed ${Op}Error, full field access
+```
+
+The consumer's `@my-org/api-client` package re-exports the
+codegen-emitted guards as part of its public surface. **Don't import
+from `./generated/*.gen.js` directly** — those are codegen artifacts
+that may move or rename. The published package is the contract.
+
+#### Cross-client runtime helpers
+
+For code paths that work across multiple generated clients (logging
+adapters, error-reporting middleware) there's a small structural
+surface published at `@polygonlabs/zod-to-openapi-heyapi/errors`.
+Useful when you don't have the wrapper return type in scope:
+
+```ts
+import {
+  categorizeApiError,
+  getApiErrorMessage,
+  isTransportError,
+  isUnknownError,
+  isWrapperError,
+  TRANSPORT_ERROR_MARKER,
+  UNKNOWN_ERROR_MARKER,
+  type TransportError,
+  type UnknownError,
+  type ErrorCategory
+} from '@polygonlabs/zod-to-openapi-heyapi/errors';
+
+const category = categorizeApiError(error);
+switch (category.kind) {
+  case 'transport':    /* category.error: TransportError */ break;
+  case 'unknown':      /* category.error: UnknownError   */ break;
+  case 'native-error': /* category.error: Error          */ break;
+  case 'other':        /* category.error: unknown        */ break;
+}
+```
+
+Same symbol-keyed marker the codegen-emitted guards check (the
+markers come from the global `Symbol.for(...)` registry, so they're
+identity-stable across realms / module copies / iframes / workers).
+Two separately-generated clients in the same process produce
+mutually-narrowable instances.
+
+The runtime helper deliberately **does not** invent a typed-error
+category. The wrapper return already encodes the typed `${Op}Error`
+union statically; a runtime helper inventing a magic-string
+convention (e.g., `{ code: string; message: string }`) for a
+"typed" branch would lose the per-op typing the wrapper return
+carries. Code paths without the wrapper return in scope land typed
+errors in the `other` bucket; consumers with the typed return in
+scope should narrow with the codegen-emitted predicates directly.
+
+`getApiErrorMessage(error, fallback?)` returns `error.message` for
+`Error` instances (including wrapper-emitted ones, which extend
+`Error`) and the supplied fallback otherwise. It does NOT special-
+case typed-error shapes — same reason as above.
+
 ### What's not covered
 
 - **Headers**: schema-typed header maps are out of scope. Headers are

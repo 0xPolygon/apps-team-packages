@@ -28,7 +28,7 @@ type-predicate guards (`isTransportError` / `isUnknownError`) — no
 `instanceof` at the call site:
 
 ```ts
-import { isTransportError, isUnknownError } from './generated/registry-validator.gen.js';
+import { isTransportError, isUnknownError } from '@my-org/api-client';
 
 const { data, error } = await getX();
 if (isTransportError(error)) {
