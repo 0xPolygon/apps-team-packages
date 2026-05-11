@@ -867,6 +867,49 @@ case typed-error shapes — same reason as above.
   params / query, but the emit needs verification against
   `@hey-api/client-fetch`'s header-serialisation surface.
 
+## `responseStyle` is threaded through wrapper return types
+
+Hey-api supports two response styles, set on the client config or
+per-call options:
+
+- `responseStyle: 'fields'` (default) — wrapper returns the
+  discriminated envelope `{ data, error, request, response }` (no-
+  throw) or `{ data, request, response }` (throw, error path
+  thrown).
+- `responseStyle: 'data'` — wrapper returns the flat payload
+  (`TData` for throw, `TData | undefined` for no-throw — hey-api's
+  runtime swallows errors as `undefined` in `'data'` + no-throw).
+
+The plugin's wrappers thread `TResponseStyle` as a fourth generic
+through `WrapErrors` (error-widening wrappers) and
+`WrapPassThrough` (pass-through wrappers). Pinning the generic at
+the call site narrows the static return to match whichever style
+the runtime selects:
+
+```ts
+import { client, getX } from '@my-org/api-client';
+
+client.setConfig({ responseStyle: 'data' });
+
+// Static return: `Promise<XData>` — flat, no envelope.
+const data = await getX<true, 'data'>();
+
+// Static return: `Promise<XData | undefined>` — flat or undefined.
+const maybe = await getX<false, 'data'>();
+
+// Default 'fields' shape — static return is the discriminated envelope.
+const result = await getX();
+```
+
+Runtime behaviour stays in step: the wrapper's error-wrapping logic
+gates on `'request' in result && 'response' in result` (hey-api
+always emits those two keys in 'fields' mode and never in 'data'
+mode), and the try/catch around the SDK call wraps thrown errors in
+either style. Consumers using `'data'` + `throwOnError: true` catch
+wrapper-emitted `TransportError` / `ResponseValidationError` in
+their `catch` block, narrowing with the codegen-emitted `is*Error`
+predicates.
+
 ## What gets emitted
 
 For every operation whose response is a `$ref` to a registered schema, the

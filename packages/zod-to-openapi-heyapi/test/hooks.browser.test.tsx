@@ -278,6 +278,133 @@ describe('useMutation via imperative wrapper', () => {
   });
 });
 
+// ── 4. useMutation with responseStyle: 'data' ──────────────────────────────
+//
+// Hooks coverage of the second half of the responseStyle × throwOnError
+// matrix. Mirrors the imperative `responseStyle: 'data'` suite in
+// `api-errors.test.ts` but pulled through `useMutation` so the
+// hook-level lifecycle is exercised. The query side bypasses the
+// wrapper by design (codec-aware queryFn calls the raw SDK with
+// `throwOnError: true`), so the hook-level 'data' assertions live
+// here on the mutation side.
+
+describe("useMutation via imperative wrapper — responseStyle: 'data'", () => {
+  afterEach(() => client.setConfig({ responseStyle: 'fields', throwOnError: false }));
+
+  function useCreateOrFetchDataMutation() {
+    return useMutation({
+      mutationFn: async () => {
+        // Per-call pinning of `<true, 'data'>` so the wrapper return
+        // is flat `TData` — errors throw, the mutation lifecycle
+        // routes them through `onError` / `mutation.error`.
+        return await createOrFetchResource<true, 'data'>();
+      }
+    });
+  }
+
+  it('populates `data` after success (flat — no envelope unwrapping)', async () => {
+    client.setConfig({ responseStyle: 'data', throwOnError: true });
+    use(
+      http.post(`${BASE_URL}/fixtures/createOrFetch`, () =>
+        HttpResponse.json({ id: 'res_1', data: 'flat' }, { status: 200 })
+      )
+    );
+    const { result } = renderApiHook(() => useCreateOrFetchDataMutation());
+    result.current.mutate();
+    await waitFor(() => {
+      expect(result.current.isSuccess).toBe(true);
+    });
+    expect(result.current.data).toEqual({ id: 'res_1', data: 'flat' });
+  });
+
+  it('lands a TransportError on `mutation.error` when fetch rejects', async () => {
+    client.setConfig({ responseStyle: 'data', throwOnError: true });
+    use(http.post(`${BASE_URL}/fixtures/createOrFetch`, () => HttpResponse.error()));
+
+    const { result } = renderApiHook(() => useCreateOrFetchDataMutation());
+    result.current.mutate();
+    await waitFor(() => {
+      expect(result.current.isError).toBe(true);
+    });
+    if (!isTransportError(result.current.error)) {
+      throw new Error(`expected TransportError, got ${describeError(result.current.error)}`);
+    }
+    expect(result.current.error.cause).toBeInstanceOf(Error);
+  });
+
+  it('lands a ResponseValidationError on `mutation.error` when the body fails parseAsync', async () => {
+    client.setConfig({ responseStyle: 'data', throwOnError: true });
+    const badBody = { unexpected: 'shape' };
+    use(
+      http.post(`${BASE_URL}/fixtures/createOrFetch`, () =>
+        HttpResponse.json(badBody, { status: 500 })
+      )
+    );
+    const { result } = renderApiHook(() => useCreateOrFetchDataMutation());
+    result.current.mutate();
+    await waitFor(() => {
+      expect(result.current.isError).toBe(true);
+    });
+    if (!isResponseValidationError(result.current.error)) {
+      throw new Error(
+        `expected ResponseValidationError, got ${describeError(result.current.error)}`
+      );
+    }
+    expect(result.current.error.body).toEqual(badBody);
+  });
+
+  it('lands a typed `${Op}Error` on `mutation.error` (codec round-trip on traceId)', async () => {
+    client.setConfig({ responseStyle: 'data', throwOnError: true });
+    use(
+      http.post(`${BASE_URL}/fixtures/createOrFetch`, () =>
+        HttpResponse.json(
+          { code: 'internal_error', message: 'kaboom', traceId: '7' },
+          { status: 500 }
+        )
+      )
+    );
+    const { result } = renderApiHook(() => useCreateOrFetchDataMutation());
+    result.current.mutate();
+    await waitFor(() => {
+      expect(result.current.isError).toBe(true);
+    });
+    const surfaced = result.current.error;
+    expect(isWrapperError(surfaced)).toBe(false);
+    if (surfaced && typeof surfaced === 'object' && 'traceId' in surfaced) {
+      expect(typeof surfaced.traceId).toBe('bigint');
+      expect(surfaced.traceId).toBe(7n);
+    } else {
+      throw new Error(`expected ServerError branch, got ${describeError(surfaced)}`);
+    }
+  });
+
+  it("returns undefined on the no-throw 'data' path (errors swallowed silently)", async () => {
+    // The other half of the 'data' matrix: throwOnError: false +
+    // responseStyle: 'data'. Hey-api drops the envelope AND swallows
+    // errors as `undefined`, so the mutationFn just sees `undefined`
+    // on the error path — no wrapper-error narrowing possible here.
+    // Pinned for completeness; consumers wanting narrowing in 'data'
+    // mode pair it with `throwOnError: true` (the cell above).
+    client.setConfig({ responseStyle: 'data', throwOnError: false });
+    use(
+      http.post(`${BASE_URL}/fixtures/createOrFetch`, () =>
+        HttpResponse.json({ code: 'bad_request', message: 'no' }, { status: 400 })
+      )
+    );
+    function useUntypedMutation() {
+      return useMutation({
+        mutationFn: async () => await createOrFetchResource<false, 'data'>()
+      });
+    }
+    const { result } = renderApiHook(() => useUntypedMutation());
+    result.current.mutate();
+    await waitFor(() => {
+      expect(result.current.isSuccess).toBe(true);
+    });
+    expect(result.current.data).toBeUndefined();
+  });
+});
+
 function describeError(v: unknown): string {
   if (v instanceof Error) return `${v.constructor.name}: ${v.message}`;
   try {

@@ -358,6 +358,18 @@ export async function registryPlugin({
         emitWrapperErrorClasses({ dsl, plugin });
       };
 
+      // Pass-through ops have no error transformer, so the gate above
+      // never fires for them. They still need a return-type alias that
+      // threads `TResponseStyle` through hey-api's 'fields' / 'data'
+      // conditional — emit `WrapPassThrough` separately the first time
+      // a pass-through wrapper needs it.
+      let wrapPassThroughEmitted = false;
+      const ensureWrapPassThrough = (): void => {
+        if (wrapPassThroughEmitted) return;
+        wrapPassThroughEmitted = true;
+        emitWrapPassThroughAlias({ dsl, plugin });
+      };
+
       // Tanstack scaffolding (queryOptions value, DefaultError type, the
       // `QueryKey<TOptions>` alias, and the shared createQueryKey helper) is
       // emitted lazily on first use — operations with no 2xx response don't
@@ -502,6 +514,11 @@ export async function registryPlugin({
         // for ops that don't.
         if (errorTransformerSymbol) {
           ensureWrapperErrorClasses();
+        } else if (!hasInputSlots) {
+          // Pass-through op (no error decoding, no input encoding).
+          // It still needs `WrapPassThrough` for its return-type
+          // annotation; emit the alias lazily on first pass-through.
+          ensureWrapPassThrough();
         }
 
         emitSdkWrapper({
@@ -1078,31 +1095,12 @@ function assertSdkPluginCompatible(plugin: PluginLike): void {
     );
   }
 
-  // The wrapper's emitted `WrapErrors<TData, TError, ThrowOnError>` return
-  // type hard-codes the `responseStyle: 'fields'` shape: `{ data, error,
-  // request, response }`. If hey-api's SDK config flips
-  // `responseStyle: 'data'`, the runtime layer returns flat `TData` (or
-  // throws on error) while the wrapper's static return type continues
-  // claiming the fields-shape — the same "runtime and type silently
-  // diverge" class of bug this release sets out to fix.
-  //
-  // Pre-flight check: refuse to generate when responseStyle is anything
-  // other than the default 'fields'. A future release should thread
-  // TResponseStyle through the wrapper signature and `WrapErrors` so
-  // 'data' is supported; for now, flag at codegen time rather than
-  // ship the silent divergence.
-  if (config['responseStyle'] !== undefined && config['responseStyle'] !== 'fields') {
-    issues.push(
-      `  - 'responseStyle' must be 'fields' (or unset). This plugin's emitted ` +
-        `wrappers return the WrapErrors<TData, TError, ThrowOnError> shape which ` +
-        `is hard-coded to the 'fields' style ({ data, error, request, response }). ` +
-        `Other values (e.g., 'data') would make the wrapper's static return type ` +
-        `diverge from the runtime — a consumer reading 'result.error' against a ` +
-        `flat-data runtime would get either undefined or a property access through ` +
-        `the wrong shape. Thread-through support is planned; until then this ` +
-        `combination is rejected at codegen.`
-    );
-  }
+  // Note: `responseStyle` doesn't need a pre-flight check. The
+  // emitted `WrapErrors<TData, TError, ThrowOnError, TResponseStyle>`
+  // type takes a 4th `TResponseStyle` generic that conditionally
+  // produces hey-api's 'fields' or 'data' return shape, and every
+  // wrapper signature carries the same 4th generic. Static and
+  // runtime stay in step in both modes — see `emitWrapErrorsAlias`.
 
   if (issues.length === 0) return;
 
@@ -1535,10 +1533,17 @@ function emitSdkWrapper({
   // re-bind kept the auto-aliased `getX2` as the function's `.name`,
   // breaking telemetry / logging that introspects the canonical name.
   // The arrow adds one stack frame and one allocation per call, which
-  // is negligible next to the network round-trip; the public surface
-  // (call signature, return shape, throwOnError narrowing) is
-  // identical to the upstream SDK function because we forward the
-  // generic and the typed options through unchanged.
+  // is negligible next to the network round-trip.
+  //
+  // The wrapper carries a `TResponseStyle` generic that flows through
+  // to the `WrapPassThrough<...>` return-type alias — same threading
+  // the error-widening wrappers do via `WrapErrors<...>`. The raw SDK
+  // function's return type is 3-generic (`RequestResult<TData, _,
+  // ThrowOnError>`) so we cast through `Awaited<WrapPassThrough<...>>`
+  // to expose the 'data' / 'fields' shape conditional. Both call
+  // shapes are structurally compatible with what hey-api emits at
+  // runtime; the cast just gives the consumer's call site the right
+  // static narrow when they pin `<true, 'data'>` etc.
   if (!inputSlots && !errorTransformerSymbol) {
     const passthroughOptionsType = dsl
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1546,23 +1551,83 @@ function emitSdkWrapper({
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .generic(dsl.type(opDataSymbol as any))
       .generic('ThrowOnError');
+    const wrapPassThroughSymbol = plugin.querySymbol({
+      category: 'type',
+      resource: 'wrapper-error',
+      name: 'WrapPassThrough'
+    });
+    const responsesSymbol = plugin.querySymbol({
+      category: 'type',
+      resource: 'operation',
+      resourceId: opId,
+      role: 'responses'
+    });
+    let passthroughReturnTypeExpr: unknown | undefined;
+    if (wrapPassThroughSymbol) {
+      const tDataExpr = responsesSymbol
+        ? // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          dsl.type(responsesSymbol as any)
+        : dsl.type('unknown');
+      passthroughReturnTypeExpr = dsl
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .type(wrapPassThroughSymbol as any)
+        .generic(tDataExpr)
+        .generic('ThrowOnError')
+        .generic('TResponseStyle');
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const styleUnion = (dsl.type.or as (...args: any[]) => unknown)(
+      dsl.type.literal('fields'),
+      dsl.type.literal('data')
+    );
     plugin.node(
       dsl
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         .const(wrapperSymbol as any)
         .export()
         .assign(
-          dsl
-            .func()
-            .async()
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          ((): any => {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            .generic('ThrowOnError', (g: any) => g.extends('boolean').default(false))
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            .param('options', (p: any) => p.required(optionsRequired).type(passthroughOptionsType))
-            .do(
+            let f: any = dsl
+              .func()
+              .async()
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              .generic('ThrowOnError', (g: any) => g.extends('boolean').default(false))
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              .generic('TResponseStyle', (g: any) =>
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                (g as any).extends(styleUnion).default(dsl.type.literal('fields'))
+              )
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              .param('options', (p: any) =>
+                p.required(optionsRequired).type(passthroughOptionsType)
+              );
+            if (passthroughReturnTypeExpr) {
+              f = f.returns(passthroughReturnTypeExpr);
+              const awaited = dsl
+                .type('Awaited')
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                .generic(passthroughReturnTypeExpr as any);
+              return f.do(
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                (dsl as any).return(
+                  dsl.as(
+                    dsl.as(
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                      (dsl(sdkSymbol as any).call('options') as any).await(),
+                      dsl.type('unknown')
+                    ),
+                    awaited
+                  )
+                )
+              );
+            }
+            return f.do(
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
               (dsl(sdkSymbol as any).call('options') as any).await().return()
-            )
+            );
+          })()
         )
     );
     return;
@@ -1779,6 +1844,17 @@ function emitSdkWrapper({
   // contract on malformed responses.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const wrapperOptionsTypeArg: any = inputSymbol ?? opDataSymbol;
+  // `Options<TData, ThrowOnError>` from the SDK plugin's
+  // `sdk.gen.ts` is a 3-generic alias that drops the upstream
+  // `TResponseStyle` slot. The wrapper still threads `TResponseStyle`
+  // through its outer generic into `WrapErrors`; runtime selection of
+  // the style happens via `options.responseStyle` (or
+  // `client.setConfig({ responseStyle })`), which exists on the
+  // options shape at runtime even though the 3-arg type signature
+  // doesn't surface it. Callers pin the generic at the call site to
+  // get the narrowed return shape:
+  //
+  //   await getX<true, 'data'>({ responseStyle: 'data' });
   const optionsTypeExpr = dsl
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     .type(optionsSymbol as any)
@@ -1975,37 +2051,81 @@ function emitSdkWrapper({
       )
     );
     bodyStatements.push(
-      // Gate the wrapper-error logic on `typeof errorBearing.error ===
-      // 'object' && errorBearing.error !== null`. Hey-api's fetch
-      // client emits `error: undefined` on success and an object on
-      // failure, so the realistic universe is "object or undefined",
-      // but the stricter `typeof === 'object'` check also defends
-      // against hostile primitive values (`error: 0`, `error: ''`,
-      // `error: false`) that would fall through to `parseAsync(<prim>)`
-      // and mis-classify as a ResponseValidationError despite there
-      // being no real failure. `null` is excluded explicitly because
-      // `typeof null === 'object'`.
+      // Gate the wrapper-error logic on the full 'fields'-style shape:
+      // `typeof result === 'object' && result !== null &&
+      // 'request' in result && 'response' in result &&
+      // typeof result.error === 'object' && result.error !== null`.
+      //
+      // The `request` / `response` presence pair discriminates hey-api's
+      // 'fields' response from its 'data' response: hey-api always
+      // emits both keys on the fields-style object (regardless of
+      // success vs error), and never on the data-style return (which
+      // is either the flat payload or `undefined`). The `data` / `error`
+      // keys are NOT a reliable discriminator — hey-api omits the
+      // unused half of the pair at runtime (the error path returns
+      // `{ error, request, response }` with no `data` key, and the
+      // success path returns `{ data, request, response }` with no
+      // `error` key).
+      //
+      // The stricter `typeof === 'object' && !== null` check on
+      // `result.error` itself defends against hostile primitive values
+      // (`error: 0`, `error: ''`, `error: false`) that would fall
+      // through to `parseAsync(<prim>)` and mis-classify as a
+      // ResponseValidationError despite there being no real failure.
+      // `null` is excluded explicitly because `typeof null === 'object'`.
       dsl
         .if(
           tsFactory.createBinaryExpression(
             tsFactory.createBinaryExpression(
-              tsFactory.createTypeOfExpression(
-                tsFactory.createPropertyAccessExpression(
-                  tsFactory.createIdentifier('errorBearing'),
-                  'error'
+              tsFactory.createBinaryExpression(
+                tsFactory.createBinaryExpression(
+                  tsFactory.createBinaryExpression(
+                    tsFactory.createTypeOfExpression(tsFactory.createIdentifier('result')),
+                    tsFactory.createToken(SyntaxKind.EqualsEqualsEqualsToken),
+                    tsFactory.createStringLiteral('object')
+                  ),
+                  tsFactory.createToken(SyntaxKind.AmpersandAmpersandToken),
+                  tsFactory.createBinaryExpression(
+                    tsFactory.createIdentifier('result'),
+                    tsFactory.createToken(SyntaxKind.ExclamationEqualsEqualsToken),
+                    tsFactory.createNull()
+                  )
+                ),
+                tsFactory.createToken(SyntaxKind.AmpersandAmpersandToken),
+                tsFactory.createBinaryExpression(
+                  tsFactory.createStringLiteral('request'),
+                  tsFactory.createToken(SyntaxKind.InKeyword),
+                  tsFactory.createIdentifier('result')
                 )
               ),
-              tsFactory.createToken(SyntaxKind.EqualsEqualsEqualsToken),
-              tsFactory.createStringLiteral('object')
+              tsFactory.createToken(SyntaxKind.AmpersandAmpersandToken),
+              tsFactory.createBinaryExpression(
+                tsFactory.createStringLiteral('response'),
+                tsFactory.createToken(SyntaxKind.InKeyword),
+                tsFactory.createIdentifier('result')
+              )
             ),
             tsFactory.createToken(SyntaxKind.AmpersandAmpersandToken),
             tsFactory.createBinaryExpression(
-              tsFactory.createPropertyAccessExpression(
-                tsFactory.createIdentifier('errorBearing'),
-                'error'
+              tsFactory.createBinaryExpression(
+                tsFactory.createTypeOfExpression(
+                  tsFactory.createPropertyAccessExpression(
+                    tsFactory.createIdentifier('errorBearing'),
+                    'error'
+                  )
+                ),
+                tsFactory.createToken(SyntaxKind.EqualsEqualsEqualsToken),
+                tsFactory.createStringLiteral('object')
               ),
-              tsFactory.createToken(SyntaxKind.ExclamationEqualsEqualsToken),
-              tsFactory.createNull()
+              tsFactory.createToken(SyntaxKind.AmpersandAmpersandToken),
+              tsFactory.createBinaryExpression(
+                tsFactory.createPropertyAccessExpression(
+                  tsFactory.createIdentifier('errorBearing'),
+                  'error'
+                ),
+                tsFactory.createToken(SyntaxKind.ExclamationEqualsEqualsToken),
+                tsFactory.createNull()
+              )
             )
           )
         )
@@ -2126,11 +2246,16 @@ function emitSdkWrapper({
           `Errors=${!!errorsSymbol}. Plugin bug.`
       );
     }
-    // WrapErrors<${Op}Responses | unknown, ${Op}Errors, ThrowOnError>.
+    // WrapErrors<${Op}Responses | unknown, ${Op}Errors, ThrowOnError, TResponseStyle>.
     // For errors-only ops (no 2xx schemas registered), `${Op}Responses`
     // doesn't exist; substitute `unknown` so RequestResult's flattening
     // still works (`unknown extends Record<string, unknown> ? … : unknown`
     // → `unknown`).
+    //
+    // `TResponseStyle` threads through from the wrapper's generic to
+    // `WrapErrors`, which conditionally picks between the 'fields' and
+    // 'data' return shapes — keeping the wrapper's static return in
+    // step with hey-api's runtime in both styles.
     const tDataExpr = responsesSymbol
       ? // eslint-disable-next-line @typescript-eslint/no-explicit-any
         dsl.type(responsesSymbol as any)
@@ -2141,7 +2266,8 @@ function emitSdkWrapper({
       .generic(tDataExpr)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .generic(dsl.type(errorsSymbol as any))
-      .generic('ThrowOnError');
+      .generic('ThrowOnError')
+      .generic('TResponseStyle');
 
     // `return result as unknown as Awaited<WrapErrors<...>>` — the
     // cast bridges the SDK's `RequestResult<...>` type to our
@@ -2170,11 +2296,21 @@ function emitSdkWrapper({
       .assign(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         ((): any => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const styleUnion = (dsl.type.or as (...args: any[]) => unknown)(
+            dsl.type.literal('fields'),
+            dsl.type.literal('data')
+          );
           let f = dsl
             .func()
             .async()
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             .generic('ThrowOnError', (g: any) => g.extends('boolean').default(false))
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            .generic('TResponseStyle', (g: any) =>
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              (g as any).extends(styleUnion).default(dsl.type.literal('fields'))
+            )
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             .param('options', (p: any) => p.required(optionsRequired).type(optionsTypeExpr));
           if (wrapperReturnTypeExpr) {
@@ -2351,54 +2487,215 @@ function emitWrapperErrorClasses({ dsl, plugin }: { dsl: Dsl; plugin: PluginLike
     markerKeys: [TRANSPORT_ERROR_SYMBOL_KEY, RESPONSE_VALIDATION_ERROR_SYMBOL_KEY]
   });
 
-  // type WrapErrors<TData, TError, ThrowOnError extends boolean> =
-  //   ThrowOnError extends true
-  //     ? Promise<{
-  //         data: TData extends Record<string, unknown> ? TData[keyof TData] : TData;
-  //         request: Request;
-  //         response: Response;
-  //       }>
-  //     : Promise<
-  //         (
-  //           | {
-  //               data: TData extends Record<string, unknown> ? TData[keyof TData] : TData;
-  //               error: undefined;
-  //             }
-  //           | {
-  //               data: undefined;
-  //               error:
-  //                 | (TError extends Record<string, unknown> ? TError[keyof TError] : TError)
-  //                 | TransportError
-  //                 | ResponseValidationError;
-  //             }
-  //         ) & {
-  //           request: Request;
-  //           response: Response;
-  //         }
-  //       >;
+  // type WrapErrors<
+  //   TData,
+  //   TError,
+  //   ThrowOnError extends boolean,
+  //   TResponseStyle extends 'fields' | 'data' = 'fields'
+  // > = ThrowOnError extends true
+  //   ? Promise<
+  //       TResponseStyle extends 'data'
+  //         ? (TData extends Record<string, unknown> ? TData[keyof TData] : TData)
+  //         : {
+  //             data: TData extends Record<string, unknown> ? TData[keyof TData] : TData;
+  //             request: Request;
+  //             response: Response;
+  //           }
+  //     >
+  //   : Promise<
+  //       TResponseStyle extends 'data'
+  //         ? (TData extends Record<string, unknown> ? TData[keyof TData] : TData) | undefined
+  //         : (
+  //             | {
+  //                 data: TData extends Record<string, unknown> ? TData[keyof TData] : TData;
+  //                 error: undefined;
+  //               }
+  //             | {
+  //                 data: undefined;
+  //                 error:
+  //                   | (TError extends Record<string, unknown> ? TError[keyof TError] : TError)
+  //                   | TransportError
+  //                   | ResponseValidationError;
+  //               }
+  //           ) & {
+  //             request: Request;
+  //             response: Response;
+  //           }
+  //     >;
   //
-  // Mirrors hey-api's `RequestResult<TData, TError, ThrowOnError, 'fields'>`
+  // Mirrors hey-api's `RequestResult<TData, TError, ThrowOnError, TResponseStyle>`
   // shape with the wrapper-error classes added to the error union. Defined
   // locally rather than imported from the consumer's generated client
   // because the client's import path varies by hey-api config (`./client.gen.ts`
   // vs `./client/index.ts` etc.) — owning the shape here keeps the wrapper's
-  // return-type contract self-contained. A runtime test asserts the data /
-  // request / response fields stay aligned with hey-api's actual return.
+  // return-type contract self-contained.
+  //
+  // The 'data' style adds nothing to the error union in the no-throw
+  // branch: hey-api's runtime returns `undefined` for the error path in
+  // 'data' style, so there's no slot to attach `TransportError` /
+  // `ResponseValidationError` to. Consumers using 'data' style + throw
+  // mode catch wrapper-emitted errors in their `catch` block where the
+  // value is `unknown` and the codegen-emitted predicates narrow it.
   emitWrapErrorsAlias({ dsl, plugin });
 }
 
 /**
- * Emit the `WrapErrors<TData, TError, ThrowOnError>` type alias at file
- * scope. Mirrors hey-api's `RequestResult<TData, TError, ThrowOnError,
- * 'fields'>` shape with `TransportError | ResponseValidationError` added to the
- * error union — single source of truth for the wrapper return type.
+ * Emit the `WrapPassThrough<TData, ThrowOnError, TResponseStyle>` type
+ * alias at file scope. Mirrors hey-api's `RequestResult<TData, never,
+ * ThrowOnError, TResponseStyle>` shape — the pass-through siblings of
+ * the error-widening wrappers use this when they have no declared
+ * error schemas (no `TError` generic; no wrapper-error union on the
+ * error path; the error type collapses to `unknown` since the route
+ * can return any HTTP body on the error path).
+ *
+ * Hand-built parallel to {@link emitWrapErrorsAlias} so pass-through
+ * wrappers can still thread `TResponseStyle` through their return
+ * type and produce hey-api's 'data' or 'fields' shape per call.
+ */
+function emitWrapPassThroughAlias({ dsl, plugin }: { dsl: Dsl; plugin: PluginLike }): void {
+  const aliasSymbol = plugin.symbol('WrapPassThrough', {
+    kind: 'type',
+    meta: { category: 'type', resource: 'wrapper-error', name: 'WrapPassThrough' }
+  });
+
+  const TData = tsFactory.createTypeReferenceNode('TData');
+  const ThrowOnError = tsFactory.createTypeReferenceNode('ThrowOnError');
+  const TResponseStyle = tsFactory.createTypeReferenceNode('TResponseStyle');
+  const RecordStringUnknown = tsFactory.createTypeReferenceNode('Record', [
+    tsFactory.createKeywordTypeNode(SyntaxKind.StringKeyword),
+    tsFactory.createKeywordTypeNode(SyntaxKind.UnknownKeyword)
+  ]);
+  const dataLiteral = tsFactory.createLiteralTypeNode(tsFactory.createStringLiteral('data'));
+  const fieldsOrDataUnion = tsFactory.createUnionTypeNode([
+    tsFactory.createLiteralTypeNode(tsFactory.createStringLiteral('fields')),
+    dataLiteral
+  ]);
+
+  const flattenedData = tsFactory.createConditionalTypeNode(
+    TData,
+    RecordStringUnknown,
+    tsFactory.createIndexedAccessTypeNode(
+      TData,
+      tsFactory.createTypeOperatorNode(SyntaxKind.KeyOfKeyword, TData)
+    ),
+    TData
+  );
+
+  const requestField = tsFactory.createPropertySignature(
+    undefined,
+    'request',
+    undefined,
+    tsFactory.createTypeReferenceNode('Request')
+  );
+  const responseField = tsFactory.createPropertySignature(
+    undefined,
+    'response',
+    undefined,
+    tsFactory.createTypeReferenceNode('Response')
+  );
+  const requestResponseLiteral = tsFactory.createTypeLiteralNode([requestField, responseField]);
+
+  // Throw branch: 'data' → flat; 'fields' → { data; request; response }
+  const throwFieldsBranch = tsFactory.createTypeLiteralNode([
+    tsFactory.createPropertySignature(undefined, 'data', undefined, flattenedData),
+    requestField,
+    responseField
+  ]);
+  const throwBranch = tsFactory.createConditionalTypeNode(
+    TResponseStyle,
+    dataLiteral,
+    flattenedData,
+    throwFieldsBranch
+  );
+
+  // No-throw branch: 'data' → TData | undefined;
+  // 'fields' → discriminated union with bare unknown error (no
+  // wrapper-error union — pass-throughs don't wrap).
+  const noThrowDataBranch = tsFactory.createUnionTypeNode([
+    flattenedData,
+    tsFactory.createKeywordTypeNode(SyntaxKind.UndefinedKeyword)
+  ]);
+  const okMember = tsFactory.createTypeLiteralNode([
+    tsFactory.createPropertySignature(undefined, 'data', undefined, flattenedData),
+    tsFactory.createPropertySignature(
+      undefined,
+      'error',
+      undefined,
+      tsFactory.createKeywordTypeNode(SyntaxKind.UndefinedKeyword)
+    )
+  ]);
+  const errorMember = tsFactory.createTypeLiteralNode([
+    tsFactory.createPropertySignature(
+      undefined,
+      'data',
+      undefined,
+      tsFactory.createKeywordTypeNode(SyntaxKind.UndefinedKeyword)
+    ),
+    tsFactory.createPropertySignature(
+      undefined,
+      'error',
+      undefined,
+      tsFactory.createKeywordTypeNode(SyntaxKind.UnknownKeyword)
+    )
+  ]);
+  const noThrowFieldsBranch = tsFactory.createIntersectionTypeNode([
+    tsFactory.createParenthesizedType(tsFactory.createUnionTypeNode([okMember, errorMember])),
+    requestResponseLiteral
+  ]);
+  const noThrowBranch = tsFactory.createConditionalTypeNode(
+    TResponseStyle,
+    dataLiteral,
+    noThrowDataBranch,
+    noThrowFieldsBranch
+  );
+
+  const conditional = tsFactory.createTypeReferenceNode('Promise', [
+    tsFactory.createConditionalTypeNode(
+      ThrowOnError,
+      tsFactory.createLiteralTypeNode(tsFactory.createTrue()),
+      throwBranch,
+      noThrowBranch
+    )
+  ]);
+
+  plugin.node(
+    dsl.type
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .alias(aliasSymbol as any)
+      .export()
+      .generic('TData')
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .generic('ThrowOnError', (g: any) => g.extends('boolean'))
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .generic('TResponseStyle', (g: any) =>
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (g as any).extends(fieldsOrDataUnion).default(dsl.type.literal('fields'))
+      )
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .type(conditional as any)
+  );
+}
+
+/**
+ * Emit the `WrapErrors<TData, TError, ThrowOnError, TResponseStyle>`
+ * type alias at file scope. Mirrors hey-api's
+ * `RequestResult<TData, TError, ThrowOnError, TResponseStyle>` shape
+ * with `TransportError | ResponseValidationError` added to the
+ * `'fields'` error union — single source of truth for the wrapper
+ * return type.
  *
  * Hand-built via raw `tsFactory`: nested conditional types, type
  * literals, intersection / union, and infer-style record-flattening
  * are awkward to thread through the openapi-ts DSL builder, and the
- * shape is static enough that the `tsFactory` form reads cleaner. The
- * output is wrapped in `dsl.stmt(rawDecl)` so top-level placement
- * still goes through the DSL.
+ * shape is static enough that the `tsFactory` form reads cleaner.
+ *
+ * `'data'` style doesn't get a wrapper-error union in the no-throw
+ * branch because hey-api's runtime returns plain `undefined` on the
+ * error path in `'data'` mode — there's no `error` field to attach
+ * the wrapper classes to. Consumers using `'data'` with
+ * `throwOnError: true` catch wrapper errors in their `catch` block
+ * (the codegen-emitted `is*Error` predicates narrow the caught
+ * `unknown`).
  */
 function emitWrapErrorsAlias({ dsl, plugin }: { dsl: Dsl; plugin: PluginLike }): void {
   const aliasSymbol = plugin.symbol('WrapErrors', {
@@ -2409,9 +2706,15 @@ function emitWrapErrorsAlias({ dsl, plugin }: { dsl: Dsl; plugin: PluginLike }):
   const TData = tsFactory.createTypeReferenceNode('TData');
   const TError = tsFactory.createTypeReferenceNode('TError');
   const ThrowOnError = tsFactory.createTypeReferenceNode('ThrowOnError');
+  const TResponseStyle = tsFactory.createTypeReferenceNode('TResponseStyle');
   const RecordStringUnknown = tsFactory.createTypeReferenceNode('Record', [
     tsFactory.createKeywordTypeNode(SyntaxKind.StringKeyword),
     tsFactory.createKeywordTypeNode(SyntaxKind.UnknownKeyword)
+  ]);
+  const dataLiteral = tsFactory.createLiteralTypeNode(tsFactory.createStringLiteral('data'));
+  const fieldsOrDataUnion = tsFactory.createUnionTypeNode([
+    tsFactory.createLiteralTypeNode(tsFactory.createStringLiteral('fields')),
+    dataLiteral
   ]);
 
   // TData extends Record<string, unknown> ? TData[keyof TData] : TData
@@ -2450,16 +2753,31 @@ function emitWrapErrorsAlias({ dsl, plugin }: { dsl: Dsl; plugin: PluginLike }):
   );
   const requestResponseLiteral = tsFactory.createTypeLiteralNode([requestField, responseField]);
 
-  // Throw-path branch: { data: <flattenedData>; request; response }
-  const throwBranch = tsFactory.createTypeLiteralNode([
+  // ── Throw branch (ThrowOnError extends true) ────────────────────────────────
+  //
+  // 'data' style: just the flattened data — errors throw.
+  // 'fields' style: { data: <flat>; request; response } — errors throw.
+  const throwFieldsBranch = tsFactory.createTypeLiteralNode([
     tsFactory.createPropertySignature(undefined, 'data', undefined, flattenedData),
     requestField,
     responseField
   ]);
+  const throwBranch = tsFactory.createConditionalTypeNode(
+    TResponseStyle,
+    dataLiteral,
+    flattenedData,
+    throwFieldsBranch
+  );
 
-  // No-throw path:
-  //   ({ data: <flattenedData>; error: undefined } | { data: undefined; error: <flattenedError> | TransportError | ResponseValidationError })
-  //   & { request; response }
+  // ── No-throw branch (ThrowOnError extends false) ────────────────────────────
+  //
+  // 'data' style: <flat data> | undefined — no error slot.
+  // 'fields' style: discriminated union with the wrapper-error union
+  // added to the error path.
+  const noThrowDataBranch = tsFactory.createUnionTypeNode([
+    flattenedData,
+    tsFactory.createKeywordTypeNode(SyntaxKind.UndefinedKeyword)
+  ]);
   const okMember = tsFactory.createTypeLiteralNode([
     tsFactory.createPropertySignature(undefined, 'data', undefined, flattenedData),
     tsFactory.createPropertySignature(
@@ -2487,10 +2805,16 @@ function emitWrapErrorsAlias({ dsl, plugin }: { dsl: Dsl; plugin: PluginLike }):
       ])
     )
   ]);
-  const noThrowBranch = tsFactory.createIntersectionTypeNode([
+  const noThrowFieldsBranch = tsFactory.createIntersectionTypeNode([
     tsFactory.createParenthesizedType(tsFactory.createUnionTypeNode([okMember, errorMember])),
     requestResponseLiteral
   ]);
+  const noThrowBranch = tsFactory.createConditionalTypeNode(
+    TResponseStyle,
+    dataLiteral,
+    noThrowDataBranch,
+    noThrowFieldsBranch
+  );
 
   // Promise<ThrowOnError extends true ? <throwBranch> : <noThrowBranch>>
   // Outer Promise wraps both branches so the resolved alias always
@@ -2508,12 +2832,9 @@ function emitWrapErrorsAlias({ dsl, plugin }: { dsl: Dsl; plugin: PluginLike }):
   ]);
 
   // Use TypeAliasTsDsl through the DSL so plugin.node correctly
-  // places it at top level — `dsl.stmt(rawTypeAliasDecl)` is silently
-  // dropped at top-level by hey-api's render layer (StmtTsDsl is for
-  // statements inside `.do(...)` blocks). TypeAliasTsDsl.type()
-  // accepts a raw `ts.TypeNode` directly via `MaybeTsDsl<ts.TypeNode>`,
-  // so we pass the hand-built conditional `tsFactory` node to it
-  // unchanged.
+  // places it at top level. TResponseStyle defaults to 'fields' so
+  // existing 3-arg consumer references (`WrapErrors<TData, TError, true>`)
+  // keep working without modification.
   plugin.node(
     dsl.type
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -2523,6 +2844,11 @@ function emitWrapErrorsAlias({ dsl, plugin }: { dsl: Dsl; plugin: PluginLike }):
       .generic('TError')
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .generic('ThrowOnError', (g: any) => g.extends('boolean'))
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .generic('TResponseStyle', (g: any) =>
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (g as any).extends(fieldsOrDataUnion).default(dsl.type.literal('fields'))
+      )
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .type(conditional as any)
   );

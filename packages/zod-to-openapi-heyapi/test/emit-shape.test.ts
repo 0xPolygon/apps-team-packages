@@ -158,17 +158,20 @@ describe('single-emit invariants', () => {
     // observe "no emit" against the live fixture (which DOES have
     // error schemas), but we CAN verify the gating works by checking
     // that ops without errors don't trigger it on their own:
-    // `getCodecObject`'s wrapper is a thin pass-through that doesn't
-    // reference any of the wrapper-error symbols. Sanity-check by
-    // confirming the wrapper-error symbols aren't referenced in
-    // pass-through wrapper bodies.
+    // `getCodecObject`'s wrapper is a thin pass-through. It still
+    // references `WrapPassThrough` for its return-type annotation
+    // (the alias threads `TResponseStyle` so per-call generics
+    // produce hey-api's 'fields' / 'data' conditional shape), but it
+    // must never reference the wrapper-error symbols `TransportError`,
+    // `ResponseValidationError`, or `WrapErrors`. Those are reserved
+    // for ops with declared error schemas.
     const src = readGenerated();
-    const passThroughMatch = src.match(
-      /export const getCodecObject = async <ThrowOnError extends boolean = false>\([^)]*\) =>[^;]+;/
-    );
+    const passThroughMatch = src.match(/export const getCodecObject = async [^;]+?;/);
     expect(passThroughMatch).not.toBeNull();
     if (passThroughMatch) {
-      expect(passThroughMatch[0]).not.toMatch(/TransportError|ResponseValidationError|WrapErrors/);
+      expect(passThroughMatch[0]).not.toMatch(
+        /\bTransportError\b|\bResponseValidationError\b|\bWrapErrors\b/
+      );
     }
   });
 });

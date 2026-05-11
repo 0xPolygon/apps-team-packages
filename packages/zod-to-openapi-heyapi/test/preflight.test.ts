@@ -97,38 +97,30 @@ describe('@hey-api/sdk plugin pre-flight checks', () => {
     ).not.toThrow(/must be (false|true)/);
   });
 
-  it("throws when responseStyle is anything other than 'fields'", async () => {
-    // The emitted `WrapErrors<...>` shape is hard-coded to the
-    // 'fields' style. Letting `responseStyle: 'data'` through would
-    // make the wrapper's static return type silently diverge from the
-    // runtime — same family of bug the wrapper-error widening fixes.
+  it('does not raise a responseStyle assertion regardless of the configured style', async () => {
+    // `responseStyle` is no longer a pre-flight concern. The emitted
+    // wrapper signature carries a `TResponseStyle` generic that threads
+    // through to `WrapErrors`, conditionally producing hey-api's
+    // 'fields' or 'data' return shape. Static and runtime stay in step
+    // in both modes, so the codegen doesn't gate on the SDK plugin's
+    // `responseStyle` config.
+    //
+    // The handler runs past the pre-flight checks here and reaches
+    // `plugin.forEach`, which our stub doesn't implement — surface as
+    // a `TypeError: plugin.forEach is not a function` rather than any
+    // pre-flight assertion. The regex match below is scoped to
+    // `responseStyle`-related copy so the stub's separate failure
+    // doesn't false-positive.
     const config = await buildConfig();
-    expect(() =>
-      runHandler(config, {
-        includeInEntry: false,
-        transformer: '@polygonlabs/zod-to-openapi-heyapi',
-        responseStyle: 'data'
-      })
-    ).toThrow(/'responseStyle' must be 'fields'/);
-  });
-
-  it("does not throw when responseStyle is 'fields' explicitly or unset", async () => {
-    const config = await buildConfig();
-    // Explicit 'fields' is accepted.
-    expect(() =>
-      runHandler(config, {
-        includeInEntry: false,
-        transformer: '@polygonlabs/zod-to-openapi-heyapi',
-        responseStyle: 'fields'
-      })
-    ).not.toThrow(/responseStyle/);
-    // Unset (undefined) is accepted — hey-api's default is 'fields'.
-    expect(() =>
-      runHandler(config, {
-        includeInEntry: false,
-        transformer: '@polygonlabs/zod-to-openapi-heyapi'
-      })
-    ).not.toThrow(/responseStyle/);
+    for (const responseStyle of ['fields', 'data', undefined] as const) {
+      expect(() =>
+        runHandler(config, {
+          includeInEntry: false,
+          transformer: '@polygonlabs/zod-to-openapi-heyapi',
+          responseStyle
+        })
+      ).not.toThrow(/responseStyle/);
+    }
   });
 
   it('does not throw when @hey-api/sdk is absent (handler proceeds, may fail elsewhere)', async () => {

@@ -288,6 +288,161 @@ describe('Typed `${Op}Error` — response body matched a registered schema', () 
   );
 });
 
+// ── 5. responseStyle: 'data' runtime parity ─────────────────────────────────
+//
+// The wrapper's emitted `WrapErrors<TData, TError, ThrowOnError,
+// TResponseStyle>` type threads a fourth generic that conditionally
+// produces hey-api's 'fields' or 'data' return shape. These tests
+// prove the runtime matches the static contract — the wrapper must
+// not mutate `result.error` on a 'data'-style return (which has no
+// error field), and the throw-mode wrapping still fires for both
+// transport and validation failures.
+
+describe("responseStyle: 'data' runtime — wrapper stays consistent with hey-api", () => {
+  describe('throwOnError: false', () => {
+    afterEach(() => client.setConfig({ responseStyle: 'fields' }));
+
+    it('returns the flat data on success (no { data, error, request, response } envelope)', async () => {
+      // The 'data' style behaviour is gated on the client config; the
+      // wrapper just threads the call through. Per-call generic pins
+      // the static return shape so `result` is typed as
+      // `CreateOrFetchResourceResponse | undefined`.
+      client.setConfig({ responseStyle: 'data' });
+      server.use(
+        http.post(`${BASE_URL}/fixtures/createOrFetch`, () =>
+          HttpResponse.json({ id: 'res_42', data: 'flat-shape' }, { status: 200 })
+        )
+      );
+      const result = await createOrFetchResource<false, 'data'>();
+      // Bare value — not the {data,error,request,response} envelope.
+      expect(result).toEqual({ id: 'res_42', data: 'flat-shape' });
+    });
+
+    it("returns undefined on the error path (hey-api's 'data' mode swallows errors)", async () => {
+      // In 'data' + throwOnError: false, hey-api's runtime drops the
+      // error body entirely and returns undefined. The wrapper has
+      // nothing to wrap — and importantly must NOT misinterpret an
+      // object result as an error envelope.
+      client.setConfig({ responseStyle: 'data' });
+      server.use(
+        http.post(`${BASE_URL}/fixtures/createOrFetch`, () =>
+          HttpResponse.json({ code: 'bad_request', message: 'no' }, { status: 400 })
+        )
+      );
+      const result = await createOrFetchResource<false, 'data'>();
+      expect(result).toBeUndefined();
+    });
+
+    it("doesn't wrap a successful 'data'-style result into a TransportError / ResponseValidationError", async () => {
+      // Discriminator sanity check: in 'data' mode hey-api strips the
+      // `{ data, error, request, response }` envelope, so the
+      // wrapper's `'request' in result && 'response' in result` gate
+      // must NOT fire even for object-valued success payloads. If it
+      // did, the wrapper would attempt to wrap a non-error value as
+      // ResponseValidationError and surface that to the caller.
+      client.setConfig({ responseStyle: 'data' });
+      server.use(
+        http.post(`${BASE_URL}/fixtures/createOrFetch`, () =>
+          HttpResponse.json({ id: 'r', data: 'ok' }, { status: 200 })
+        )
+      );
+      const result = await createOrFetchResource<false, 'data'>();
+      // The result is the success payload itself, not an envelope.
+      expect(result).toEqual({ id: 'r', data: 'ok' });
+      // And it's definitely not a wrapper-emitted error.
+      expect(isWrapperError(result)).toBe(false);
+      expect(isTransportError(result)).toBe(false);
+      expect(isResponseValidationError(result)).toBe(false);
+    });
+  });
+
+  describe('throwOnError: true', () => {
+    afterEach(() => client.setConfig({ responseStyle: 'fields', throwOnError: false }));
+
+    it('returns the flat data on success', async () => {
+      client.setConfig({ responseStyle: 'data', throwOnError: true });
+      server.use(
+        http.post(`${BASE_URL}/fixtures/createOrFetch`, () =>
+          HttpResponse.json({ id: 'r', data: 'ok' }, { status: 200 })
+        )
+      );
+      const data = await createOrFetchResource<true, 'data'>();
+      expect(data).toEqual({ id: 'r', data: 'ok' });
+    });
+
+    it('throws a TransportError on fetch failure (request never reached the API)', async () => {
+      client.setConfig({ responseStyle: 'data', throwOnError: true });
+      const controller = new AbortController();
+      controller.abort();
+      let caught: unknown;
+      try {
+        await createOrFetchResource<true, 'data'>({ signal: controller.signal });
+      } catch (err) {
+        caught = err;
+      }
+      if (!isTransportError(caught)) {
+        throw new Error(`expected TransportError, got ${describeError(caught)}`);
+      }
+      expect(caught.cause).toBeInstanceOf(Error);
+    });
+
+    it('throws a ResponseValidationError when the wire body fails parseAsync', async () => {
+      // 500 with a body that doesn't match the ServerError schema.
+      // The wrapper's catch block runs the error transformer and
+      // wraps the validation failure — same wrapping logic as in
+      // 'fields' mode.
+      client.setConfig({ responseStyle: 'data', throwOnError: true });
+      server.use(
+        http.post(`${BASE_URL}/fixtures/createOrFetch`, () =>
+          HttpResponse.json({ unexpected: 'shape', value: 42 }, { status: 500 })
+        )
+      );
+      let caught: unknown;
+      try {
+        await createOrFetchResource<true, 'data'>();
+      } catch (err) {
+        caught = err;
+      }
+      if (!isResponseValidationError(caught)) {
+        throw new Error(`expected ResponseValidationError, got ${describeError(caught)}`);
+      }
+      // Cross-realm-safe narrowing — same predicate works in both styles.
+      expect(caught.body).toEqual({ unexpected: 'shape', value: 42 });
+      expect(caught.cause.issues.length).toBeGreaterThan(0);
+    });
+
+    it('throws a typed ${Op}Error when the wire body matches a registered error schema (codec round-trip)', async () => {
+      // 500 with a body that DOES match ServerError. The wrapper's
+      // catch block runs the transformer successfully and throws the
+      // typed (codec-decoded) error.
+      client.setConfig({ responseStyle: 'data', throwOnError: true });
+      server.use(
+        http.post(`${BASE_URL}/fixtures/createOrFetch`, () =>
+          HttpResponse.json(
+            { code: 'internal_error', message: 'kaboom', traceId: '987654321' },
+            { status: 500 }
+          )
+        )
+      );
+      let caught: unknown;
+      try {
+        await createOrFetchResource<true, 'data'>();
+      } catch (err) {
+        caught = err;
+      }
+      // Typed `${Op}Error`, not a wrapper error.
+      expect(isWrapperError(caught)).toBe(false);
+      if (caught && typeof caught === 'object' && 'traceId' in caught) {
+        // Codec round-trip on the error path: wire `'987654321'` → bigint.
+        expect(typeof caught.traceId).toBe('bigint');
+        expect(caught.traceId).toBe(987654321n);
+      } else {
+        throw new Error(`expected typed ServerError shape, got ${describeError(caught)}`);
+      }
+    });
+  });
+});
+
 // ── 4. Mutual exclusion across categories ────────────────────────────────────
 
 describe('discriminator exclusivity', () => {
