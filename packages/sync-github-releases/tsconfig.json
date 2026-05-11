@@ -1,8 +1,10 @@
 {
-  "extends": ["@tsconfig/node24", "@tsconfig/node-ts"],
-  "compilerOptions": {
-    "noEmit": true,
-    "customConditions": ["@polygonlabs/source"]
-  },
-  "include": ["src/**/*.ts", "eslint.config.js"]
+  "extends": "../../tsconfig.base.json",
+  "files": [],
+  "include": [],
+  "references": [
+    {
+      "path": "./tsconfig.lib.json"
+    }
+  ]
 }

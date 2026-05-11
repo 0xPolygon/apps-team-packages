@@ -14,5 +14,6 @@ export default [
     rules: {
       'import-x/no-default-export': 'off'
     }
-  }
+  },
+  { ignores: ['out-tsc/**'] }
 ];

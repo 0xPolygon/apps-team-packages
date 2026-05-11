@@ -41,15 +41,15 @@
     "MIGRATION.md"
   ],
   "scripts": {
-    "build": "pnpm run typecheck && tsc -p tsconfig.build.json",
-    "build:clean": "pnpm run typecheck && rm -rf dist *.tsbuildinfo && tsc -p tsconfig.build.json",
+    "build": "pnpm run typecheck && tsc -b tsconfig.lib.json",
+    "build:clean": "pnpm run typecheck && rm -rf dist out-tsc *.tsbuildinfo && tsc -b tsconfig.lib.json",
     "codegen": "node --conditions @polygonlabs/source test/codegen.ts",
     "codegen-drift": "pnpm run codegen && git diff --exit-code -- test/__generated__",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc -b",
     "pretest": "playwright install chromium",
     "test": "vitest run",
     "lint": "eslint .",
-    "clean": "rm -rf node_modules dist *.tsbuildinfo",
+    "clean": "rm -rf node_modules dist out-tsc *.tsbuildinfo",
     "prepublishOnly": "pnpm run build:clean"
   },
   "peerDependencies": {
