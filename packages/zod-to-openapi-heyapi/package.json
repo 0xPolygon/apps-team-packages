@@ -37,6 +37,7 @@
     "codegen": "node --conditions @polygonlabs/source test/codegen.ts",
     "codegen-drift": "pnpm run codegen && git diff --exit-code -- test/__generated__",
     "typecheck": "tsc --noEmit",
+    "pretest": "playwright install chromium",
     "test": "vitest run",
     "lint": "eslint .",
     "clean": "rm -rf node_modules dist *.tsbuildinfo",
@@ -59,13 +60,26 @@
     "@polygonlabs/apps-team-lint": "workspace:*",
     "@polygonlabs/zod-codecs": "workspace:*",
     "@tanstack/react-query": "^5.100.1",
+    "@testing-library/dom": "^10.4.0",
+    "@testing-library/react": "^16.1.0",
     "@tsconfig/node-ts": "^23.0.0",
     "@tsconfig/node24": "^24.0.0",
     "@types/node": "^24.0.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitest/browser": "^3.2.4",
     "eslint": "^10.0.0",
     "msw": "^2.7.0",
+    "playwright": "^1.50.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
     "typescript": "^5.9.3",
     "vitest": "^3.2.3",
     "zod": "^4.3.6"
+  },
+  "msw": {
+    "workerDirectory": [
+      "test/__msw__"
+    ]
   }
 }

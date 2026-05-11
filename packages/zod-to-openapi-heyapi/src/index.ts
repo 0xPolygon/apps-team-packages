@@ -665,7 +665,23 @@ export async function defineRegistryClientConfig(
 
   const plugins: UserConfig['plugins'] = [
     pluginConfig as never,
-    '@hey-api/typescript',
+    // `@hey-api/typescript` emits wire-shape types into `types.gen.ts`
+    // (e.g. `${Op}Response` typed as the unparsed JSON shape, with
+    // `string` for codec slots). Our plugin emits codec-aware aliases
+    // with the same names in `registry-validator.gen.ts` (e.g. the
+    // bigint runtime version). With both plugins exporting through
+    // the auto-barrel, hey-api collision-renames the typescript
+    // plugin's exports to `${Name}2` — `CreateOrderError2`,
+    // `CreateOrderResponse2`, etc. — and re-exports both. Consumers
+    // who reach for `CreateOrderError2` thinking it's a v2 / alternate
+    // form get the wire shape (string instead of bigint, ISO string
+    // instead of Date) and the codec round-trip silently breaks.
+    //
+    // Setting `includeInEntry: false` here keeps the wire-shape types
+    // out of the public barrel. They still exist in `types.gen.ts` for
+    // advanced power users importing the deep path, but the canonical
+    // public surface is the codec-aware ones from our plugin.
+    { name: '@hey-api/typescript', includeInEntry: false },
     '@hey-api/client-fetch',
     { name: '@hey-api/sdk', transformer: true, includeInEntry: false },
     ...(tanstack ? (['@tanstack/react-query'] as const) : [])
