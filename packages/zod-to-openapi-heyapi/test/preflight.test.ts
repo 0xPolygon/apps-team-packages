@@ -97,6 +97,40 @@ describe('@hey-api/sdk plugin pre-flight checks', () => {
     ).not.toThrow(/must be (false|true)/);
   });
 
+  it("throws when responseStyle is anything other than 'fields'", async () => {
+    // The emitted `WrapErrors<...>` shape is hard-coded to the
+    // 'fields' style. Letting `responseStyle: 'data'` through would
+    // make the wrapper's static return type silently diverge from the
+    // runtime — same family of bug the wrapper-error widening fixes.
+    const config = await buildConfig();
+    expect(() =>
+      runHandler(config, {
+        includeInEntry: false,
+        transformer: '@polygonlabs/zod-to-openapi-heyapi',
+        responseStyle: 'data'
+      })
+    ).toThrow(/'responseStyle' must be 'fields'/);
+  });
+
+  it("does not throw when responseStyle is 'fields' explicitly or unset", async () => {
+    const config = await buildConfig();
+    // Explicit 'fields' is accepted.
+    expect(() =>
+      runHandler(config, {
+        includeInEntry: false,
+        transformer: '@polygonlabs/zod-to-openapi-heyapi',
+        responseStyle: 'fields'
+      })
+    ).not.toThrow(/responseStyle/);
+    // Unset (undefined) is accepted — hey-api's default is 'fields'.
+    expect(() =>
+      runHandler(config, {
+        includeInEntry: false,
+        transformer: '@polygonlabs/zod-to-openapi-heyapi'
+      })
+    ).not.toThrow(/responseStyle/);
+  });
+
   it('does not throw when @hey-api/sdk is absent (handler proceeds, may fail elsewhere)', async () => {
     // Edge case: SDK plugin not loaded at all. The pre-flight has
     // nothing to check; later steps will fail when they try to

@@ -7,7 +7,7 @@
 //
 //   - Three real failure scenarios that each map cleanly to one wrapper
 //     category — `TransportError` (request never reached the API),
-//     `UnknownError` (response body didn't match any registered schema),
+//     `ResponseValidationError` (response body didn't match any registered schema),
 //     and typed `${Op}Error` (response body matched a registered schema).
 //   - `describe.each` over `throwOnError: { false, true }` so every
 //     scenario runs both ways. The wrapper has separate code paths for
@@ -18,7 +18,7 @@
 //     error schemas including codec fields (`traceId: Int64Codec` on
 //     ServerError), so the typed-error branch can also assert the
 //     codec runtime shape rather than just "some error landed."
-//   - `isTransportError` / `isUnknownError` / `isWrapperError` as the
+//   - `isTransportError` / `isResponseValidationError` / `isWrapperError` as the
 //     consumer-facing narrowing API. No `instanceof`, no string-tag
 //     comparisons — the predicates are what consumers actually call.
 //
@@ -38,7 +38,7 @@ import {
   createOrFetchResource,
   getErrorsOnly,
   isTransportError,
-  isUnknownError,
+  isResponseValidationError,
   isWrapperError
 } from './public-client.ts';
 
@@ -108,14 +108,14 @@ describe('TransportError — request never reached the API', () => {
   );
 });
 
-// ── 2. UnknownError (response body didn't match any registered schema) ───────
+// ── 2. ResponseValidationError (response body didn't match any registered schema) ───────
 
-describe('UnknownError — schema mismatch on the error body', () => {
+describe('ResponseValidationError — schema mismatch on the error body', () => {
   // Server replies with a body that doesn't match any of the
   // registered error schemas (no `code` field, no `traceId`,
   // unrecognised structure). The wrapper runs `parseAsync` against the
   // union of registered error schemas, gets a ZodError, and wraps it
-  // as UnknownError carrying both the parse issues (on `.cause`) and
+  // as ResponseValidationError carrying both the parse issues (on `.cause`) and
   // the original wire body (on `.body`).
 
   const badBody = { unexpected: 'shape', value: 42 };
@@ -123,7 +123,7 @@ describe('UnknownError — schema mismatch on the error body', () => {
   describe.each([{ throwOnError: false }, { throwOnError: true }])(
     'throwOnError: $throwOnError',
     ({ throwOnError }) => {
-      it('wraps the malformed body as UnknownError with cause + body', async () => {
+      it('wraps the malformed body as ResponseValidationError with cause + body', async () => {
         server.use(
           http.post(`${BASE_URL}/fixtures/createOrFetch`, () =>
             HttpResponse.json(badBody, { status: 500 })
@@ -132,8 +132,8 @@ describe('UnknownError — schema mismatch on the error body', () => {
 
         const surfaced = await captureSurfacedError(() => createOrFetchResource({ throwOnError }));
 
-        if (!isUnknownError(surfaced)) {
-          throw new Error(`expected UnknownError, got ${describeError(surfaced)}`);
+        if (!isResponseValidationError(surfaced)) {
+          throw new Error(`expected ResponseValidationError, got ${describeError(surfaced)}`);
         }
         // ZodError carries `.issues` — confirms parseAsync actually ran.
         expect(Array.isArray(surfaced.cause.issues)).toBe(true);
@@ -143,7 +143,7 @@ describe('UnknownError — schema mismatch on the error body', () => {
         expect(surfaced.body).toEqual(badBody);
         // Same union-guard contract.
         expect(isWrapperError(surfaced)).toBe(true);
-        // Exclusivity: an UnknownError must not also report as
+        // Exclusivity: an ResponseValidationError must not also report as
         // TransportError. This is the core discriminator contract —
         // a regression in the marker assignment would break it.
         expect(isTransportError(surfaced)).toBe(false);
@@ -161,8 +161,8 @@ describe('UnknownError — schema mismatch on the error body', () => {
 
         const surfaced = await captureSurfacedError(() => getErrorsOnly({ throwOnError }));
 
-        if (!isUnknownError(surfaced)) {
-          throw new Error(`expected UnknownError, got ${describeError(surfaced)}`);
+        if (!isResponseValidationError(surfaced)) {
+          throw new Error(`expected ResponseValidationError, got ${describeError(surfaced)}`);
         }
         expect(surfaced.body).toEqual(badBody);
       });
@@ -204,7 +204,7 @@ describe('Typed `${Op}Error` — response body matched a registered schema', () 
         // `${Op}Error` union.
         expect(isWrapperError(surfaced)).toBe(false);
         expect(isTransportError(surfaced)).toBe(false);
-        expect(isUnknownError(surfaced)).toBe(false);
+        expect(isResponseValidationError(surfaced)).toBe(false);
 
         // Narrow to the ServerError branch. After `'traceId' in error`
         // the union narrows; no `as` cast needed.
@@ -300,14 +300,14 @@ describe('discriminator exclusivity', () => {
   it('a fresh plain object passes none of the guards', () => {
     const noise = { code: 'whatever', not: 'an error class' };
     expect(isTransportError(noise)).toBe(false);
-    expect(isUnknownError(noise)).toBe(false);
+    expect(isResponseValidationError(noise)).toBe(false);
     expect(isWrapperError(noise)).toBe(false);
   });
 
   it('null and undefined fail all guards without throwing', () => {
     for (const v of [null, undefined, 0, '', false]) {
       expect(isTransportError(v)).toBe(false);
-      expect(isUnknownError(v)).toBe(false);
+      expect(isResponseValidationError(v)).toBe(false);
       expect(isWrapperError(v)).toBe(false);
     }
   });

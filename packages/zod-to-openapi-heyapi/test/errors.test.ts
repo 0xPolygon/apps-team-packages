@@ -18,11 +18,11 @@ import { describe, expect, it } from 'vitest';
 
 import {
   TRANSPORT_ERROR_MARKER,
-  UNKNOWN_ERROR_MARKER,
+  RESPONSE_VALIDATION_ERROR_MARKER,
   categorizeApiError,
   getApiErrorMessage,
   isTransportError,
-  isUnknownError,
+  isResponseValidationError,
   isWrapperError
 } from '../src/errors.ts';
 
@@ -48,13 +48,13 @@ function makeTransport(cause: Error): Error {
   return err;
 }
 
-function makeUnknown(issues: ReadonlyArray<unknown>, body: unknown): Error {
+function makeResponseValidation(issues: ReadonlyArray<unknown>, body: unknown): Error {
   const cause = Object.assign(new Error('zod parse failed'), { issues });
   const err = Object.assign(new Error('API response did not match the registered schema'), {
     cause,
     body
   });
-  (err as unknown as Record<symbol, unknown>)[UNKNOWN_ERROR_MARKER] = true;
+  (err as unknown as Record<symbol, unknown>)[RESPONSE_VALIDATION_ERROR_MARKER] = true;
   return err;
 }
 
@@ -77,8 +77,8 @@ describe('isTransportError', () => {
     }
   });
 
-  it('returns false for an UnknownError (mutual exclusion)', () => {
-    const err = makeUnknown([], { wire: 'shape' });
+  it('returns false for an ResponseValidationError (mutual exclusion)', () => {
+    const err = makeResponseValidation([], { wire: 'shape' });
     expect(isTransportError(err)).toBe(false);
   });
 
@@ -93,17 +93,17 @@ describe('isTransportError', () => {
   });
 });
 
-describe('isUnknownError', () => {
-  it('returns true for values carrying the unknown marker', () => {
-    const err = makeUnknown([{ path: ['x'], code: 'invalid_type' }], { wire: 'shape' });
-    expect(isUnknownError(err)).toBe(true);
+describe('isResponseValidationError', () => {
+  it('returns true for values carrying the response-validation marker', () => {
+    const err = makeResponseValidation([{ path: ['x'], code: 'invalid_type' }], { wire: 'shape' });
+    expect(isResponseValidationError(err)).toBe(true);
   });
 
-  it('narrows to UnknownError so .cause.issues and .body are accessible without a cast', () => {
+  it('narrows to ResponseValidationError so .cause.issues and .body are accessible without a cast', () => {
     const issues = [{ path: ['code'], code: 'invalid_type' }] as const;
     const body = { unexpected: 'shape' };
-    const err = makeUnknown(issues, body);
-    if (isUnknownError(err)) {
+    const err = makeResponseValidation(issues, body);
+    if (isResponseValidationError(err)) {
       // Both fields are typed by the predicate. No cast.
       expect(err.cause.issues).toEqual(issues);
       expect(err.body).toEqual(body);
@@ -114,19 +114,19 @@ describe('isUnknownError', () => {
 
   it('returns false for a TransportError (mutual exclusion)', () => {
     const err = makeTransport(new TypeError('fetch failed'));
-    expect(isUnknownError(err)).toBe(false);
+    expect(isResponseValidationError(err)).toBe(false);
   });
 
   it('returns false for a typed-error shape', () => {
     const typed = { code: 'not_found', message: 'no resource' };
-    expect(isUnknownError(typed)).toBe(false);
+    expect(isResponseValidationError(typed)).toBe(false);
   });
 });
 
 describe('isWrapperError', () => {
-  it('returns true for transport AND unknown wrapper errors', () => {
+  it('returns true for transport AND response-validation wrapper errors', () => {
     expect(isWrapperError(makeTransport(new Error('x')))).toBe(true);
-    expect(isWrapperError(makeUnknown([], {}))).toBe(true);
+    expect(isWrapperError(makeResponseValidation([], {}))).toBe(true);
   });
 
   it('returns false for native Errors and typed-error shapes', () => {
@@ -150,13 +150,13 @@ describe('categorizeApiError', () => {
     }
   });
 
-  it('routes an UnknownError to kind=unknown with full narrowing', () => {
+  it('routes a ResponseValidationError to kind=response-validation with full narrowing', () => {
     const issues = [{ path: ['x'], code: 'invalid_type' }] as const;
     const body = { unexpected: 'shape' };
-    const err = makeUnknown(issues, body);
+    const err = makeResponseValidation(issues, body);
     const category = categorizeApiError(err);
-    expect(category.kind).toBe('unknown');
-    if (category.kind === 'unknown') {
+    expect(category.kind).toBe('response-validation');
+    if (category.kind === 'response-validation') {
       expect(category.error.cause.issues).toEqual(issues);
       expect(category.error.body).toEqual(body);
     }
@@ -177,7 +177,7 @@ describe('categorizeApiError', () => {
   it('routes a typed-error shape (or anything non-Error) to kind=other', () => {
     // The runtime helper deliberately does NOT invent a 'typed'
     // category: the consumer's wrapper return is already statically
-    // narrowed to `${Op}Error | TransportError | UnknownError | undefined`,
+    // narrowed to `${Op}Error | TransportError | ResponseValidationError | undefined`,
     // so once the wrapper-error branches are peeled off via the
     // emitted guards, the static type IS the typed `${Op}Error`. The
     // helper would only obscure that. For code paths that don't
@@ -206,15 +206,15 @@ describe('categorizeApiError', () => {
   });
 
   it('preserves wrapper-error precedence over instanceof Error', () => {
-    // Both makeTransport and makeUnknown produce values that are
+    // Both makeTransport and makeResponseValidation produce values that are
     // ALSO `instanceof Error` (we built them from `new Error(...)`).
     // The categoriser must check the marker first — otherwise every
     // wrapper-error would route to kind=native-error and the typed-
     // error / wire-body fields would be invisible.
     expect(makeTransport(new Error('x')) instanceof Error).toBe(true);
     expect(categorizeApiError(makeTransport(new Error('x'))).kind).toBe('transport');
-    expect(makeUnknown([], {}) instanceof Error).toBe(true);
-    expect(categorizeApiError(makeUnknown([], {})).kind).toBe('unknown');
+    expect(makeResponseValidation([], {}) instanceof Error).toBe(true);
+    expect(categorizeApiError(makeResponseValidation([], {})).kind).toBe('response-validation');
   });
 });
 
@@ -226,8 +226,8 @@ describe('getApiErrorMessage', () => {
     expect(getApiErrorMessage(err)).toBe('Request failed before producing an HTTP response');
   });
 
-  it('returns the wrapper-error super message for unknown errors', () => {
-    const err = makeUnknown([], {});
+  it('returns the wrapper-error super message for response-validation errors', () => {
+    const err = makeResponseValidation([], {});
     expect(getApiErrorMessage(err)).toBe('API response did not match the registered schema');
   });
 
@@ -261,11 +261,11 @@ describe('getApiErrorMessage', () => {
 // ── Symbol-key constants ─────────────────────────────────────────────────────
 
 describe('symbol-key constants', () => {
-  it('TRANSPORT_ERROR_MARKER and UNKNOWN_ERROR_MARKER are distinct global symbols', () => {
-    expect(TRANSPORT_ERROR_MARKER).not.toBe(UNKNOWN_ERROR_MARKER);
+  it('TRANSPORT_ERROR_MARKER and RESPONSE_VALIDATION_ERROR_MARKER are distinct global symbols', () => {
+    expect(TRANSPORT_ERROR_MARKER).not.toBe(RESPONSE_VALIDATION_ERROR_MARKER);
   });
 
-  it('TRANSPORT_ERROR_MARKER === Symbol.for(canonical key) so cross-realm narrowing works', () => {
+  it('markers === Symbol.for(canonical key) so cross-realm narrowing works', () => {
     // The codegen emits classes that set this same key in their
     // constructors. If a consumer hand-builds a marker check using
     // Symbol.for(...) with the canonical string, it MUST match the
@@ -274,8 +274,8 @@ describe('symbol-key constants', () => {
     expect(TRANSPORT_ERROR_MARKER).toBe(
       Symbol.for('@polygonlabs/zod-to-openapi-heyapi/is-transport-error')
     );
-    expect(UNKNOWN_ERROR_MARKER).toBe(
-      Symbol.for('@polygonlabs/zod-to-openapi-heyapi/is-unknown-error')
+    expect(RESPONSE_VALIDATION_ERROR_MARKER).toBe(
+      Symbol.for('@polygonlabs/zod-to-openapi-heyapi/is-response-validation-error')
     );
   });
 });

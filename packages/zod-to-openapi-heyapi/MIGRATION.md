@@ -1,6 +1,6 @@
 # Migration Guide
 
-## 1.2.0 → 1.2.1 (TransportError / UnknownError discrimination — bug fix)
+## 1.2.0 → 1.3.0 (TransportError / ResponseValidationError discrimination — bug fix)
 
 1.2.0's error-decoding wrapper had a hole: when an API returned a body
 that didn't match any registered error schema, the `throwOnError: false`
@@ -11,30 +11,30 @@ would get a string at runtime. The `throwOnError: true` path also
 didn't surface validation failures clearly — the original wire-shape
 body re-threw, which caused similar runtime/type drift.
 
-1.2.1 fixes this by emitting two new classes, `TransportError` and
-`UnknownError`, alongside the SDK wrappers, and **widening the
+1.3.0 fixes this by emitting two new classes, `TransportError` and
+`ResponseValidationError`, alongside the SDK wrappers, and **widening the
 wrapper's static return type** so the runtime shape and the static
 type stay in sync. The wrapper now sorts every error response into
 one of three categories:
 
 ```ts
-type Error = ${Op}Error | TransportError | UnknownError;
+type Error = ${Op}Error | TransportError | ResponseValidationError;
 ```
 
 `result.error`'s static type widens to that union (delivered by an
 emitted `WrapErrors<TData, TError, ThrowOnError>` file-scope alias
 that wraps each per-op return). Consumers narrow via emitted
-type-predicate guards (`isTransportError` / `isUnknownError`) — no
+type-predicate guards (`isTransportError` / `isResponseValidationError`) — no
 `instanceof` at the call site:
 
 ```ts
-import { isTransportError, isUnknownError } from '@my-org/api-client';
+import { isTransportError, isResponseValidationError } from '@my-org/api-client';
 
 const { data, error } = await getX();
 if (isTransportError(error)) {
   // Request never reached the API. error.cause is the native fetch
   // error: TypeError / AbortError / Node SystemError with .code.
-} else if (isUnknownError(error)) {
+} else if (isResponseValidationError(error)) {
   // Got an HTTP response, body didn't match any registered schema.
   // error.cause is the ZodError; error.body is the original wire body.
 } else if (error) {
@@ -43,15 +43,15 @@ if (isTransportError(error)) {
 ```
 
 The guards are emitted with `value is TransportError` / `value is
-UnknownError` type predicates, so each branch narrows `error` to the
+ResponseValidationError` type predicates, so each branch narrows `error` to the
 right shape without further casts. They check a symbol-keyed marker
 (`Symbol.for('@polygonlabs/zod-to-openapi-heyapi/is-transport-error')`,
-likewise for unknown) — symbol identity from `Symbol.for(...)` is
+likewise for response-validation) — symbol identity from `Symbol.for(...)` is
 stable across realms, workers, iframes, and multiple bundle copies of
 the generated client, which `instanceof` is not.
 
 A union helper `isWrapperError(value): value is TransportError |
-UnknownError` is also emitted for "log any wrapper-emitted error
+ResponseValidationError` is also emitted for "log any wrapper-emitted error
 generically" call sites that don't care which category.
 
 ### Internals: how transport vs schema-mismatch is decided
@@ -70,7 +70,7 @@ the exact failure mode this release sets out to fix.
 
 Existing 1.2.0 consumers that did `if (result.error) { result.error.code }`
 without narrowing will now get a TS error: `result.error.code` doesn't
-exist on `TransportError` or `UnknownError`. The fix is the three-branch
+exist on `TransportError` or `ResponseValidationError`. The fix is the three-branch
 narrow above.
 
 This is intentional — if you don't surface the unknown / transport cases
@@ -82,8 +82,8 @@ apply to the thrown value — same guards in the catch block.
 
 ### Optional: read the wire body when debugging
 
-`UnknownError.cause` is the `ZodError` from `parseAsync` (carries
-`.issues`); `UnknownError.body` is the original HTTP body the server
+`ResponseValidationError.cause` is the `ZodError` from `parseAsync` (carries
+`.issues`); `ResponseValidationError.body` is the original HTTP body the server
 sent. Symmetric with `TransportError.cause` (native Error) — both
 fields are one hop from the wrapper-error. When debugging schema
 drift, log the full instance — `pino`, Sentry, and `util.inspect`
@@ -91,7 +91,7 @@ with `{ depth: Infinity }` walk the chain:
 
 ```ts
 import { logError } from './logger';
-if (isUnknownError(error)) {
+if (isResponseValidationError(error)) {
   logError({ err: error, body: error.body });
 }
 ```
@@ -113,7 +113,7 @@ classes:
   consumers to check both `result.error` and `result.validationError`,
   invited mis-handling. Network errors (which shouldn't run through
   parseAsync) had nowhere clean to live.
-- **Single `UnknownError` class for everything non-typed**: lumped
+- **Single wrapper class for everything non-typed**: lumped
   network failures (request never reached the API) with schema
   mismatches (request reached the API, body didn't conform). Two
   fundamentally different failure modes that consumers usually want to

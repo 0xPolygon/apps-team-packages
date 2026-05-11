@@ -143,7 +143,7 @@ describe('single-emit invariants', () => {
     const src = readGenerated();
     const transportClass = src.match(/^export class TransportError\b/gm) ?? [];
     expect(transportClass).toHaveLength(1);
-    const unknownClass = src.match(/^export class UnknownError\b/gm) ?? [];
+    const unknownClass = src.match(/^export class ResponseValidationError\b/gm) ?? [];
     expect(unknownClass).toHaveLength(1);
     const isTransportFn = src.match(/^export const isTransportError = /gm) ?? [];
     expect(isTransportFn).toHaveLength(1);
@@ -168,7 +168,7 @@ describe('single-emit invariants', () => {
     );
     expect(passThroughMatch).not.toBeNull();
     if (passThroughMatch) {
-      expect(passThroughMatch[0]).not.toMatch(/TransportError|UnknownError|WrapErrors/);
+      expect(passThroughMatch[0]).not.toMatch(/TransportError|ResponseValidationError|WrapErrors/);
     }
   });
 });

@@ -3,11 +3,12 @@
  * `@polygonlabs/zod-to-openapi-heyapi/errors` for consumer code that
  * works with errors surfaced by the codegen-emitted SDK wrappers.
  *
- * The wrappers emit per-client `isTransportError` / `isUnknownError` /
- * `isWrapperError` type-predicate guards alongside `TransportError`
- * and `UnknownError` classes. Those are the *primary* narrowing API
- * — locally typed against each generated client's error union and
- * accurate at the type level. This module is the *secondary* surface:
+ * The wrappers emit per-client `isTransportError` /
+ * `isResponseValidationError` / `isWrapperError` type-predicate guards
+ * alongside `TransportError` and `ResponseValidationError` classes.
+ * Those are the *primary* narrowing API — locally typed against each
+ * generated client's error union and accurate at the type level. This
+ * module is the *secondary* surface:
  *
  *   - **Cross-client utilities** that work on values from any
  *     generated client (e.g., a logging adapter that doesn't want to
@@ -25,7 +26,17 @@
  * is identity-stable across realms / module copies / iframes /
  * workers). Two separately-generated clients in the same process
  * produce mutually-narrowable instances.
+ *
+ * The structural {@link ResponseValidationError} interface types
+ * `cause` as `ZodError` so cross-client consumers reach
+ * `cause.format()` / `cause.flatten()` / `cause.issues` without a
+ * cast. `zod` is already a peer dependency (every generated client
+ * imports it at runtime for `parseAsync`), so requiring it for the
+ * `/errors` subpath isn't a new ask. The import is type-only — this
+ * module has no runtime dependency on `zod`.
  */
+
+import type { ZodError } from 'zod';
 
 // ── Symbol-key constants ─────────────────────────────────────────────────────
 
@@ -41,11 +52,11 @@ export const TRANSPORT_ERROR_MARKER: unique symbol = Symbol.for(
 );
 
 /**
- * Global symbol the wrapper sets on every emitted `UnknownError`
- * instance. See {@link TRANSPORT_ERROR_MARKER}.
+ * Global symbol the wrapper sets on every emitted
+ * `ResponseValidationError` instance. See {@link TRANSPORT_ERROR_MARKER}.
  */
-export const UNKNOWN_ERROR_MARKER: unique symbol = Symbol.for(
-  '@polygonlabs/zod-to-openapi-heyapi/is-unknown-error'
+export const RESPONSE_VALIDATION_ERROR_MARKER: unique symbol = Symbol.for(
+  '@polygonlabs/zod-to-openapi-heyapi/is-response-validation-error'
 );
 
 // ── Structural classes (typed surface for consumer code) ────────────────────
@@ -68,19 +79,20 @@ export interface TransportError extends Error {
 }
 
 /**
- * Structural type for the `UnknownError` instance the wrapper emits.
- * Same rationale as {@link TransportError} — re-declared structurally
- * so this module doesn't depend on per-client generation.
+ * Structural type for the `ResponseValidationError` instance the
+ * wrapper emits. Same rationale as {@link TransportError} — re-
+ * declared structurally so this module doesn't depend on per-client
+ * generation.
  *
- * `cause` carries the parse issues from `parseAsync` (`ZodError`'s
- * `.issues` array). `body` carries the original wire body the server
- * sent — symmetric with `TransportError.cause` (one hop from the
- * wrapper-error). The `ZodError` type isn't imported here to keep the
- * runtime surface zero-dependency; `cause` is typed as a basic
- * `{ issues: readonly unknown[] }` shape.
+ * The class is *always* constructed the same way:
+ * `new ResponseValidationError(zodError, wireBody)`. `cause` is the
+ * `ZodError` from `parseAsync` — cross-client consumers reach
+ * `.format()` / `.flatten()` / `.issues` directly; `body` is the
+ * original wire body that failed parse. Both fields are one hop from
+ * the wrapper-error — symmetric with `TransportError.cause`.
  */
-export interface UnknownError extends Error {
-  readonly cause: { readonly issues: ReadonlyArray<unknown> };
+export interface ResponseValidationError extends Error {
+  readonly cause: ZodError;
   readonly body: unknown;
 }
 
@@ -104,26 +116,26 @@ export function isTransportError(value: unknown): value is TransportError {
 }
 
 /**
- * Cross-client type-predicate guard for {@link UnknownError}. See
- * {@link isTransportError} for the per-client / cross-client
+ * Cross-client type-predicate guard for {@link ResponseValidationError}.
+ * See {@link isTransportError} for the per-client / cross-client
  * distinction.
  */
-export function isUnknownError(value: unknown): value is UnknownError {
+export function isResponseValidationError(value: unknown): value is ResponseValidationError {
   return (
     typeof value === 'object' &&
     value !== null &&
-    (value as Record<symbol, unknown>)[UNKNOWN_ERROR_MARKER] === true
+    (value as Record<symbol, unknown>)[RESPONSE_VALIDATION_ERROR_MARKER] === true
   );
 }
 
 /**
  * "Either category" guard for {@link TransportError} or
- * {@link UnknownError}. Saves writing
- * `isTransportError(x) || isUnknownError(x)` at every "log any
- * wrapper-emitted error" call site.
+ * {@link ResponseValidationError}. Saves writing
+ * `isTransportError(x) || isResponseValidationError(x)` at every
+ * "log any wrapper-emitted error" call site.
  */
-export function isWrapperError(value: unknown): value is TransportError | UnknownError {
-  return isTransportError(value) || isUnknownError(value);
+export function isWrapperError(value: unknown): value is TransportError | ResponseValidationError {
+  return isTransportError(value) || isResponseValidationError(value);
 }
 
 // ── Categorization ───────────────────────────────────────────────────────────
@@ -133,8 +145,8 @@ export function isWrapperError(value: unknown): value is TransportError | Unknow
  * the four categories the runtime helper can authoritatively
  * identify from a value's shape:
  *
- *   - **`transport`** / **`unknown`** — wrapper-emitted, identified
- *     via the symbol-keyed marker. Always typed.
+ *   - **`transport`** / **`response-validation`** — wrapper-emitted,
+ *     identified via the symbol-keyed marker. Always typed.
  *   - **`native-error`** — native `Error` instance from a non-wrapper
  *     code path (e.g., the codec-aware TanStack Query factory's
  *     `queryFn` rejecting with a fetch error).
@@ -143,19 +155,20 @@ export function isWrapperError(value: unknown): value is TransportError | Unknow
  *
  * **No `typed` branch.** The runtime helper deliberately doesn't
  * include a typed-error category. The wrapper's return type is
- * already statically narrowed to the per-op `${Op}Error | TransportError
- * | UnknownError | undefined` union, so once a consumer peels off
- * `transport` and `unknown` the remaining static type IS the typed
- * `${Op}Error`. A runtime helper inventing a magic-string convention
- * (e.g., `{ code: string; message: string }`) for the typed branch
- * would lose type information the wrapper return already carries.
+ * already statically narrowed to the per-op
+ * `${Op}Error | TransportError | ResponseValidationError | undefined`
+ * union, so once a consumer peels off `transport` and `response-
+ * validation` the remaining static type IS the typed `${Op}Error`. A
+ * runtime helper inventing a magic-string convention (e.g.,
+ * `{ code: string; message: string }`) for the typed branch would
+ * lose type information the wrapper return already carries.
  *
  * Consumer pattern (no `as` casts, no type hints):
  *
  *   const { data, error } = await getX();           // typed return
- *   if (isTransportError(error))   { ... }
- *   else if (isUnknownError(error)) { ... }
- *   else if (error)                 { ... }          // ${Op}Error, fully typed
+ *   if (isTransportError(error))            { ... }
+ *   else if (isResponseValidationError(error)) { ... }
+ *   else if (error)                          { ... }   // ${Op}Error, fully typed
  *
  * Use {@link categorizeApiError} only when you don't have access to
  * the wrapper return type — typically logging adapters and
@@ -170,8 +183,8 @@ export type ErrorCategory =
     }
   | {
       /** Wrapper-emitted: response body didn't match any registered schema. */
-      readonly kind: 'unknown';
-      readonly error: UnknownError;
+      readonly kind: 'response-validation';
+      readonly error: ResponseValidationError;
     }
   | {
       /**
@@ -221,12 +234,12 @@ export type ErrorCategory =
  * predicates directly — they integrate with TS flow narrowing on
  * the typed return shape:
  *
- *   import { getX, isTransportError, isUnknownError } from '@my-org/api-client';
+ *   import { getX, isTransportError, isResponseValidationError } from '@my-org/api-client';
  *
  *   const { error } = await getX();
- *   if (isTransportError(error))      log.network(error.cause);
- *   else if (isUnknownError(error))   log.schemaDrift(error);
- *   else if (error)                   handleTyped(error);   // typed ${Op}Error
+ *   if (isTransportError(error))            log.network(error.cause);
+ *   else if (isResponseValidationError(error)) log.schemaDrift(error);
+ *   else if (error)                          handleTyped(error);   // typed ${Op}Error
  *
  * No imports from `./generated/...gen.js` — the consumer's `@my-org/api-client`
  * package is expected to re-export the codegen-emitted guards as
@@ -236,8 +249,8 @@ export function categorizeApiError(value: unknown): ErrorCategory {
   if (isTransportError(value)) {
     return { kind: 'transport', error: value };
   }
-  if (isUnknownError(value)) {
-    return { kind: 'unknown', error: value };
+  if (isResponseValidationError(value)) {
+    return { kind: 'response-validation', error: value };
   }
   if (value instanceof Error) {
     return { kind: 'native-error', error: value };
@@ -251,8 +264,8 @@ export function categorizeApiError(value: unknown): ErrorCategory {
  * pattern.
  *
  * Returns `error.message` for `Error` instances (this includes
- * wrapper-emitted `TransportError` / `UnknownError`, which extend
- * `Error`). Falls back to the supplied string for non-`Error`
+ * wrapper-emitted `TransportError` / `ResponseValidationError`, which
+ * extend `Error`). Falls back to the supplied string for non-`Error`
  * values — including typed `${Op}Error` shapes, since the runtime
  * helper deliberately doesn't invent a `{ code, message }`
  * convention. Consumers with per-op typed errors in scope should

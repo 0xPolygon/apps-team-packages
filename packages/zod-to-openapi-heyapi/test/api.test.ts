@@ -25,7 +25,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 // transformer for codec decoding). Behaviour is identical to the raw
 // SDK function on the success path and on declared-error responses;
 // only the error-discriminator branch — `TransportError`,
-// `UnknownError` for malformed wire bodies — is a wrapper-only
+// `ResponseValidationError` for malformed wire bodies — is a wrapper-only
 // addition, and the tests below that target those branches assert on
 // the wrapper-emitted classes directly.
 import {
@@ -385,7 +385,7 @@ describe('input-side codec encoding via the SDK wrapper', () => {
 // matrix of category × throwOnError × imperative path. The cases
 // below originally tested codec-field round-trip on typed errors
 // (`traceId: Int64Codec` → bigint), TransportError on abort, and
-// UnknownError on schema mismatch; api-errors.test.ts now covers all
+// ResponseValidationError on schema mismatch; api-errors.test.ts now covers all
 // three for both throwOnError modes plus exclusivity guarantees and
 // errors-only ops. Hook-side coverage of the same matrix lives in
 // hooks.browser.test.tsx.

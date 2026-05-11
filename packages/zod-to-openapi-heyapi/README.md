@@ -636,16 +636,16 @@ the runtime value matches the codec runtime types declared in
 1. **Did the request reach the API at all?** No → `TransportError`.
    Yes → next.
 2. **Does the response body match a registered error schema?** Yes →
-   typed `${Op}Error`. No → `UnknownError`.
+   typed `${Op}Error`. No → `ResponseValidationError`.
 
-Both `TransportError` and `UnknownError` are emitted as classes
+Both `TransportError` and `ResponseValidationError` are emitted as classes
 alongside the SDK wrappers — see [The wrapper-emitted error
 classes](#the-wrapper-emitted-error-classes) below.
 
 #### `throwOnError: false`
 
 ```ts
-import { isTransportError, isUnknownError } from './generated/registry-validator.gen.js';
+import { isTransportError, isResponseValidationError } from './generated/registry-validator.gen.js';
 
 const { data, error } = await getX();
 if (isTransportError(error)) {
@@ -653,7 +653,7 @@ if (isTransportError(error)) {
   // native fetch error (TypeError / AbortError / Node SystemError
   // carrying ECONNRESET / ETIMEDOUT / etc.).
   log.error('network', error.cause);
-} else if (isUnknownError(error)) {
+} else if (isResponseValidationError(error)) {
   // The server replied, but the body didn't match any registered
   // error schema. error.cause is the ZodError carrying parse
   // issues; error.body is the original wire body (one hop, same
@@ -666,7 +666,7 @@ if (isTransportError(error)) {
 ```
 
 `result.error`'s static type widens to
-`${Op}Error | TransportError | UnknownError | undefined`, so the
+`${Op}Error | TransportError | ResponseValidationError | undefined`, so the
 three branches above are exhaustive — TS errors if a consumer reads
 `error.<typed-field>` without narrowing first. The widening is
 delivered by an emitted file-scope `WrapErrors<TData, TError,
@@ -684,15 +684,15 @@ narrows the same way:
 try { await getX({ throwOnError: true }); }
 catch (err) {
   if (isTransportError(err)) { /* … */ }
-  else if (isUnknownError(err)) { /* … */ }
+  else if (isResponseValidationError(err)) { /* … */ }
   // else: typed ${Op}Error
 }
 ```
 
 A union helper `isWrapperError(value): value is TransportError |
-UnknownError` is also emitted, for "log any wrapper-emitted error
+ResponseValidationError` is also emitted, for "log any wrapper-emitted error
 generically" call sites that don't care which category — saves
-writing `isTransportError(x) || isUnknownError(x)`.
+writing `isTransportError(x) || isResponseValidationError(x)`.
 
 #### Why a wrapper at all
 
@@ -700,7 +700,7 @@ writing `isTransportError(x) || isUnknownError(x)`.
 2xx bodies — error responses bypass it. Without the wrapper, the
 `${Op}Error` types would claim codec runtime shapes (`bigint`,
 `Date`) while the consumer received wire-shape values. The
-TransportError / UnknownError split is what keeps `${Op}Error` narrow
+TransportError / ResponseValidationError split is what keeps `${Op}Error` narrow
 and honest: when `result.error` is the typed shape, it really is
 the codec runtime shape; non-conforming responses end up in their
 own typed slot.
@@ -716,19 +716,19 @@ class TransportError extends Error {
   //   this[Symbol.for('@polygonlabs/zod-to-openapi-heyapi/is-transport-error')] = true
 }
 
-/** @internal — codegen-emitted; consumers narrow via isUnknownError. */
-class UnknownError extends Error {
+/** @internal — codegen-emitted; consumers narrow via isResponseValidationError. */
+class ResponseValidationError extends Error {
   readonly cause: ZodError;        // parseAsync's issues
   readonly body: unknown;          // original wire body (one hop, no walking)
   // super message: 'API response did not match the registered schema'
   // Carries a symbol-keyed marker:
-  //   this[Symbol.for('@polygonlabs/zod-to-openapi-heyapi/is-unknown-error')] = true
+  //   this[Symbol.for('@polygonlabs/zod-to-openapi-heyapi/is-response-validation-error')] = true
 }
 
 // Type-predicate guards — the only consumer-facing narrowing API.
 declare const isTransportError: (value: unknown) => value is TransportError;
-declare const isUnknownError:   (value: unknown) => value is UnknownError;
-declare const isWrapperError:   (value: unknown) => value is TransportError | UnknownError;
+declare const isResponseValidationError:   (value: unknown) => value is ResponseValidationError;
+declare const isWrapperError:   (value: unknown) => value is TransportError | ResponseValidationError;
 ```
 
 Both extend `Error` so they integrate with `try/catch`, structured
@@ -745,7 +745,7 @@ match our schema":
   `ETIMEDOUT` / abort / DNS / TLS handshake failures — the request
   never got an HTTP response back. Retry policies, alerting, and
   service-level monitoring usually want this category isolated.
-- **UnknownError** is for "got bytes, can't decode" — schema
+- **ResponseValidationError** is for "got bytes, can't decode" — schema
   drift, foreign errors from a CDN or gateway, or simply a
   registered schema that's out of date. The handling here is
   typically "log the body, file a bug, return a generic 'something
@@ -783,10 +783,10 @@ pipelines composed in one wrapper body.
 
 #### Consumer narrowing — the canonical pattern
 
-The codegen-emitted `isTransportError` / `isUnknownError` /
+The codegen-emitted `isTransportError` / `isResponseValidationError` /
 `isWrapperError` guards plus the wrapper's widened return type ARE
 the consumer narrowing API. The wrapper's return is statically
-`${Op}Error | TransportError | UnknownError | undefined`; once you
+`${Op}Error | TransportError | ResponseValidationError | undefined`; once you
 peel off the wrapper-error branches via the predicates, the
 remaining static type is the typed `${Op}Error` — no `as` casts, no
 type hints, no manual narrowing:
@@ -795,12 +795,12 @@ type hints, no manual narrowing:
 import {
   getX,
   isTransportError,
-  isUnknownError
+  isResponseValidationError
 } from '@my-org/api-client';
 
 const { data, error } = await getX();
 if (isTransportError(error))      log.network(error.cause);
-else if (isUnknownError(error))   log.schemaDrift({ issues: error.cause.issues, body: error.body });
+else if (isResponseValidationError(error))   log.schemaDrift({ issues: error.cause.issues, body: error.body });
 else if (error)                   handleTyped(error);   // typed ${Op}Error, full field access
 ```
 
@@ -821,21 +821,21 @@ import {
   categorizeApiError,
   getApiErrorMessage,
   isTransportError,
-  isUnknownError,
+  isResponseValidationError,
   isWrapperError,
   TRANSPORT_ERROR_MARKER,
-  UNKNOWN_ERROR_MARKER,
+  RESPONSE_VALIDATION_ERROR_MARKER,
   type TransportError,
-  type UnknownError,
+  type ResponseValidationError,
   type ErrorCategory
 } from '@polygonlabs/zod-to-openapi-heyapi/errors';
 
 const category = categorizeApiError(error);
 switch (category.kind) {
-  case 'transport':    /* category.error: TransportError */ break;
-  case 'unknown':      /* category.error: UnknownError   */ break;
-  case 'native-error': /* category.error: Error          */ break;
-  case 'other':        /* category.error: unknown        */ break;
+  case 'transport':           /* category.error: TransportError          */ break;
+  case 'response-validation': /* category.error: ResponseValidationError */ break;
+  case 'native-error':        /* category.error: Error                   */ break;
+  case 'other':               /* category.error: unknown                 */ break;
 }
 ```
 

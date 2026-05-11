@@ -22,7 +22,10 @@ import { describe, it } from 'vitest';
 // aliases. See `_test-internals.ts` for why this access is segregated
 // from the consumer-facing public surface.
 import type {
+  _TestInternal_createOrderSdk,
+  _TestInternal_createOrFetchResourceSdk,
   _TestInternal_getCodecObjectSdk,
+  _TestInternal_getErrorsOnlySdk,
   _TestInternal_lookupBlockSdk
 } from './_test-internals.ts';
 import type * as schemas from './fixtures/schemas.ts';
@@ -59,7 +62,7 @@ import type {
   SubmitForReviewInput,
   submitForReviewOptions,
   TransportError,
-  UnknownError,
+  ResponseValidationError,
   UpdateOrderInput
 } from './public-client.ts';
 
@@ -255,20 +258,20 @@ type Assertions = [
   >,
 
   // Error-decoding wrapper widens `result.error` to include the
-  // wrapper-emitted `TransportError` / `UnknownError` classes — the
+  // wrapper-emitted `TransportError` / `ResponseValidationError` classes — the
   // wrapper return type *deliberately differs* from the SDK return
   // type. Preserves codec runtime shapes for typed errors
   // (`result.error.traceId` is `bigint`, not the wire `string`) AND
   // forces consumers to narrow before reaching typed-error fields.
   // If this assertion ever loses the wrapper-error union, consumers
   // re-introduce the silent `result.error.<typed-field>`-on-runtime-
-  // `UnknownError` bug. `<false>` pins the throwOnError-false branch
+  // `ResponseValidationError` bug. `<false>` pins the throwOnError-false branch
   // of the conditional return type so we can read `.error` directly
   // without union-distribution gymnastics.
   Expect<
     Equal<
       Awaited<ReturnType<typeof createOrFetchResource<false>>>['error'],
-      CreateOrFetchResourceError | TransportError | UnknownError | undefined
+      CreateOrFetchResourceError | TransportError | ResponseValidationError | undefined
     >
   >,
 
@@ -276,7 +279,7 @@ type Assertions = [
   Expect<
     Equal<
       Awaited<ReturnType<typeof createOrder<false>>>['error'],
-      CreateOrderError | TransportError | UnknownError | undefined
+      CreateOrderError | TransportError | ResponseValidationError | undefined
     >
   >,
 
@@ -285,7 +288,36 @@ type Assertions = [
   Expect<
     Equal<
       Awaited<ReturnType<typeof getErrorsOnly<false>>>['error'],
-      GetErrorsOnlyError | TransportError | UnknownError | undefined
+      GetErrorsOnlyError | TransportError | ResponseValidationError | undefined
+    >
+  >,
+
+  // ── Data-field parity for error-widening wrappers ───────────────────────────
+  //
+  // The error-widening wrappers above pin `['error']`. They MUST NOT
+  // also widen `['data']` — the data branch should match the raw SDK
+  // function's data exactly. A regression that drops the narrow data
+  // type for these wrappers (e.g., re-emits the SDK success shape as
+  // `unknown`) would silently propagate `any`-flavoured values into
+  // consumer code. Asserting equality against the raw SDK's `['data']`
+  // pins this contract without re-stating the shape literally (which
+  // would drift if the underlying schema changes).
+  Expect<
+    Equal<
+      Awaited<ReturnType<typeof createOrFetchResource<false>>>['data'],
+      Awaited<ReturnType<typeof _TestInternal_createOrFetchResourceSdk<false>>>['data']
+    >
+  >,
+  Expect<
+    Equal<
+      Awaited<ReturnType<typeof createOrder<false>>>['data'],
+      Awaited<ReturnType<typeof _TestInternal_createOrderSdk<false>>>['data']
+    >
+  >,
+  Expect<
+    Equal<
+      Awaited<ReturnType<typeof getErrorsOnly<false>>>['data'],
+      Awaited<ReturnType<typeof _TestInternal_getErrorsOnlySdk<false>>>['data']
     >
   >
 ];

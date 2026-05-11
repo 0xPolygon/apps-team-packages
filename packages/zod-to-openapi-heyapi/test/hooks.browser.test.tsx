@@ -35,7 +35,7 @@ import {
   createOrFetchResource,
   getScalarStringOptions,
   isTransportError,
-  isUnknownError,
+  isResponseValidationError,
   isWrapperError,
   lookupBlockOptions
 } from './public-client.ts';
@@ -123,7 +123,7 @@ describe('useQuery via upstream factory (non-codec op)', () => {
     // Upstream factory's queryFn calls the raw SDK with
     // `throwOnError: true`; the SDK throws the wire-shape body.
     // Because the wrapper isn't in this path, `query.error` is the
-    // raw value, NOT a TransportError / UnknownError. This is the
+    // raw value, NOT a TransportError / ResponseValidationError. This is the
     // current behaviour — pin it so a future change to route the
     // upstream factory through the wrapper surfaces as a flipped
     // assertion, not a silent narrowing change.
@@ -184,7 +184,7 @@ describe('useQuery via codec-aware factory', () => {
 describe('useMutation via imperative wrapper', () => {
   // The mutation calls the wrapper via `await createOrFetchResource(...)`,
   // so `mutation.error` carries the wrapper-narrowed shape (typed
-  // `${Op}Error` | TransportError | UnknownError). Tests cover all
+  // `${Op}Error` | TransportError | ResponseValidationError). Tests cover all
   // three categories + the success path.
 
   function useCreateOrFetchMutation() {
@@ -231,7 +231,7 @@ describe('useMutation via imperative wrapper', () => {
     expect(result.current.error.cause).toBeInstanceOf(Error);
   });
 
-  it('lands an UnknownError on `mutation.error` when the body is schema-mismatched', async () => {
+  it('lands an ResponseValidationError on `mutation.error` when the body is schema-mismatched', async () => {
     const badBody = { unexpected: 'shape' };
     use(
       http.post(`${BASE_URL}/fixtures/createOrFetch`, () =>
@@ -244,8 +244,10 @@ describe('useMutation via imperative wrapper', () => {
     await waitFor(() => {
       expect(result.current.isError).toBe(true);
     });
-    if (!isUnknownError(result.current.error)) {
-      throw new Error(`expected UnknownError, got ${describeError(result.current.error)}`);
+    if (!isResponseValidationError(result.current.error)) {
+      throw new Error(
+        `expected ResponseValidationError, got ${describeError(result.current.error)}`
+      );
     }
     expect(result.current.error.body).toEqual(badBody);
   });

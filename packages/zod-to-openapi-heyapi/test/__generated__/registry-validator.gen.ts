@@ -370,7 +370,7 @@ export const createOrFetchResourceErrorTransformer = async (data: unknown): Prom
 export class TransportError extends Error {
     readonly cause: Error;
     constructor(cause: Error) {
-        super('Request failed before producing an HTTP response', { cause });
+        super('Request failed before producing an HTTP response');
         (this as Record<symbol, unknown>)[Symbol.for("@polygonlabs/zod-to-openapi-heyapi/is-transport-error")] = true;
         this.cause = cause;
         this.name = 'TransportError';
@@ -383,25 +383,25 @@ export class TransportError extends Error {
  * `parseAsync` rejects an HTTP error body that did not match any
  * registered error schema. `cause` carries the `ZodError` issues;
  * `body` is the original wire body for debugging schema drift.
- * Narrow via the emitted `isUnknownError` type-predicate guard.
+ * Narrow via the emitted `isResponseValidationError` type-predicate guard.
  */
-export class UnknownError extends Error {
+export class ResponseValidationError extends Error {
     readonly cause: ZodError;
     readonly body: unknown;
     constructor(cause: ZodError, body: unknown) {
-        super('API response did not match the registered schema', { cause });
-        (this as Record<symbol, unknown>)[Symbol.for("@polygonlabs/zod-to-openapi-heyapi/is-unknown-error")] = true;
+        super('API response did not match the registered schema');
+        (this as Record<symbol, unknown>)[Symbol.for("@polygonlabs/zod-to-openapi-heyapi/is-response-validation-error")] = true;
         this.cause = cause;
-        this.name = 'UnknownError';
+        this.name = 'ResponseValidationError';
         this.body = body;
     }
 }
 
 export const isTransportError = (value: unknown): value is TransportError => typeof value === "object" && value !== null && (value as Record<symbol, unknown>)[Symbol.for("@polygonlabs/zod-to-openapi-heyapi/is-transport-error")] === true;
 
-export const isUnknownError = (value: unknown): value is UnknownError => typeof value === "object" && value !== null && (value as Record<symbol, unknown>)[Symbol.for("@polygonlabs/zod-to-openapi-heyapi/is-unknown-error")] === true;
+export const isResponseValidationError = (value: unknown): value is ResponseValidationError => typeof value === "object" && value !== null && (value as Record<symbol, unknown>)[Symbol.for("@polygonlabs/zod-to-openapi-heyapi/is-response-validation-error")] === true;
 
-export const isWrapperError = (value: unknown): value is TransportError | UnknownError => typeof value === "object" && value !== null && ((value as Record<symbol, unknown>)[Symbol.for("@polygonlabs/zod-to-openapi-heyapi/is-transport-error")] === true || (value as Record<symbol, unknown>)[Symbol.for("@polygonlabs/zod-to-openapi-heyapi/is-unknown-error")] === true);
+export const isWrapperError = (value: unknown): value is TransportError | ResponseValidationError => typeof value === "object" && value !== null && ((value as Record<symbol, unknown>)[Symbol.for("@polygonlabs/zod-to-openapi-heyapi/is-transport-error")] === true || (value as Record<symbol, unknown>)[Symbol.for("@polygonlabs/zod-to-openapi-heyapi/is-response-validation-error")] === true);
 
 export type WrapErrors<TData, TError, ThrowOnError extends boolean> = Promise<ThrowOnError extends true ? {
     data: TData extends Record<string, unknown> ? TData[keyof TData] : TData;
@@ -412,7 +412,7 @@ export type WrapErrors<TData, TError, ThrowOnError extends boolean> = Promise<Th
     error: undefined;
 } | {
     data: undefined;
-    error: (TError extends Record<string, unknown> ? TError[keyof TError] : TError) | TransportError | UnknownError;
+    error: (TError extends Record<string, unknown> ? TError[keyof TError] : TError) | TransportError | ResponseValidationError;
 }) & {
     request: Request;
     response: Response;
@@ -432,14 +432,14 @@ export const createOrFetchResource = async <ThrowOnError extends boolean = false
             typedErr = await createOrFetchResourceErrorTransformer(err);
         }
         catch (validationError) {
-            throw new UnknownError(validationError as ZodError, err);
+            throw new ResponseValidationError(validationError as ZodError, err);
         }
         throw typedErr;
     }
     const errorBearing = result as {
         error?: unknown;
     };
-    if (errorBearing.error != null) {
+    if (typeof errorBearing.error === "object" && errorBearing.error !== null) {
         if (errorBearing.error instanceof Error) {
             errorBearing.error = new TransportError(errorBearing.error as Error);
         }
@@ -448,7 +448,7 @@ export const createOrFetchResource = async <ThrowOnError extends boolean = false
                 errorBearing.error = await createOrFetchResourceErrorTransformer(errorBearing.error);
             }
             catch (validationError) {
-                errorBearing.error = new UnknownError(validationError as ZodError, errorBearing.error);
+                errorBearing.error = new ResponseValidationError(validationError as ZodError, errorBearing.error);
             }
         }
     }
@@ -478,14 +478,14 @@ export const getErrorsOnly = async <ThrowOnError extends boolean = false>(option
             typedErr = await getErrorsOnlyErrorTransformer(err);
         }
         catch (validationError) {
-            throw new UnknownError(validationError as ZodError, err);
+            throw new ResponseValidationError(validationError as ZodError, err);
         }
         throw typedErr;
     }
     const errorBearing = result as {
         error?: unknown;
     };
-    if (errorBearing.error != null) {
+    if (typeof errorBearing.error === "object" && errorBearing.error !== null) {
         if (errorBearing.error instanceof Error) {
             errorBearing.error = new TransportError(errorBearing.error as Error);
         }
@@ -494,7 +494,7 @@ export const getErrorsOnly = async <ThrowOnError extends boolean = false>(option
                 errorBearing.error = await getErrorsOnlyErrorTransformer(errorBearing.error);
             }
             catch (validationError) {
-                errorBearing.error = new UnknownError(validationError as ZodError, errorBearing.error);
+                errorBearing.error = new ResponseValidationError(validationError as ZodError, errorBearing.error);
             }
         }
     }
@@ -636,14 +636,14 @@ export const createOrder = async <ThrowOnError extends boolean = false>(options:
             typedErr = await createOrderErrorTransformer(err);
         }
         catch (validationError) {
-            throw new UnknownError(validationError as ZodError, err);
+            throw new ResponseValidationError(validationError as ZodError, err);
         }
         throw typedErr;
     }
     const errorBearing = result as {
         error?: unknown;
     };
-    if (errorBearing.error != null) {
+    if (typeof errorBearing.error === "object" && errorBearing.error !== null) {
         if (errorBearing.error instanceof Error) {
             errorBearing.error = new TransportError(errorBearing.error as Error);
         }
@@ -652,7 +652,7 @@ export const createOrder = async <ThrowOnError extends boolean = false>(options:
                 errorBearing.error = await createOrderErrorTransformer(errorBearing.error);
             }
             catch (validationError) {
-                errorBearing.error = new UnknownError(validationError as ZodError, errorBearing.error);
+                errorBearing.error = new ResponseValidationError(validationError as ZodError, errorBearing.error);
             }
         }
     }

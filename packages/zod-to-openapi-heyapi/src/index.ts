@@ -50,7 +50,7 @@ import type { CallExpression, Expression } from 'typescript';
 
 import { getRefId } from '@asteasolutions/zod-to-openapi';
 // Used to hand-construct a TypePredicateNode for the wrapper-emitted
-// `isTransportError` / `isUnknownError` type guards (and the
+// `isTransportError` / `isResponseValidationError` type guards (and the
 // computed-key element-access assignment in their classes) — the
 // openapi-ts DSL doesn't expose type predicates or computed property
 // access as first-class nodes, so we drop down to the raw TS factory.
@@ -330,7 +330,7 @@ export async function registryPlugin({
       };
 
       // ZodError type import + the wrapper-emitted error classes
-      // (TransportError, UnknownError) are scaffolded lazily on first use
+      // (TransportError, ResponseValidationError) are scaffolded lazily on first use
       // by an SDK wrapper that needs them — any op with a declared
       // error schema. The classes give consumers a tag-based discriminator
       // so they don't have to `instanceof` at narrow sites:
@@ -496,7 +496,7 @@ export async function registryPlugin({
         // these wrappers are the only public SDK surface. Consumers see
         // one canonical name per op and can't accidentally import a
         // wire-shaped variant.
-        // Wrapper-emitted error classes (TransportError, UnknownError) are
+        // Wrapper-emitted error classes (TransportError, ResponseValidationError) are
         // only needed by ops that have an error transformer — i.e. the
         // wrapper actually decodes errors. Skip the file-level scaffolding
         // for ops that don't.
@@ -1075,6 +1075,32 @@ function assertSdkPluginCompatible(plugin: PluginLike): void {
         `with no responseTransformer wiring, so codec response decode (Int64Codec ` +
         `wire string → bigint, IsoDateCodec → Date) silently doesn't run — callers ` +
         `receive wire-shaped data while the type system promises the runtime shape.`
+    );
+  }
+
+  // The wrapper's emitted `WrapErrors<TData, TError, ThrowOnError>` return
+  // type hard-codes the `responseStyle: 'fields'` shape: `{ data, error,
+  // request, response }`. If hey-api's SDK config flips
+  // `responseStyle: 'data'`, the runtime layer returns flat `TData` (or
+  // throws on error) while the wrapper's static return type continues
+  // claiming the fields-shape — the same "runtime and type silently
+  // diverge" class of bug this release sets out to fix.
+  //
+  // Pre-flight check: refuse to generate when responseStyle is anything
+  // other than the default 'fields'. A future release should thread
+  // TResponseStyle through the wrapper signature and `WrapErrors` so
+  // 'data' is supported; for now, flag at codegen time rather than
+  // ship the silent divergence.
+  if (config['responseStyle'] !== undefined && config['responseStyle'] !== 'fields') {
+    issues.push(
+      `  - 'responseStyle' must be 'fields' (or unset). This plugin's emitted ` +
+        `wrappers return the WrapErrors<TData, TError, ThrowOnError> shape which ` +
+        `is hard-coded to the 'fields' style ({ data, error, request, response }). ` +
+        `Other values (e.g., 'data') would make the wrapper's static return type ` +
+        `diverge from the runtime — a consumer reading 'result.error' against a ` +
+        `flat-data runtime would get either undefined or a property access through ` +
+        `the wrong shape. Thread-through support is planned; until then this ` +
+        `combination is rejected at codegen.`
     );
   }
 
@@ -1797,12 +1823,12 @@ function emitSdkWrapper({
       resource: 'wrapper-error',
       name: 'TransportError'
     });
-    const unknownSymbol = plugin.querySymbol({
+    const responseValidationSymbol = plugin.querySymbol({
       category: 'class',
       resource: 'wrapper-error',
-      name: 'UnknownError'
+      name: 'ResponseValidationError'
     });
-    if (!transportSymbol || !unknownSymbol) {
+    if (!transportSymbol || !responseValidationSymbol) {
       throw new Error(
         `[zod-to-openapi-heyapi] wrapper-error classes missing for '${opId}' — ` +
           `ensureWrapperErrorClasses() should have run by now. Plugin bug.`
@@ -1826,7 +1852,7 @@ function emitSdkWrapper({
     // because there's no HTTP body to validate. Case (a) attempts
     // parseAsync; on success throws the typed `${Op}Error` shape; on
     // validation failure wraps the ZodError plus the wire body in an
-    // UnknownError.
+    // ResponseValidationError.
     //
     // `instanceof Error` is reliable here: fetch's transport rejections
     // are `TypeError` / `AbortError` / Node `SystemError`, all of which
@@ -1838,8 +1864,8 @@ function emitSdkWrapper({
     // Koa / FastAPI) that include stack traces in JSON error bodies.
     //
     // Result: every throw the wrapper produces is either a typed
-    // `${Op}Error` member, a TransportError, or an UnknownError.
-    // Consumers narrow via `isTransportError` / `isUnknownError`
+    // `${Op}Error` member, a TransportError, or an ResponseValidationError.
+    // Consumers narrow via `isTransportError` / `isResponseValidationError`
     // (or `isWrapperError` for "any wrapper-emitted").
     const zodErrorTypeSymbol = plugin.querySymbol({
       category: 'type',
@@ -1895,7 +1921,7 @@ function emitSdkWrapper({
             )
             .catchArg('validationError')
             .catch(
-              // throw new UnknownError(validationError as ZodError, err)
+              // throw new ResponseValidationError(validationError as ZodError, err)
               // — the ZodError carries the parseAsync issues and the
               // original wire body sits alongside as a separate field.
               // Two-arg constructor (rather than mutating the ZodError
@@ -1906,7 +1932,7 @@ function emitSdkWrapper({
               (dsl as any).throw(
                 dsl
                   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                  .new(unknownSymbol as any)
+                  .new(responseValidationSymbol as any)
                   .args(
                     dsl.as(
                       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1930,9 +1956,9 @@ function emitSdkWrapper({
     // Cast through `{ error?: unknown }` to satisfy TS's
     // discriminated-union access, then mutate in place: transport →
     // TransportError, plain object → typed shape (parseAsync) or
-    // UnknownError (parseAsync rejects). The wrapper's static return
+    // ResponseValidationError (parseAsync rejects). The wrapper's static return
     // type widens `error` to `${Op}Error | TransportError |
-    // UnknownError` so consumers see the three cases.
+    // ResponseValidationError` so consumers see the three cases.
     bodyStatements.push(
       dsl.const('errorBearing').assign(
         dsl.as(
@@ -1949,20 +1975,38 @@ function emitSdkWrapper({
       )
     );
     bodyStatements.push(
-      // `errorBearing.error != null` (loose, covers both `undefined`
-      // and `null`). The hey-api fetch client effectively never sets
-      // `error: null`, but the loose check is defensive — `null`
-      // falling through to `parseAsync(null)` would mis-classify as
-      // an UnknownError despite there being no real failure.
+      // Gate the wrapper-error logic on `typeof errorBearing.error ===
+      // 'object' && errorBearing.error !== null`. Hey-api's fetch
+      // client emits `error: undefined` on success and an object on
+      // failure, so the realistic universe is "object or undefined",
+      // but the stricter `typeof === 'object'` check also defends
+      // against hostile primitive values (`error: 0`, `error: ''`,
+      // `error: false`) that would fall through to `parseAsync(<prim>)`
+      // and mis-classify as a ResponseValidationError despite there
+      // being no real failure. `null` is excluded explicitly because
+      // `typeof null === 'object'`.
       dsl
         .if(
           tsFactory.createBinaryExpression(
-            tsFactory.createPropertyAccessExpression(
-              tsFactory.createIdentifier('errorBearing'),
-              'error'
+            tsFactory.createBinaryExpression(
+              tsFactory.createTypeOfExpression(
+                tsFactory.createPropertyAccessExpression(
+                  tsFactory.createIdentifier('errorBearing'),
+                  'error'
+                )
+              ),
+              tsFactory.createToken(SyntaxKind.EqualsEqualsEqualsToken),
+              tsFactory.createStringLiteral('object')
             ),
-            tsFactory.createToken(SyntaxKind.ExclamationEqualsToken),
-            tsFactory.createNull()
+            tsFactory.createToken(SyntaxKind.AmpersandAmpersandToken),
+            tsFactory.createBinaryExpression(
+              tsFactory.createPropertyAccessExpression(
+                tsFactory.createIdentifier('errorBearing'),
+                'error'
+              ),
+              tsFactory.createToken(SyntaxKind.ExclamationEqualsEqualsToken),
+              tsFactory.createNull()
+            )
           )
         )
         .do(
@@ -2004,13 +2048,13 @@ function emitSdkWrapper({
                 )
                 .catchArg('validationError')
                 .catch(
-                  // errorBearing.error = new UnknownError(
+                  // errorBearing.error = new ResponseValidationError(
                   //   validationError as ZodError,
                   //   errorBearing.error
                   // );
                   // The right-hand-side reads `errorBearing.error`
                   // (the wire body) BEFORE the assignment overwrites
-                  // it, so the body is preserved on the UnknownError
+                  // it, so the body is preserved on the ResponseValidationError
                   // even though we're mutating in place. Two-arg
                   // constructor avoids the in-place ZodError mutation
                   // that the earlier `Object.assign(...)` patch used.
@@ -2019,7 +2063,7 @@ function emitSdkWrapper({
                     .assign(
                       dsl
                         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                        .new(unknownSymbol as any)
+                        .new(responseValidationSymbol as any)
                         .args(
                           dsl.as(
                             // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -2051,7 +2095,7 @@ function emitSdkWrapper({
   // Explicit return type when the wrapper widens errors at runtime
   // (i.e. `errorTransformerSymbol` is set). Without this, the wrapper's
   // inferred return matches the SDK's return type EXACTLY and the
-  // runtime mutation to `TransportError` / `UnknownError` is invisible
+  // runtime mutation to `TransportError` / `ResponseValidationError` is invisible
   // to TS — a consumer reading `result.error.code` after a malformed
   // response gets `undefined` at runtime with no compile-time hint to
   // narrow first. The annotation forces the three-branch narrow.
@@ -2153,13 +2197,14 @@ function emitSdkWrapper({
 // Mirrors the `@polygonlabs/verror` pattern (WERROR_SYMBOL,
 // MULTIERROR_SYMBOL).
 const TRANSPORT_ERROR_SYMBOL_KEY = '@polygonlabs/zod-to-openapi-heyapi/is-transport-error';
-const UNKNOWN_ERROR_SYMBOL_KEY = '@polygonlabs/zod-to-openapi-heyapi/is-unknown-error';
+const RESPONSE_VALIDATION_ERROR_SYMBOL_KEY =
+  '@polygonlabs/zod-to-openapi-heyapi/is-response-validation-error';
 
 /**
- * Emit `TransportError` and `UnknownError` classes plus matching
- * `isTransportError` / `isUnknownError` helpers in
+ * Emit `TransportError` and `ResponseValidationError` classes plus matching
+ * `isTransportError` / `isResponseValidationError` helpers in
  * `registry-validator.gen.ts`. Also registers the type-only `ZodError`
- * import from `'zod'` that `UnknownError`'s cause field references.
+ * import from `'zod'` that `ResponseValidationError`'s cause field references.
  *
  * The two classes split the world by **whether the request reached the
  * API at all**:
@@ -2176,7 +2221,7 @@ const UNKNOWN_ERROR_SYMBOL_KEY = '@polygonlabs/zod-to-openapi-heyapi/is-unknown-
  *     discriminator so they don't have to `instanceof` at every call
  *     site.
  *
- *   - **UnknownError** — request produced an HTTP response, but the
+ *   - **ResponseValidationError** — request produced an HTTP response, but the
  *     body did not match any registered error schema. Could be schema
  *     drift (server bug, stale spec), a foreign error from a CDN /
  *     gateway / proxy that doesn't speak our schema, or any other
@@ -2188,10 +2233,10 @@ const UNKNOWN_ERROR_SYMBOL_KEY = '@polygonlabs/zod-to-openapi-heyapi/is-unknown-
  * Together they let the consumer narrow `result.error` (or the thrown
  * value, on `throwOnError: true`) into one of three cases via a
  * tag-equality check — typed `${Op}Error`, `TransportError`, or
- * `UnknownError` — without ever needing `instanceof` at the call site.
+ * `ResponseValidationError` — without ever needing `instanceof` at the call site.
  */
 function emitWrapperErrorClasses({ dsl, plugin }: { dsl: Dsl; plugin: PluginLike }): void {
-  // ZodError type import — used in UnknownError's `cause` field.
+  // ZodError type import — used in ResponseValidationError's `cause` field.
   plugin.symbol('ZodError', {
     external: 'zod',
     importKind: 'named',
@@ -2202,8 +2247,8 @@ function emitWrapperErrorClasses({ dsl, plugin }: { dsl: Dsl; plugin: PluginLike
   const transportSymbol = plugin.symbol('TransportError', {
     meta: { category: 'class', resource: 'wrapper-error', name: 'TransportError' }
   });
-  const unknownSymbol = plugin.symbol('UnknownError', {
-    meta: { category: 'class', resource: 'wrapper-error', name: 'UnknownError' }
+  const responseValidationSymbol = plugin.symbol('ResponseValidationError', {
+    meta: { category: 'class', resource: 'wrapper-error', name: 'ResponseValidationError' }
   });
   const zodErrorSymbol = plugin.querySymbol({
     category: 'type',
@@ -2236,7 +2281,7 @@ function emitWrapperErrorClasses({ dsl, plugin }: { dsl: Dsl; plugin: PluginLike
   //     symbol's binding name fails during the analyze pass because
   //     finalName isn't determined yet.
   //   - Consumers narrow via the emitted `isTransportError` /
-  //     `isUnknownError` helpers, not by importing the symbol const.
+  //     `isResponseValidationError` helpers, not by importing the symbol const.
   //     The const would have been a power-user escape hatch for
   //     hand-rolled narrowing — a small cost compared with a plumbing
   //     workaround.
@@ -2258,9 +2303,9 @@ function emitWrapperErrorClasses({ dsl, plugin }: { dsl: Dsl; plugin: PluginLike
   emitWrapperErrorClass({
     dsl,
     plugin,
-    classSymbol: unknownSymbol,
-    className: 'UnknownError',
-    markerKey: UNKNOWN_ERROR_SYMBOL_KEY,
+    classSymbol: responseValidationSymbol,
+    className: 'ResponseValidationError',
+    markerKey: RESPONSE_VALIDATION_ERROR_SYMBOL_KEY,
     superMessage: 'API response did not match the registered schema',
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     causeTypeExpr: dsl.type(zodErrorSymbol as any),
@@ -2274,12 +2319,12 @@ function emitWrapperErrorClasses({ dsl, plugin }: { dsl: Dsl; plugin: PluginLike
       '`parseAsync` rejects an HTTP error body that did not match any',
       'registered error schema. `cause` carries the `ZodError` issues;',
       '`body` is the original wire body for debugging schema drift.',
-      'Narrow via the emitted `isUnknownError` type-predicate guard.'
+      'Narrow via the emitted `isResponseValidationError` type-predicate guard.'
     ]
   });
 
   // export const isTransportError = (value: unknown): value is TransportError => …
-  // export const isUnknownError   = (value: unknown): value is UnknownError   => …
+  // export const isResponseValidationError   = (value: unknown): value is ResponseValidationError   => …
   emitTagGuard({
     dsl,
     plugin,
@@ -2290,11 +2335,11 @@ function emitWrapperErrorClasses({ dsl, plugin }: { dsl: Dsl; plugin: PluginLike
   emitTagGuard({
     dsl,
     plugin,
-    name: 'isUnknownError',
-    className: 'UnknownError',
-    markerKey: UNKNOWN_ERROR_SYMBOL_KEY
+    name: 'isResponseValidationError',
+    className: 'ResponseValidationError',
+    markerKey: RESPONSE_VALIDATION_ERROR_SYMBOL_KEY
   });
-  // export const isWrapperError = (value): value is TransportError | UnknownError => …
+  // export const isWrapperError = (value): value is TransportError | ResponseValidationError => …
   // The "is this any wrapper-emitted error" guard, for consumers that
   // want to log / track the two categories generically without
   // double-checking each tag.
@@ -2302,8 +2347,8 @@ function emitWrapperErrorClasses({ dsl, plugin }: { dsl: Dsl; plugin: PluginLike
     dsl,
     plugin,
     name: 'isWrapperError',
-    classNames: ['TransportError', 'UnknownError'],
-    markerKeys: [TRANSPORT_ERROR_SYMBOL_KEY, UNKNOWN_ERROR_SYMBOL_KEY]
+    classNames: ['TransportError', 'ResponseValidationError'],
+    markerKeys: [TRANSPORT_ERROR_SYMBOL_KEY, RESPONSE_VALIDATION_ERROR_SYMBOL_KEY]
   });
 
   // type WrapErrors<TData, TError, ThrowOnError extends boolean> =
@@ -2324,7 +2369,7 @@ function emitWrapperErrorClasses({ dsl, plugin }: { dsl: Dsl; plugin: PluginLike
   //               error:
   //                 | (TError extends Record<string, unknown> ? TError[keyof TError] : TError)
   //                 | TransportError
-  //                 | UnknownError;
+  //                 | ResponseValidationError;
   //             }
   //         ) & {
   //           request: Request;
@@ -2345,7 +2390,7 @@ function emitWrapperErrorClasses({ dsl, plugin }: { dsl: Dsl; plugin: PluginLike
 /**
  * Emit the `WrapErrors<TData, TError, ThrowOnError>` type alias at file
  * scope. Mirrors hey-api's `RequestResult<TData, TError, ThrowOnError,
- * 'fields'>` shape with `TransportError | UnknownError` added to the
+ * 'fields'>` shape with `TransportError | ResponseValidationError` added to the
  * error union — single source of truth for the wrapper return type.
  *
  * Hand-built via raw `tsFactory`: nested conditional types, type
@@ -2413,7 +2458,7 @@ function emitWrapErrorsAlias({ dsl, plugin }: { dsl: Dsl; plugin: PluginLike }):
   ]);
 
   // No-throw path:
-  //   ({ data: <flattenedData>; error: undefined } | { data: undefined; error: <flattenedError> | TransportError | UnknownError })
+  //   ({ data: <flattenedData>; error: undefined } | { data: undefined; error: <flattenedError> | TransportError | ResponseValidationError })
   //   & { request; response }
   const okMember = tsFactory.createTypeLiteralNode([
     tsFactory.createPropertySignature(undefined, 'data', undefined, flattenedData),
@@ -2438,7 +2483,7 @@ function emitWrapErrorsAlias({ dsl, plugin }: { dsl: Dsl; plugin: PluginLike }):
       tsFactory.createUnionTypeNode([
         flattenedError,
         tsFactory.createTypeReferenceNode('TransportError'),
-        tsFactory.createTypeReferenceNode('UnknownError')
+        tsFactory.createTypeReferenceNode('ResponseValidationError')
       ])
     )
   ]);
@@ -2531,7 +2576,7 @@ function symbolForExpr(key: string): CallExpression {
  *     codegen-emitted marker, not a public surface
  *
  * Optional `extraField` adds a second readonly field + constructor
- * param + assignment (used by `UnknownError` to carry the original
+ * param + assignment (used by `ResponseValidationError` to carry the original
  * wire body alongside the `ZodError` cause).
  */
 function emitWrapperErrorClass({
@@ -2632,12 +2677,16 @@ function emitWrapperErrorClass({
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         init = init.param(extraField.name, (p: any) => p.type(extraField.typeExpr));
       }
+      // The constructor body deliberately does NOT pass `{ cause }`
+      // to `super(...)`. The class declares a narrower `readonly cause:
+      // <T>` field above and assigns it explicitly via
+      // `this.cause = cause` here — that single assignment satisfies
+      // both the runtime (the value lands on the instance under the
+      // canonical name) and TypeScript's strict property
+      // initialization. Adding `{ cause }` to `super` would assign the
+      // same value twice for no observable benefit.
       const stmts: unknown[] = [
-        dsl('super').call(
-          dsl.literal(superMessage),
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          dsl.object().prop('cause', dsl.id('cause')) as any
-        ),
+        dsl('super').call(dsl.literal(superMessage)),
         markerAssignmentStmt,
         dsl('this').attr('cause').assign(dsl.id('cause')),
         dsl('this').attr('name').assign(dsl.literal(className))
@@ -2667,7 +2716,7 @@ function emitWrapperErrorClass({
  * `className` is captured by string rather than by hey-api Symbol
  * reference because the lazy/Symbol-resolution dance fails during
  * the analyze pass (finalName isn't available yet). In practice the
- * class binding names we emit (`TransportError` / `UnknownError`)
+ * class binding names we emit (`TransportError` / `ResponseValidationError`)
  * are stable — they only get suffix-renamed on collision, and a
  * collision with a user schema named `TransportError` would already
  * have broken the consumer's import surface elsewhere.
@@ -2774,7 +2823,7 @@ function emitTagGuard({
 /**
  * Emit a union type-guard helper:
  *
- *   export const isWrapperError = (value: unknown): value is TransportError | UnknownError =>
+ *   export const isWrapperError = (value: unknown): value is TransportError | ResponseValidationError =>
  *     typeof value === 'object' && value !== null && (
  *       (value as Record<symbol, unknown>)[Symbol.for(KEY_T)] === true ||
  *       (value as Record<symbol, unknown>)[Symbol.for(KEY_U)] === true
@@ -2782,7 +2831,7 @@ function emitTagGuard({
  *
  * Same construction as `emitTagGuard` but with multiple markers OR'd
  * together and a union type predicate. Saves consumers writing
- * `isTransportError(x) || isUnknownError(x)` at every "log all
+ * `isTransportError(x) || isResponseValidationError(x)` at every "log all
  * wrapper errors generically" call site.
  */
 function emitUnionTagGuard({
@@ -2816,7 +2865,7 @@ function emitUnionTagGuard({
     undefined,
     tsFactory.createKeywordTypeNode(SyntaxKind.UnknownKeyword)
   );
-  // value is TransportError | UnknownError
+  // value is TransportError | ResponseValidationError
   const predicate = tsFactory.createTypePredicateNode(
     undefined,
     'value',

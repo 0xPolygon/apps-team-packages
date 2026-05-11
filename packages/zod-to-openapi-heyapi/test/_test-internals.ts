@@ -10,9 +10,9 @@
 // `types.test.ts` need both halves of the comparison: the wrapper's
 // return type AND the raw SDK function's return type. The contract
 // the test pins — pass-through wrappers (no declared error responses)
-// return exactly what the raw SDK function returns, with no
-// accidental error-union widening — only has meaning if we can name
-// both sides.
+// return exactly what the raw SDK function returns; error-widening
+// wrappers leave `['data']` unchanged from the raw SDK and only widen
+// `['error']` — only has meaning if we can name both sides.
 //
 // Underscore prefix and the `_TestInternal_` symbol prefix mark this
 // boundary so any consumer who finds this file via grep can tell at a
@@ -20,6 +20,9 @@
 // public API.
 
 export {
+  createOrder as _TestInternal_createOrderSdk,
+  createOrFetchResource as _TestInternal_createOrFetchResourceSdk,
   getCodecObject as _TestInternal_getCodecObjectSdk,
+  getErrorsOnly as _TestInternal_getErrorsOnlySdk,
   lookupBlock as _TestInternal_lookupBlockSdk
 } from './__generated__/sdk.gen.ts';
