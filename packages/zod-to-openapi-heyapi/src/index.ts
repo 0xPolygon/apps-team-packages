@@ -615,18 +615,29 @@ export interface DefineRegistryClientConfigOptions {
  *
  *   - {@link registryPlugin} ahead of `@hey-api/typescript` so the
  *     response-type symbols register first.
- *   - `@hey-api/client-fetch` as the HTTP client.
+ *   - `@hey-api/client-fetch` with `includeInEntry: true` so the
+ *     singleton `client` reaches the auto-barrel.
  *   - `@hey-api/sdk` with `transformer: true` and `includeInEntry: false`
  *     — both required for the codec round-trip to fire and for the
  *     entry barrel to expose only this plugin's wrappers.
  *
+ * The auto-generated `index.ts` is the canonical consumer surface: it
+ * re-exports the singleton `client`, every SDK wrapper, both wrapper-
+ * error classes plus their `is*Error` guards, and (when enabled) every
+ * TanStack Query factory regardless of codec status. Consumers — and the
+ * consumer package's own hand-written barrel — should import only from
+ * this entry; they should never reach into `*.gen.ts` paths directly.
+ *
  * When `tanstackReactQuery: true`, it additionally:
  *
- *   - Adds `'@tanstack/react-query'` to the plugin list.
+ *   - Adds `'@tanstack/react-query'` to the plugin list with
+ *     `includeInEntry: true`, so non-codec ops' `${Op}Options` /
+ *     `${Op}QueryKey` factories reach the auto-barrel.
  *   - Installs a `parser.hooks.operations.isQuery` hook that returns
  *     `false` for every operation id with a registered input schema, so
  *     the upstream tanstack plugin skips those — this plugin emits them
- *     instead with codec-aware typing.
+ *     instead with codec-aware typing. Both factory files contribute to
+ *     the entry under one canonical name per op id, no collisions.
  *
  * @example
  * ```ts
@@ -682,9 +693,37 @@ export async function defineRegistryClientConfig(
     // advanced power users importing the deep path, but the canonical
     // public surface is the codec-aware ones from our plugin.
     { name: '@hey-api/typescript', includeInEntry: false },
-    '@hey-api/client-fetch',
+    // `@hey-api/client-fetch` defaults to `includeInEntry: false`, which
+    // would leave the singleton `client` out of the auto-barrel and force
+    // consumers (or the consumer package's own hand-written barrel) to
+    // reach into `./client.gen.js` directly. Flipping it on routes the
+    // singleton through the canonical entry — `client.gen.ts` exports
+    // only `client` and the `CreateClientConfig` type, neither of which
+    // collide with anything else this plugin emits.
+    { name: '@hey-api/client-fetch', includeInEntry: true },
     { name: '@hey-api/sdk', transformer: true, includeInEntry: false },
-    ...(tanstack ? (['@tanstack/react-query'] as const) : [])
+    // Same reasoning for the upstream `@tanstack/react-query` plugin:
+    // it emits non-codec ops' `${Op}Options` / `${Op}QueryKey` factories
+    // (and `${Op}Mutation` for codec ops, which our `isQuery: false`
+    // hook routes to the upstream's mutation path) into
+    // `@tanstack/react-query.gen.ts`, and the default `includeInEntry`
+    // would keep those out of the auto-barrel.
+    //
+    // The predicate filters out `QueryKey` because this plugin emits its
+    // own canonical `QueryKey<TOptions>` alias (scaffolded by
+    // {@link scaffoldTanstack}) — letting both contribute would collide
+    // in the auto-generated `index.ts` and TypeScript fails the
+    // duplicate-export. Our `QueryKey` is the public-surface alias the
+    // consumer reaches for; the upstream's is an internal-shape alias
+    // that nothing useful imports.
+    ...(tanstack
+      ? ([
+          {
+            name: '@tanstack/react-query',
+            includeInEntry: (sym: { name: string }): boolean => sym.name !== 'QueryKey'
+          }
+        ] as const)
+      : [])
   ];
 
   // Build the parser hook only when tanstack is wired. Skipped otherwise

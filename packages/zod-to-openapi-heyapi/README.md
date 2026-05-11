@@ -64,6 +64,17 @@ That's the whole config. The factory locks in the plugin order, the
 and `OpenApiGeneratorV3`) so consumers don't have to wire any of it up
 themselves.
 
+It also flips `includeInEntry: true` on `@hey-api/client-fetch` and
+(when `tanstackReactQuery: true`) on `@tanstack/react-query`, so the
+auto-generated `index.ts` is the **canonical consumer surface**: the
+singleton `client`, every SDK wrapper, both wrapper-error classes plus
+their `is*Error` guards, and every TanStack Query factory all flow
+through `./generated/index.js`. Publishable client packages should
+re-export from `./generated/index.js` and never name a `*.gen.ts` path
+in their hand-written barrel — the layout (which factory file owns
+which op, where the singleton `client` lives) is an internal codegen
+concern that consumers shouldn't have to understand.
+
 For codec-aware TanStack Query factories alongside the SDK wrappers,
 flip `tanstackReactQuery: true`. See [TanStack Query
 factories](#tanstack-query-factories) below for the full picture.
@@ -95,8 +106,21 @@ export default defineConfig({
       generatorClass: OpenApiGeneratorV3,
       $
     })) as never,
-    '@hey-api/typescript',
-    '@hey-api/client-fetch',
+    // `includeInEntry: false` here keeps the wire-shape `${Op}Response` /
+    // `${Op}Error` aliases out of the auto-barrel — this plugin emits
+    // codec-aware aliases under the same names. Without the flag, both
+    // land in the entry barrel and hey-api collision-renames the
+    // typescript plugin's emissions to `${Name}2` (`CreateOrderError2`,
+    // etc.) — reaching for `2`-suffixed names then silently loses the
+    // codec round-trip on the wire-shape side. Either keep this flag, or
+    // leave the typescript plugin out entirely.
+    { name: '@hey-api/typescript', includeInEntry: false },
+    // `includeInEntry: true` (default is false on `@hey-api/client-fetch`)
+    // surfaces the singleton `client` through the auto-barrel so the
+    // consumer's `client.setConfig({ baseUrl })` line resolves from the
+    // canonical entry. No name collision — `client.gen.ts` exports only
+    // `client` and `CreateClientConfig`.
+    { name: '@hey-api/client-fetch', includeInEntry: true },
     // `includeInEntry: false` is required: this plugin owns the public
     // SDK surface and emits a wrapper per operation under the canonical
     // name. Without it, `@hey-api/sdk`'s same-named raw functions would
@@ -981,6 +1005,29 @@ without registered input schemas neither produce a codec factory from
 this plugin (no codec runtime shape to type against, or no Response
 type to parameterise) — those go through the upstream plugin
 unchanged.
+
+### Both factory files reach the canonical `index.ts`
+
+`defineRegistryClientConfig` sets `includeInEntry: true` on the
+upstream `@tanstack/react-query` plugin (and filters out its
+colliding `QueryKey` type-alias emission via a predicate, since this
+plugin emits the canonical `QueryKey<TOptions>`). The codec-aware
+factories live in `registry-validator.gen.ts`; the upstream
+factories live in `@tanstack/react-query.gen.ts`; both flow through
+the auto-barrel under the same op-id naming. So a consumer's React
+re-export looks like:
+
+```ts
+// my-api-client/src/react.ts — no `.gen.js` paths
+export {
+  getBlockMetadataOptions, // codec-aware (registry-validator.gen.ts)
+  getMessageOptions, // upstream (@tanstack/react-query.gen.ts)
+  // …
+} from './generated/index.js';
+```
+
+The split-by-codec-status is an internal codegen concern; the
+canonical entry hides it.
 
 ## Codegen drift
 

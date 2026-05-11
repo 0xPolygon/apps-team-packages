@@ -13,10 +13,24 @@
 
 import { describe, it } from 'vitest';
 
+// Test-internal raw SDK access — used as the type-level "ground truth"
+// for the non-error-widening wrappers (`getCodecObject`, `lookupBlock`)
+// where the wrapper must return *exactly* what the raw SDK function
+// returns. Wrappers that widen errors (`createOrFetchResource`,
+// `createOrder`, `getErrorsOnly`) deliberately diverge and assert
+// against `WrapErrors<...>` shapes instead, so they don't pull SDK
+// aliases. See `_test-internals.ts` for why this access is segregated
+// from the consumer-facing public surface.
 import type {
-  getCodecObjectOptions,
-  getCodecObjectQueryKey
-} from './__generated__/@tanstack/react-query.gen.ts';
+  _TestInternal_getCodecObjectSdk,
+  _TestInternal_lookupBlockSdk
+} from './_test-internals.ts';
+import type * as schemas from './fixtures/schemas.ts';
+import type { z } from './fixtures/zod.ts';
+// Consumer-facing surface — same path a real consumer would import
+// from (`@my-org/api-client`). Catches barrel regressions: if the
+// plugin emits a symbol but forgets to publish it, this import
+// breaks at compile time.
 import type {
   createOrFetchResource,
   createOrder,
@@ -29,6 +43,8 @@ import type {
   createOrderOptions,
   getCodecObject,
   GetCodecObjectResponse,
+  getCodecObjectOptions,
+  getCodecObjectQueryKey,
   GetCodecObjectResponses,
   GetDateFieldResponse,
   getErrorsOnly,
@@ -45,19 +61,7 @@ import type {
   TransportError,
   UnknownError,
   UpdateOrderInput
-} from './__generated__/registry-validator.gen.ts';
-// Raw SDK functions used as the type-level "ground truth" for the
-// non-error-widening wrappers (`getCodecObject`, `lookupBlock`) — we
-// want their return types to match the SDK's exactly. Wrappers that
-// widen errors (`createOrFetchResource`, `createOrder`,
-// `getErrorsOnly`) deliberately diverge and assert against
-// `WrapErrors<...>` shapes instead, so they don't pull SDK aliases.
-import type {
-  getCodecObject as getCodecObjectSdk,
-  lookupBlock as lookupBlockSdk
-} from './__generated__/sdk.gen.ts';
-import type * as schemas from './fixtures/schemas.ts';
-import type { z } from './fixtures/zod.ts';
+} from './public-client.ts';
 
 type Equal<X, Y> =
   (<T>() => T extends X ? 1 : 2) extends <T>() => T extends Y ? 1 : 2 ? true : false;
@@ -229,13 +233,16 @@ type Assertions = [
 
   // Pass-through (no input, no errors).
   Expect<
-    Equal<Awaited<ReturnType<typeof getCodecObject>>, Awaited<ReturnType<typeof getCodecObjectSdk>>>
+    Equal<
+      Awaited<ReturnType<typeof getCodecObject>>,
+      Awaited<ReturnType<typeof _TestInternal_getCodecObjectSdk>>
+    >
   >,
   // Same wrapper with throwOnError: true narrowing.
   Expect<
     Equal<
       Awaited<ReturnType<typeof getCodecObject<true>>>,
-      Awaited<ReturnType<typeof getCodecObjectSdk<true>>>
+      Awaited<ReturnType<typeof _TestInternal_getCodecObjectSdk<true>>>
     >
   >,
 
@@ -243,7 +250,7 @@ type Assertions = [
   Expect<
     Equal<
       Awaited<ReturnType<typeof lookupBlock<true>>>,
-      Awaited<ReturnType<typeof lookupBlockSdk<true>>>
+      Awaited<ReturnType<typeof _TestInternal_lookupBlockSdk<true>>>
     >
   >,
 

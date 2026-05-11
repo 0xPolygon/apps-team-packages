@@ -11,30 +11,32 @@ import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
+// Imports through the consumer-facing public surface (public-client.ts)
+// only — never deep into `__generated__/<file>.gen.ts`. Mirrors how a
+// real consumer wires the codegen into a published package; if a
+// plugin change forgets to re-export a helper, this test file (and any
+// consumer) breaks at compile time. Reaching into the deep path would
+// mask that.
+//
+// Every `createOrFetchResource` / `getCodecObject` / `getDateField` /
+// `getErrorsOnly` / `getScalarString` call below resolves to the
+// codec-aware wrapper from `registry-validator.gen.ts` (delegating to
+// `@hey-api/sdk`'s raw emission for HTTP wiring and the upstream
+// transformer for codec decoding). Behaviour is identical to the raw
+// SDK function on the success path and on declared-error responses;
+// only the error-discriminator branch — `TransportError`,
+// `UnknownError` for malformed wire bodies — is a wrapper-only
+// addition, and the tests below that target those branches assert on
+// the wrapper-emitted classes directly.
 import {
+  client,
   createOrFetchResource,
+  createOrder,
+  createOrderOptions,
   getCodecObject,
   getDateField,
   getErrorsOnly,
-  getScalarString
-} from './__generated__/sdk.gen.ts';
-// Imports through the consumer-facing public surface (public-client.ts)
-// rather than reaching into `__generated__/<file>.gen.ts` directly.
-// Mirrors how a real consumer wires the codegen into a published
-// package — if a plugin change forgets to re-export a helper, this
-// test file (and any consumer) breaks at compile time. Reaching into
-// the deep path would mask that.
-//
-// A handful of tests still pull from the raw `sdk.gen.ts` (the SDK
-// plugin's emission, NOT re-exported from the public barrel because
-// `includeInEntry: false` keeps non-codec functions out of the public
-// API). Those tests verify parity between the wrapper and the raw
-// SDK; they're the one legitimate reason to bypass the barrel.
-import {
-  client,
-  createOrder,
-  createOrderOptions,
-  getErrorsOnly as getErrorsOnlyWrapper,
+  getScalarString,
   listRecentEvents,
   lookupBlock,
   lookupBlockOptions,
@@ -400,7 +402,7 @@ describe('errors-only operation (codec field round-trip)', () => {
       )
     );
 
-    const { error } = await getErrorsOnlyWrapper();
+    const { error } = await getErrorsOnly();
     expect(error).toBeDefined();
     if (error && 'traceId' in error) {
       expect(typeof error.traceId).toBe('bigint');
