@@ -605,28 +605,150 @@ be required (asteasolutions defaults to optional otherwise).
 Operations that declare error response schemas get an
 `${opId}ErrorTransformer` (mirrors the success-side `${opId}Transformer`
 shape — `parseAsync` against a single schema or `z.union(...)` for
-multi-status). The SDK wrapper calls it on both error paths so the
-runtime value matches the codec runtime types declared in `${Op}Error`:
+multi-status). The SDK wrapper calls it on both throwOnError paths so
+the runtime value matches the codec runtime types declared in
+`${Op}Error`. Two boundaries the wrapper crosses:
 
-- **`throwOnError: false` path** — after the SDK call returns,
-  `result.error` is decoded in place. If `parseAsync` throws (response
-  body doesn't match any registered error schema), the wire-shape
-  value is left in place rather than propagating a `ZodError` to a
-  caller that asked for non-throwing behaviour. The type/runtime gap
-  re-opens *only* on malformed responses; the well-formed case
-  delivers what the type promises.
-- **`throwOnError: true` path** — the SDK function throws the
-  wire-shape body; the wrapper catches, runs `parseAsync`, and
-  re-throws the decoded shape. If `parseAsync` rejects (network-level
-  error or unexpected body), the original error re-throws raw so
-  upstream stack traces aren't replaced with a parse failure.
+1. **Did the request reach the API at all?** No → `TransportError`.
+   Yes → next.
+2. **Does the response body match a registered error schema?** Yes →
+   typed `${Op}Error`. No → `UnknownError`.
 
-Why a wrapper at all: hey-api's fetch client only invokes the
-`responseTransformer` on 2xx bodies. Error responses bypass it, so the
-plugin has to take the runtime decode into its own hands — otherwise
-the `${Op}Error` types would claim codec runtime shapes (`bigint`,
-`Date`) while the consumer received wire-shape values. The wrapper
-closes that gap.
+Both `TransportError` and `UnknownError` are emitted as classes
+alongside the SDK wrappers — see [The wrapper-emitted error
+classes](#the-wrapper-emitted-error-classes) below.
+
+#### `throwOnError: false`
+
+```ts
+import { isTransportError, isUnknownError } from './generated/registry-validator.gen.js';
+
+const { data, error } = await getX();
+if (isTransportError(error)) {
+  // Request never produced an HTTP response. error.cause is the
+  // native fetch error (TypeError / AbortError / Node SystemError
+  // carrying ECONNRESET / ETIMEDOUT / etc.).
+  log.error('network', error.cause);
+} else if (isUnknownError(error)) {
+  // The server replied, but the body didn't match any registered
+  // error schema. error.cause is the ZodError carrying parse
+  // issues; error.body is the original wire body (one hop, same
+  // depth as transport's .cause).
+  log.error('schema mismatch', { issues: error.cause.issues, body: error.body });
+} else if (error) {
+  // Typed ${Op}Error — error.code, error.traceId etc. all type-checked.
+  if (error.code === 'not_found') ...
+}
+```
+
+`result.error`'s static type widens to
+`${Op}Error | TransportError | UnknownError | undefined`, so the
+three branches above are exhaustive — TS errors if a consumer reads
+`error.<typed-field>` without narrowing first. The widening is
+delivered by an emitted file-scope `WrapErrors<TData, TError,
+ThrowOnError>` type alias that wraps each per-op return; the two
+`is*Error` helpers are emitted as type predicates
+(`value is TransportError`), so each `if` block narrows `error`
+correctly without further casts.
+
+#### `throwOnError: true`
+
+The wrapper throws one of the same three shapes. Consumer's `catch`
+narrows the same way:
+
+```ts
+try { await getX({ throwOnError: true }); }
+catch (err) {
+  if (isTransportError(err)) { /* … */ }
+  else if (isUnknownError(err)) { /* … */ }
+  // else: typed ${Op}Error
+}
+```
+
+A union helper `isWrapperError(value): value is TransportError |
+UnknownError` is also emitted, for "log any wrapper-emitted error
+generically" call sites that don't care which category — saves
+writing `isTransportError(x) || isUnknownError(x)`.
+
+#### Why a wrapper at all
+
+`@hey-api/client-fetch` only invokes the `responseTransformer` on
+2xx bodies — error responses bypass it. Without the wrapper, the
+`${Op}Error` types would claim codec runtime shapes (`bigint`,
+`Date`) while the consumer received wire-shape values. The
+TransportError / UnknownError split is what keeps `${Op}Error` narrow
+and honest: when `result.error` is the typed shape, it really is
+the codec runtime shape; non-conforming responses end up in their
+own typed slot.
+
+### The wrapper-emitted error classes
+
+```ts
+/** @internal — codegen-emitted; consumers narrow via isTransportError. */
+class TransportError extends Error {
+  readonly cause: Error;
+  // super message: 'Request failed before producing an HTTP response'
+  // Carries a symbol-keyed marker:
+  //   this[Symbol.for('@polygonlabs/zod-to-openapi-heyapi/is-transport-error')] = true
+}
+
+/** @internal — codegen-emitted; consumers narrow via isUnknownError. */
+class UnknownError extends Error {
+  readonly cause: ZodError;        // parseAsync's issues
+  readonly body: unknown;          // original wire body (one hop, no walking)
+  // super message: 'API response did not match the registered schema'
+  // Carries a symbol-keyed marker:
+  //   this[Symbol.for('@polygonlabs/zod-to-openapi-heyapi/is-unknown-error')] = true
+}
+
+// Type-predicate guards — the only consumer-facing narrowing API.
+declare const isTransportError: (value: unknown) => value is TransportError;
+declare const isUnknownError:   (value: unknown) => value is UnknownError;
+declare const isWrapperError:   (value: unknown) => value is TransportError | UnknownError;
+```
+
+Both extend `Error` so they integrate with `try/catch`, structured
+logging (Sentry / pino walk `.cause`), and any tooling that
+introspects error chains. Both are tagged `@internal` — the wrapper
+constructs them; consumer-thrown instances would erode the
+discriminator's meaning.
+
+The two classes split by **whether the request reached the API**.
+That boundary is categorically different from "did the response
+match our schema":
+
+- **TransportError** is for `ECONNRESET` / `ENOTFOUND` /
+  `ETIMEDOUT` / abort / DNS / TLS handshake failures — the request
+  never got an HTTP response back. Retry policies, alerting, and
+  service-level monitoring usually want this category isolated.
+- **UnknownError** is for "got bytes, can't decode" — schema
+  drift, foreign errors from a CDN or gateway, or simply a
+  registered schema that's out of date. The handling here is
+  typically "log the body, file a bug, return a generic 'something
+  went wrong' to the user."
+
+Wrapping `TransportError` (rather than letting native `TypeError` /
+`AbortError` bubble through unchanged) gives consumers a uniform
+narrowing API. The marker is a `Symbol.for(...)` value, not a
+string `_tag` field, so it survives cross-realm boundaries
+(workers, iframes, multiple bundle copies) where `instanceof` loses
+identity — `Symbol.for` returns the same symbol globally regardless
+of which copy of the module is loaded. Two separately-generated
+clients in the same process produce mutually-narrowable
+`TransportError` instances by design; the marker key is intentionally
+shared across all consumers of the plugin.
+
+#### Detecting transport errors
+
+The wrapper discriminates transport rejections from HTTP error bodies
+via `err instanceof Error`. Fetch's transport errors (`TypeError`,
+`AbortError`, Node `SystemError`) all extend the global `Error`
+constructor in the same realm as the wrapper's call site; hey-api's
+wire-shape error bodies are plain object literals, never Error
+instances. (An earlier `'stack' in err` duck-type heuristic was
+rejected: debug-mode servers — Express / Koa / FastAPI — include
+stack traces in error JSON, which would mis-classify a real HTTP
+error body as TransportError and skip `parseAsync` entirely.)
 
 Pass-through ops — those with no input schemas AND no error schemas —
 stay re-binds (`export const ${opId} = ${opId}2`) so the auto-barrel

@@ -2,7 +2,7 @@
 
 import { type DefaultError, queryOptions } from '@tanstack/react-query';
 import { ArrayOfCodecs, ArrayOfScalars, ArrayWithLength, BadRequestError, BlockNumberPathParams, BrandedField, CodecObject, Composed, ConstrainedCodec, CreateOrderRequest, DateField, DefaultField, DiscriminatedUnion, EnumField, IntersectionField, LiteralField, MapField, Nested, NotFoundError, NullableField, NumberWithRange, OptionalField, OptionalNullableField, OrderIdPathParams, PaginatedComposed, ReadonlyArrayField, RecentEventsQuery, RecordField, RefinedField, ResourceCreated, ResourceFetched, ScalarBigInt, ScalarBoolean, ScalarNumber, ScalarString, ServerError, SetField, StringWithFormat, StringWithMinMax, SubmitForReviewRequest, TupleField, UnionField, UnionOfLiterals, UpdateOrderRequest } from '#test-fixtures/schemas';
-import { z } from 'zod';
+import { z, type ZodError } from 'zod';
 
 import { client } from './client.gen.ts';
 import { createOrder as createOrder2, createOrFetchResource as createOrFetchResource2, getArrayOfCodecs as getArrayOfCodecs2, getArrayOfScalars as getArrayOfScalars2, getArrayWithLength as getArrayWithLength2, getBrandedField as getBrandedField2, getCodecObject as getCodecObject2, getComposed as getComposed2, getConstrainedCodec as getConstrainedCodec2, getDateField as getDateField2, getDefaultField as getDefaultField2, getDiscriminatedUnion as getDiscriminatedUnion2, getEnumField as getEnumField2, getErrorsOnly as getErrorsOnly2, getIntersectionField as getIntersectionField2, getItemWithRegisteredParam as getItemWithRegisteredParam2, getLiteralField as getLiteralField2, getMapField as getMapField2, getNested as getNested2, getNullableField as getNullableField2, getNumberWithRange as getNumberWithRange2, getOptionalField as getOptionalField2, getOptionalNullableField as getOptionalNullableField2, getPaginatedComposed as getPaginatedComposed2, getReadonlyArrayField as getReadonlyArrayField2, getRecordField as getRecordField2, getRefinedField as getRefinedField2, getScalarBigInt as getScalarBigInt2, getScalarBoolean as getScalarBoolean2, getScalarNumber as getScalarNumber2, getScalarString as getScalarString2, getSetField as getSetField2, getStringWithFormat as getStringWithFormat2, getStringWithMinMax as getStringWithMinMax2, getTupleField as getTupleField2, getUnionField as getUnionField2, getUnionOfLiterals as getUnionOfLiterals2, listRecentEvents as listRecentEvents2, lookupBlock as lookupBlock2, type Options, submitForReview as submitForReview2, updateOrder as updateOrder2 } from './sdk.gen.ts';
@@ -361,31 +361,98 @@ export const createOrFetchResourceErrorTransformer = async (data: unknown): Prom
     ServerError
 ]).parseAsync(data);
 
-export const createOrFetchResource = async <ThrowOnError extends boolean = false>(options?: Options<CreateOrFetchResourceData, ThrowOnError>) => {
+/**
+ * @internal — emitted by `@polygonlabs/zod-to-openapi-heyapi`. Do not
+ * instantiate from consumer code; the wrapper constructs these in
+ * response to fetch transport rejections (DNS / abort / `ECONNRESET`).
+ * Narrow via the emitted `isTransportError` type-predicate guard.
+ */
+export class TransportError extends Error {
+    readonly cause: Error;
+    constructor(cause: Error) {
+        super('Request failed before producing an HTTP response', { cause });
+        (this as Record<symbol, unknown>)[Symbol.for("@polygonlabs/zod-to-openapi-heyapi/is-transport-error")] = true;
+        this.cause = cause;
+        this.name = 'TransportError';
+    }
+}
+
+/**
+ * @internal — emitted by `@polygonlabs/zod-to-openapi-heyapi`. Do not
+ * instantiate from consumer code; the wrapper constructs these when
+ * `parseAsync` rejects an HTTP error body that did not match any
+ * registered error schema. `cause` carries the `ZodError` issues;
+ * `body` is the original wire body for debugging schema drift.
+ * Narrow via the emitted `isUnknownError` type-predicate guard.
+ */
+export class UnknownError extends Error {
+    readonly cause: ZodError;
+    readonly body: unknown;
+    constructor(cause: ZodError, body: unknown) {
+        super('API response did not match the registered schema', { cause });
+        (this as Record<symbol, unknown>)[Symbol.for("@polygonlabs/zod-to-openapi-heyapi/is-unknown-error")] = true;
+        this.cause = cause;
+        this.name = 'UnknownError';
+        this.body = body;
+    }
+}
+
+export const isTransportError = (value: unknown): value is TransportError => typeof value === "object" && value !== null && (value as Record<symbol, unknown>)[Symbol.for("@polygonlabs/zod-to-openapi-heyapi/is-transport-error")] === true;
+
+export const isUnknownError = (value: unknown): value is UnknownError => typeof value === "object" && value !== null && (value as Record<symbol, unknown>)[Symbol.for("@polygonlabs/zod-to-openapi-heyapi/is-unknown-error")] === true;
+
+export const isWrapperError = (value: unknown): value is TransportError | UnknownError => typeof value === "object" && value !== null && ((value as Record<symbol, unknown>)[Symbol.for("@polygonlabs/zod-to-openapi-heyapi/is-transport-error")] === true || (value as Record<symbol, unknown>)[Symbol.for("@polygonlabs/zod-to-openapi-heyapi/is-unknown-error")] === true);
+
+export type WrapErrors<TData, TError, ThrowOnError extends boolean> = Promise<ThrowOnError extends true ? {
+    data: TData extends Record<string, unknown> ? TData[keyof TData] : TData;
+    request: Request;
+    response: Response;
+} : ({
+    data: TData extends Record<string, unknown> ? TData[keyof TData] : TData;
+    error: undefined;
+} | {
+    data: undefined;
+    error: (TError extends Record<string, unknown> ? TError[keyof TError] : TError) | TransportError | UnknownError;
+}) & {
+    request: Request;
+    response: Response;
+}>;
+
+export const createOrFetchResource = async <ThrowOnError extends boolean = false>(options?: Options<CreateOrFetchResourceData, ThrowOnError>): WrapErrors<CreateOrFetchResourceResponses, CreateOrFetchResourceErrors, ThrowOnError> => {
     let result;
     try {
         result = await createOrFetchResource2(options);
     }
     catch (err) {
+        if (err instanceof Error) {
+            throw new TransportError(err as Error);
+        }
         let typedErr;
         try {
             typedErr = await createOrFetchResourceErrorTransformer(err);
         }
-        catch {
-            throw err;
+        catch (validationError) {
+            throw new UnknownError(validationError as ZodError, err);
         }
         throw typedErr;
     }
     const errorBearing = result as {
         error?: unknown;
     };
-    if (errorBearing.error !== undefined) {
-        try {
-            errorBearing.error = await createOrFetchResourceErrorTransformer(errorBearing.error);
+    if (errorBearing.error != null) {
+        if (errorBearing.error instanceof Error) {
+            errorBearing.error = new TransportError(errorBearing.error as Error);
         }
-        catch { }
+        else {
+            try {
+                errorBearing.error = await createOrFetchResourceErrorTransformer(errorBearing.error);
+            }
+            catch (validationError) {
+                errorBearing.error = new UnknownError(validationError as ZodError, errorBearing.error);
+            }
+        }
     }
-    return result;
+    return result as unknown as Awaited<WrapErrors<CreateOrFetchResourceResponses, CreateOrFetchResourceErrors, ThrowOnError>>;
 };
 
 export type GetErrorsOnlyErrors = {
@@ -397,31 +464,41 @@ export type GetErrorsOnlyError = GetErrorsOnlyErrors[keyof GetErrorsOnlyErrors];
 
 export const getErrorsOnlyErrorTransformer = async (data: unknown): Promise<z.output<typeof BadRequestError> | z.output<typeof ServerError>> => await z.union([BadRequestError, ServerError]).parseAsync(data);
 
-export const getErrorsOnly = async <ThrowOnError extends boolean = false>(options?: Options<GetErrorsOnlyData, ThrowOnError>) => {
+export const getErrorsOnly = async <ThrowOnError extends boolean = false>(options?: Options<GetErrorsOnlyData, ThrowOnError>): WrapErrors<unknown, GetErrorsOnlyErrors, ThrowOnError> => {
     let result;
     try {
         result = await getErrorsOnly2(options);
     }
     catch (err) {
+        if (err instanceof Error) {
+            throw new TransportError(err as Error);
+        }
         let typedErr;
         try {
             typedErr = await getErrorsOnlyErrorTransformer(err);
         }
-        catch {
-            throw err;
+        catch (validationError) {
+            throw new UnknownError(validationError as ZodError, err);
         }
         throw typedErr;
     }
     const errorBearing = result as {
         error?: unknown;
     };
-    if (errorBearing.error !== undefined) {
-        try {
-            errorBearing.error = await getErrorsOnlyErrorTransformer(errorBearing.error);
+    if (errorBearing.error != null) {
+        if (errorBearing.error instanceof Error) {
+            errorBearing.error = new TransportError(errorBearing.error as Error);
         }
-        catch { }
+        else {
+            try {
+                errorBearing.error = await getErrorsOnlyErrorTransformer(errorBearing.error);
+            }
+            catch (validationError) {
+                errorBearing.error = new UnknownError(validationError as ZodError, errorBearing.error);
+            }
+        }
     }
-    return result;
+    return result as unknown as Awaited<WrapErrors<unknown, GetErrorsOnlyErrors, ThrowOnError>>;
 };
 
 export type GetItemWithRegisteredParamResponses = {
@@ -544,32 +621,42 @@ export type CreateOrderInput = Omit<CreateOrderData, 'body'> & {
 
 export const createOrderInputTransformer = async (input: Pick<CreateOrderInput, 'body'>) => ({ ...input.body !== undefined ? { body: await z.encode(CreateOrderRequest, input.body) } : {} });
 
-export const createOrder = async <ThrowOnError extends boolean = false>(options: Options<CreateOrderInput, ThrowOnError>) => {
+export const createOrder = async <ThrowOnError extends boolean = false>(options: Options<CreateOrderInput, ThrowOnError>): WrapErrors<CreateOrderResponses, CreateOrderErrors, ThrowOnError> => {
     const transformed = await createOrderInputTransformer(options);
     let result;
     try {
         result = await createOrder2({ ...options, ...transformed } as Options<CreateOrderData, ThrowOnError>);
     }
     catch (err) {
+        if (err instanceof Error) {
+            throw new TransportError(err as Error);
+        }
         let typedErr;
         try {
             typedErr = await createOrderErrorTransformer(err);
         }
-        catch {
-            throw err;
+        catch (validationError) {
+            throw new UnknownError(validationError as ZodError, err);
         }
         throw typedErr;
     }
     const errorBearing = result as {
         error?: unknown;
     };
-    if (errorBearing.error !== undefined) {
-        try {
-            errorBearing.error = await createOrderErrorTransformer(errorBearing.error);
+    if (errorBearing.error != null) {
+        if (errorBearing.error instanceof Error) {
+            errorBearing.error = new TransportError(errorBearing.error as Error);
         }
-        catch { }
+        else {
+            try {
+                errorBearing.error = await createOrderErrorTransformer(errorBearing.error);
+            }
+            catch (validationError) {
+                errorBearing.error = new UnknownError(validationError as ZodError, errorBearing.error);
+            }
+        }
     }
-    return result;
+    return result as unknown as Awaited<WrapErrors<CreateOrderResponses, CreateOrderErrors, ThrowOnError>>;
 };
 
 export const createOrderQueryKey = (options: Options<CreateOrderInput>) => createQueryKey('createOrder', { ...options, ...options?.body !== undefined ? { body: z.encode(CreateOrderRequest, options?.body) } : {} } as Options<CreateOrderData>);

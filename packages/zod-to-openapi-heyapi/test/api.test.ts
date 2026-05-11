@@ -17,6 +17,8 @@ import {
   createOrderOptions,
   createOrFetchResource as createOrFetchResourceWrapper,
   getErrorsOnly as getErrorsOnlyWrapper,
+  isTransportError,
+  isUnknownError,
   listRecentEvents,
   lookupBlock,
   lookupBlockOptions,
@@ -422,25 +424,27 @@ describe('error response codec decoding via the SDK wrapper', () => {
       caught = err;
     }
     expect(caught).toBeDefined();
-    if (
-      caught &&
-      typeof caught === 'object' &&
-      'traceId' in caught &&
-      typeof (caught as { traceId: unknown }).traceId === 'bigint'
-    ) {
-      expect((caught as { traceId: bigint }).traceId).toBe(42n);
+    // `'traceId' in caught` narrows `caught` to a record carrying
+    // `traceId: unknown` — enough for `expect(...).toBe(42n)` to
+    // run identity comparison without a value-level cast. The
+    // remaining `caught.traceId` is `unknown`; vitest's `toBe`
+    // accepts `unknown`, so no cast is needed at the test boundary.
+    if (caught && typeof caught === 'object' && 'traceId' in caught) {
+      expect(caught.traceId).toBe(42n);
+      expect(typeof caught.traceId).toBe('bigint');
     } else {
       throw new Error('expected typed ServerError with bigint traceId');
     }
   });
 
-  it('leaves error as wire-shape when parseAsync rejects (non-throwing path)', async () => {
+  it('wraps HTTP body that does not match the schema as UnknownError (throwOnError: false)', async () => {
     // Server returns a body that doesn't match any registered error
-    // schema (no `code` field). The wrapper's error transformer
-    // throws — but the throwOnError: false caller asked for no
-    // throws, so the wrapper swallows the parse error and leaves the
-    // raw value in `result.error`. The type lie returns *only* for
-    // malformed responses, not the typical case.
+    // schema (no `code` field). The wrapper produces an UnknownError
+    // with the ZodError as cause and the original wire body reachable
+    // via cause.cause. Type contract: `result.error` is widened to
+    // `${Op}Error | UnknownError | TransportError`, so the consumer
+    // narrows via the `isUnknownError` type-predicate without losing
+    // access to the typed-error case.
     server.use(
       http.post(`${BASE_URL}/fixtures/createOrFetch`, () =>
         HttpResponse.json({ unexpected: 'shape' }, { status: 500 })
@@ -448,14 +452,25 @@ describe('error response codec decoding via the SDK wrapper', () => {
     );
 
     const { error } = await createOrFetchResourceWrapper();
-    expect(error).toEqual({ unexpected: 'shape' });
+    expect(error).toBeDefined();
+    if (isUnknownError(error)) {
+      // ZodError carries `.issues` — confirms parseAsync was attempted.
+      expect(error.cause).toBeDefined();
+      expect(Array.isArray(error.cause.issues)).toBe(true);
+      // The original wire body sits on `.body` (not `.cause.cause`)
+      // so the depth at which the body is reachable is symmetric with
+      // `transportError.cause` — both one hop from the wrapper-error.
+      expect(error.body).toEqual({ unexpected: 'shape' });
+    } else {
+      throw new Error('expected UnknownError');
+    }
   });
 
-  it('re-throws raw error when parseAsync rejects (throwOnError: true path)', async () => {
-    // Same malformed-body scenario, but throwOnError: true. The wrapper
-    // tries to decode, fails, and re-throws the original wire-shape
-    // body — caller sees what the SDK function would have thrown
-    // without the wrapper, not a confusing ZodError.
+  it('throws UnknownError when HTTP body does not match the schema (throwOnError: true)', async () => {
+    // Same malformed-body scenario but throwOnError: true. The
+    // thrown value carries the same shape as the throwOnError: false
+    // result.error: type-predicate narrowing, ZodError on `.cause`,
+    // original wire body on `.body`.
     server.use(
       http.post(`${BASE_URL}/fixtures/createOrFetch`, () =>
         HttpResponse.json({ unexpected: 'shape' }, { status: 500 })
@@ -468,7 +483,43 @@ describe('error response codec decoding via the SDK wrapper', () => {
     } catch (err) {
       caught = err;
     }
-    expect(caught).toEqual({ unexpected: 'shape' });
+    expect(caught).toBeDefined();
+    if (isUnknownError(caught)) {
+      expect(caught.body).toEqual({ unexpected: 'shape' });
+    } else {
+      throw new Error('expected UnknownError');
+    }
+  });
+
+  it('wraps fetch-layer errors as TransportError without running parseAsync', async () => {
+    // Simulate a transport failure by aborting the request mid-flight.
+    // hey-api/client-fetch surfaces the AbortError as a thrown native
+    // Error; the wrapper discriminates via `err instanceof Error` and
+    // wraps as TransportError without attempting to validate against
+    // the schema. The original native error is reachable via `.cause`.
+    server.use(
+      http.post(`${BASE_URL}/fixtures/createOrFetch`, async () => {
+        // Hold the request indefinitely so the abort fires first.
+        await new Promise(() => {});
+        return HttpResponse.json({});
+      })
+    );
+
+    const ac = new AbortController();
+    queueMicrotask(() => ac.abort());
+
+    let caught: unknown;
+    try {
+      await createOrFetchResourceWrapper({ throwOnError: true, signal: ac.signal });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeDefined();
+    if (isTransportError(caught)) {
+      expect(caught.cause).toBeInstanceOf(Error);
+    } else {
+      throw new Error(`expected TransportError, got ${JSON.stringify(caught)}`);
+    }
   });
 
   it('decodes errors-only operation result.error', async () => {

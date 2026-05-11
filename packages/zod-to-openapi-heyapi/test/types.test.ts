@@ -20,6 +20,7 @@ import type {
 import type {
   createOrFetchResource,
   createOrder,
+  CreateOrderError,
   CreateOrderInput,
   CreateOrFetchResourceError,
   CreateOrFetchResourceErrors,
@@ -31,6 +32,7 @@ import type {
   GetCodecObjectResponses,
   GetDateFieldResponse,
   getErrorsOnly,
+  GetErrorsOnlyError,
   ListRecentEventsInput,
   listRecentEventsOptions,
   listRecentEventsQueryKey,
@@ -40,17 +42,18 @@ import type {
   lookupBlockQueryKey,
   SubmitForReviewInput,
   submitForReviewOptions,
+  TransportError,
+  UnknownError,
   UpdateOrderInput
 } from './__generated__/registry-validator.gen.ts';
-// Raw SDK functions used as the type-level "ground truth" — we want our
-// wrappers' return types to match these exactly, so the codec promises
-// the response transformer makes (success body) and the error
-// transformer makes (error body) reach the caller as-is.
+// Raw SDK functions used as the type-level "ground truth" for the
+// non-error-widening wrappers (`getCodecObject`, `lookupBlock`) — we
+// want their return types to match the SDK's exactly. Wrappers that
+// widen errors (`createOrFetchResource`, `createOrder`,
+// `getErrorsOnly`) deliberately diverge and assert against
+// `WrapErrors<...>` shapes instead, so they don't pull SDK aliases.
 import type {
-  createOrFetchResource as createOrFetchResourceSdk,
-  createOrder as createOrderSdk,
   getCodecObject as getCodecObjectSdk,
-  getErrorsOnly as getErrorsOnlySdk,
   lookupBlock as lookupBlockSdk
 } from './__generated__/sdk.gen.ts';
 import type * as schemas from './fixtures/schemas.ts';
@@ -244,30 +247,39 @@ type Assertions = [
     >
   >,
 
-  // Error-decoding wrapper. Preserving the SDK return type means
-  // `result.error.traceId` is `bigint` (Int64Codec runtime), not
-  // `string` (the wire shape). The runtime test in api.test.ts
-  // proves the runtime decode actually happens; this assertion
-  // proves the type contract the wrapper makes still aligns with
-  // what the SDK function declared.
+  // Error-decoding wrapper widens `result.error` to include the
+  // wrapper-emitted `TransportError` / `UnknownError` classes — the
+  // wrapper return type *deliberately differs* from the SDK return
+  // type. Preserves codec runtime shapes for typed errors
+  // (`result.error.traceId` is `bigint`, not the wire `string`) AND
+  // forces consumers to narrow before reaching typed-error fields.
+  // If this assertion ever loses the wrapper-error union, consumers
+  // re-introduce the silent `result.error.<typed-field>`-on-runtime-
+  // `UnknownError` bug. `<false>` pins the throwOnError-false branch
+  // of the conditional return type so we can read `.error` directly
+  // without union-distribution gymnastics.
   Expect<
     Equal<
-      Awaited<ReturnType<typeof createOrFetchResource>>,
-      Awaited<ReturnType<typeof createOrFetchResourceSdk>>
+      Awaited<ReturnType<typeof createOrFetchResource<false>>>['error'],
+      CreateOrFetchResourceError | TransportError | UnknownError | undefined
     >
   >,
 
   // Combined codec-input + error-decoding op.
   Expect<
     Equal<
-      Awaited<ReturnType<typeof createOrder<true>>>,
-      Awaited<ReturnType<typeof createOrderSdk<true>>>
+      Awaited<ReturnType<typeof createOrder<false>>>['error'],
+      CreateOrderError | TransportError | UnknownError | undefined
     >
   >,
 
-  // Errors-only op.
+  // Errors-only op (no 2xx schemas registered) — `WrapErrors<unknown,
+  // GetErrorsOnlyErrors, ThrowOnError>` still widens the error union.
   Expect<
-    Equal<Awaited<ReturnType<typeof getErrorsOnly>>, Awaited<ReturnType<typeof getErrorsOnlySdk>>>
+    Equal<
+      Awaited<ReturnType<typeof getErrorsOnly<false>>>['error'],
+      GetErrorsOnlyError | TransportError | UnknownError | undefined
+    >
   >
 ];
 

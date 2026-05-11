@@ -46,8 +46,15 @@
  */
 
 import type { $, IR, UserConfig } from '@hey-api/openapi-ts';
+import type { CallExpression, Expression } from 'typescript';
 
 import { getRefId } from '@asteasolutions/zod-to-openapi';
+// Used to hand-construct a TypePredicateNode for the wrapper-emitted
+// `isTransportError` / `isUnknownError` type guards (and the
+// computed-key element-access assignment in their classes) — the
+// openapi-ts DSL doesn't expose type predicates or computed property
+// access as first-class nodes, so we drop down to the raw TS factory.
+import { factory as tsFactory, SyntaxKind } from 'typescript';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -322,6 +329,35 @@ export async function registryPlugin({
         });
       };
 
+      // ZodError type import + the wrapper-emitted error classes
+      // (TransportError, UnknownError) are scaffolded lazily on first use
+      // by an SDK wrapper that needs them — any op with a declared
+      // error schema. The classes give consumers a tag-based discriminator
+      // so they don't have to `instanceof` at narrow sites:
+      //
+      //   if (error?._tag === '__zod_to_openapi_transport_error__') {
+      //     // request never completed — error.cause is the native fetch error
+      //     // (TypeError / AbortError / Node SystemError carrying ECONNRESET, etc.)
+      //   } else if (error?._tag === '__zod_to_openapi_unknown_error__') {
+      //     // got an HTTP response, didn't match our schema — error.cause
+      //     // is the ZodError; error.cause.cause is the original wire body
+      //   } else if (error) {
+      //     // typed `${Op}Error`
+      //   }
+      //
+      // Two distinct classes, not one with a discriminator field, because
+      // "request never reached the API" (transport) and "API responded
+      // but we couldn't decode" (unknown) are categorically different
+      // failure modes — the consumer's handling, retry logic, alerting
+      // surfaces are typically different. Pretending they're the same
+      // class with sub-types would invite mis-handling.
+      let wrapperErrorClassesEmitted = false;
+      const ensureWrapperErrorClasses = (): void => {
+        if (wrapperErrorClassesEmitted) return;
+        wrapperErrorClassesEmitted = true;
+        emitWrapperErrorClasses({ dsl, plugin });
+      };
+
       // Tanstack scaffolding (queryOptions value, DefaultError type, the
       // `QueryKey<TOptions>` alias, and the shared createQueryKey helper) is
       // emitted lazily on first use — operations with no 2xx response don't
@@ -460,6 +496,14 @@ export async function registryPlugin({
         // these wrappers are the only public SDK surface. Consumers see
         // one canonical name per op and can't accidentally import a
         // wire-shaped variant.
+        // Wrapper-emitted error classes (TransportError, UnknownError) are
+        // only needed by ops that have an error transformer — i.e. the
+        // wrapper actually decodes errors. Skip the file-level scaffolding
+        // for ops that don't.
+        if (errorTransformerSymbol) {
+          ensureWrapperErrorClasses();
+        }
+
         emitSdkWrapper({
           dsl,
           plugin,
@@ -1323,12 +1367,19 @@ function emitParseTransformer({
  *     against the registered error schema(s). `result.error` from the
  *     `throwOnError: false` path gets decoded in-place; the
  *     `throwOnError: true` path catches the thrown wire-shape body,
- *     decodes it, and re-throws the typed result. If `parseAsync` fails
- *     (response doesn't match any registered error schema — server bug
- *     or network-level error surfaced through the catch), the original
- *     wire-shape value passes through unchanged: better to leak a small
- *     type/runtime gap on malformed responses than to throw `ZodError`s
- *     into a caller that explicitly asked for non-throwing behaviour.
+ *     decodes it, and re-throws the typed result. If `parseAsync`
+ *     fails (response doesn't match any registered error schema —
+ *     server bug, stale schema, or network-level error surfaced
+ *     through the catch), the validation error throws on **both** paths,
+ *     regardless of the `throwOnError` flag. This is the same
+ *     contract the input transformer has always had: `z.encode`
+ *     failures throw out of the wrapper because the type system
+ *     promised the codec runtime shapes and a wire-shape leak in
+ *     `result.error` would re-open the exact type/runtime gap this
+ *     work was added to close. `${Op}Error` stays narrow
+ *     (`z.output<typeof Schema>`) so consumers reading
+ *     `result.error.traceId` always see the codec runtime value when
+ *     the field is set — never a `ZodError` or a wire-shape leak.
  *
  * Pre-condition: `includeInEntry: false` is set on `@hey-api/sdk` so the
  * SDK plugin's same-named emissions don't collide with these wrappers in
@@ -1686,17 +1737,63 @@ function emitSdkWrapper({
   }
 
   if (errorTransformerSymbol) {
-    // Steps 2 + 3 — error decoding via try/catch + result.error in-place
-    // decode. Using a typed-then-throw pattern with an explicit `let`
-    // because hand-rolling `try { throw await … } catch (typed) { … }`
-    // catches its own throw and gets messy. The outer try captures
-    // network errors that aren't HTTP error bodies — those re-throw raw.
-    //
+    const transportSymbol = plugin.querySymbol({
+      category: 'class',
+      resource: 'wrapper-error',
+      name: 'TransportError'
+    });
+    const unknownSymbol = plugin.querySymbol({
+      category: 'class',
+      resource: 'wrapper-error',
+      name: 'UnknownError'
+    });
+    if (!transportSymbol || !unknownSymbol) {
+      throw new Error(
+        `[zod-to-openapi-heyapi] wrapper-error classes missing for '${opId}' — ` +
+          `ensureWrapperErrorClasses() should have run by now. Plugin bug.`
+      );
+    }
+
     // `result` is declared with `let` outside the try so the body that
-    // follows the catch can read it (block-scoped `const result` inside
-    // the try would be unreachable). The inner `try` assigns it.
+    // follows the catch can read it (a block-scoped `const result`
+    // inside the try would be unreachable). The inner `try` assigns it.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     bodyStatements.push((dsl as any).let('result'));
+
+    // throwOnError: true path. The SDK function threw — could be:
+    //   (a) the wire-shape error body for an HTTP error response, or
+    //   (b) a native Error from fetch (TypeError / AbortError / Node
+    //       SystemError carrying ECONNRESET / ETIMEDOUT / etc.) when
+    //       the request never produced an HTTP response.
+    //
+    // Branch on `err instanceof Error`: case (b) wraps as
+    // TransportError and re-throws — never runs through parseAsync
+    // because there's no HTTP body to validate. Case (a) attempts
+    // parseAsync; on success throws the typed `${Op}Error` shape; on
+    // validation failure wraps the ZodError plus the wire body in an
+    // UnknownError.
+    //
+    // `instanceof Error` is reliable here: fetch's transport rejections
+    // are `TypeError` / `AbortError` / Node `SystemError`, all of which
+    // extend the global `Error` constructor in the realm where the
+    // wrapper runs (same realm as the fetch call, by definition of an
+    // SDK call). A wire-shape error body parsed by hey-api is a plain
+    // object — not an Error instance. The earlier `'stack' in err`
+    // duck-type was fragile against debug-mode servers (Express /
+    // Koa / FastAPI) that include stack traces in JSON error bodies.
+    //
+    // Result: every throw the wrapper produces is either a typed
+    // `${Op}Error` member, a TransportError, or an UnknownError.
+    // Consumers narrow via `isTransportError` / `isUnknownError`
+    // (or `isWrapperError` for "any wrapper-emitted").
+    const zodErrorTypeSymbol = plugin.querySymbol({
+      category: 'type',
+      tool: 'zod',
+      name: 'ZodError'
+    });
+    if (!zodErrorTypeSymbol) {
+      throw new Error(`[zod-to-openapi-heyapi] ZodError type symbol missing — plugin bug`);
+    }
     bodyStatements.push(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (dsl as any)
@@ -1704,6 +1801,30 @@ function emitSdkWrapper({
         .try((dsl('result') as any).assign(sdkCallExpr))
         .catchArg('err')
         .catch(
+          dsl
+            // err instanceof Error → wrap as TransportError and
+            // re-throw, no parseAsync (request never reached the API;
+            // nothing to validate).
+            .if(instanceofErrorExpr(tsFactory.createIdentifier('err')))
+            .do(
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              (dsl as any).throw(
+                dsl
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  .new(transportSymbol as any)
+                  .args(
+                    dsl.as(
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                      dsl('err') as any,
+                      dsl.type('Error')
+                    )
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  ) as any,
+                false
+              )
+            ),
+          // err is a plain HTTP-body object → try parseAsync, wrap on
+          // validation failure.
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           (dsl as any).let('typedErr'),
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1717,26 +1838,46 @@ function emitSdkWrapper({
                   .await()
               )
             )
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            .catch((dsl as any).throw('err', false)),
+            .catchArg('validationError')
+            .catch(
+              // throw new UnknownError(validationError as ZodError, err)
+              // — the ZodError carries the parseAsync issues and the
+              // original wire body sits alongside as a separate field.
+              // Two-arg constructor (rather than mutating the ZodError
+              // in place to graft on `.cause`) keeps the body access
+              // symmetric: `transportError.cause` and
+              // `unknownError.body` are both one hop away.
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              (dsl as any).throw(
+                dsl
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  .new(unknownSymbol as any)
+                  .args(
+                    dsl.as(
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                      dsl('validationError') as any,
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                      dsl.type(zodErrorTypeSymbol as any)
+                    ),
+                    dsl.id('err')
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  ) as any,
+                false
+              )
+            ),
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           (dsl as any).throw('typedErr', false)
         )
     );
 
-    // throwOnError: false path — `result` is set, decode error in place.
-    // The SDK function's static return type is a union of
-    // `{ data, request, response }` (throwOnError: true) and
-    // `{ data, error, … }` (throwOnError: false). TS doesn't know that
-    // the throwOnError: true variant can't reach this code (it would
-    // have thrown above), and the union doesn't have `error` on every
-    // member, so direct access fails the structural check. Cast through
-    // a narrow `{ error?: unknown }` view to do the in-place mutation —
-    // the cast is sound because at runtime the throwOnError: true
-    // variant simply doesn't have an `error` field, so the access is
-    // a no-op (undefined). Caller's view of `result` (the wrapper's
-    // return value) keeps the SDK's discriminated-union typing
-    // unchanged.
+    // throwOnError: false path — `result` is set; `result.error` may
+    // hold a wire body (HTTP error) or a native Error (transport).
+    // Cast through `{ error?: unknown }` to satisfy TS's
+    // discriminated-union access, then mutate in place: transport →
+    // TransportError, plain object → typed shape (parseAsync) or
+    // UnknownError (parseAsync rejects). The wrapper's static return
+    // type widens `error` to `${Op}Error | TransportError |
+    // UnknownError` so consumers see the three cases.
     bodyStatements.push(
       dsl.const('errorBearing').assign(
         dsl.as(
@@ -1753,30 +1894,173 @@ function emitSdkWrapper({
       )
     );
     bodyStatements.push(
-      dsl.if(dsl('errorBearing').attr('error').neq(dsl.id('undefined'))).do(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (dsl as any)
-          .try(
-            dsl('errorBearing')
-              .attr('error')
-              .assign(
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                dsl(errorTransformerSymbol as any)
-                  .call(dsl('errorBearing').attr('error'))
-                  .await()
-              )
+      // `errorBearing.error != null` (loose, covers both `undefined`
+      // and `null`). The hey-api fetch client effectively never sets
+      // `error: null`, but the loose check is defensive — `null`
+      // falling through to `parseAsync(null)` would mis-classify as
+      // an UnknownError despite there being no real failure.
+      dsl
+        .if(
+          tsFactory.createBinaryExpression(
+            tsFactory.createPropertyAccessExpression(
+              tsFactory.createIdentifier('errorBearing'),
+              'error'
+            ),
+            tsFactory.createToken(SyntaxKind.ExclamationEqualsToken),
+            tsFactory.createNull()
           )
-          // Empty catch — leave wire shape on parse failure. See the
-          // function-level comment for why we don't propagate the
-          // ZodError on the throwOnError: false path.
-          .catch()
-      )
+        )
+        .do(
+          dsl
+            .if(
+              instanceofErrorExpr(
+                tsFactory.createPropertyAccessExpression(
+                  tsFactory.createIdentifier('errorBearing'),
+                  'error'
+                )
+              )
+            )
+            .do(
+              dsl('errorBearing')
+                .attr('error')
+                .assign(
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  dsl.new(transportSymbol as any).args(
+                    dsl.as(
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                      dsl('errorBearing').attr('error') as any,
+                      dsl.type('Error')
+                    )
+                  )
+                )
+            )
+            .otherwise(
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              (dsl as any)
+                .try(
+                  dsl('errorBearing')
+                    .attr('error')
+                    .assign(
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                      dsl(errorTransformerSymbol as any)
+                        .call(dsl('errorBearing').attr('error'))
+                        .await()
+                    )
+                )
+                .catchArg('validationError')
+                .catch(
+                  // errorBearing.error = new UnknownError(
+                  //   validationError as ZodError,
+                  //   errorBearing.error
+                  // );
+                  // The right-hand-side reads `errorBearing.error`
+                  // (the wire body) BEFORE the assignment overwrites
+                  // it, so the body is preserved on the UnknownError
+                  // even though we're mutating in place. Two-arg
+                  // constructor avoids the in-place ZodError mutation
+                  // that the earlier `Object.assign(...)` patch used.
+                  dsl('errorBearing')
+                    .attr('error')
+                    .assign(
+                      dsl
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                        .new(unknownSymbol as any)
+                        .args(
+                          dsl.as(
+                            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                            dsl('validationError') as any,
+                            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                            dsl.type(zodErrorTypeSymbol as any)
+                          ),
+                          dsl('errorBearing').attr('error')
+                        )
+                    )
+                )
+            )
+        )
     );
 
-    bodyStatements.push(dsl.return('result'));
+    // The bodyStatements `return result` is pushed below, after we've
+    // constructed `wrapperReturnTypeExpr` — the cast at the return
+    // point bridges the SDK's `RequestResult<...>` type to our
+    // narrower `WrapErrors<...>`. The two are structurally equivalent
+    // for the runtime values we produce, but TS doesn't unify two
+    // conditional-type aliases automatically. The cast is internal to
+    // the generated wrapper; consumers see only the widened return
+    // type and don't need any cast themselves.
   } else {
     // No error transformer — return the SDK call directly.
     bodyStatements.push(sdkCallExpr.return());
+  }
+
+  // Explicit return type when the wrapper widens errors at runtime
+  // (i.e. `errorTransformerSymbol` is set). Without this, the wrapper's
+  // inferred return matches the SDK's return type EXACTLY and the
+  // runtime mutation to `TransportError` / `UnknownError` is invisible
+  // to TS — a consumer reading `result.error.code` after a malformed
+  // response gets `undefined` at runtime with no compile-time hint to
+  // narrow first. The annotation forces the three-branch narrow.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let wrapperReturnTypeExpr: any | undefined;
+  if (errorTransformerSymbol) {
+    const wrapErrorsSymbol = plugin.querySymbol({
+      category: 'type',
+      resource: 'wrapper-error',
+      name: 'WrapErrors'
+    });
+    const responsesSymbol = plugin.querySymbol({
+      category: 'type',
+      resource: 'operation',
+      resourceId: opId,
+      role: 'responses'
+    });
+    const errorsSymbol = plugin.querySymbol({
+      category: 'type',
+      resource: 'operation',
+      resourceId: opId,
+      role: 'errors'
+    });
+    if (!wrapErrorsSymbol || !errorsSymbol) {
+      throw new Error(
+        `[zod-to-openapi-heyapi] missing required symbols for return-type ` +
+          `widening on '${opId}': WrapErrors=${!!wrapErrorsSymbol}, ` +
+          `Errors=${!!errorsSymbol}. Plugin bug.`
+      );
+    }
+    // WrapErrors<${Op}Responses | unknown, ${Op}Errors, ThrowOnError>.
+    // For errors-only ops (no 2xx schemas registered), `${Op}Responses`
+    // doesn't exist; substitute `unknown` so RequestResult's flattening
+    // still works (`unknown extends Record<string, unknown> ? … : unknown`
+    // → `unknown`).
+    const tDataExpr = responsesSymbol
+      ? // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        dsl.type(responsesSymbol as any)
+      : dsl.type('unknown');
+    wrapperReturnTypeExpr = dsl
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .type(wrapErrorsSymbol as any)
+      .generic(tDataExpr)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .generic(dsl.type(errorsSymbol as any))
+      .generic('ThrowOnError');
+
+    // `return result as unknown as Awaited<WrapErrors<...>>` — the
+    // cast bridges the SDK's `RequestResult<...>` type to our
+    // narrower `WrapErrors<...>` annotation. Both shapes are
+    // structurally equivalent for the runtime values we produce, but
+    // TS doesn't unify two distinct conditional-type aliases by
+    // structure alone (TS2352 "neither type sufficiently overlaps").
+    // The intermediate `as unknown` satisfies that overlap check.
+    // The cast is internal to the generated wrapper; consumers see
+    // only the widened return type — they don't write any cast.
+    const awaitedReturnType = dsl
+      .type('Awaited')
+
+      .generic(wrapperReturnTypeExpr);
+    bodyStatements.push(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (dsl as any).return(dsl.as(dsl.as(dsl('result'), dsl.type('unknown')), awaitedReturnType))
+    );
   }
 
   plugin.node(
@@ -1785,16 +2069,770 @@ function emitSdkWrapper({
       .const(wrapperSymbol as any)
       .export()
       .assign(
-        dsl
-          .func()
-          .async()
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ((): any => {
+          let f = dsl
+            .func()
+            .async()
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            .generic('ThrowOnError', (g: any) => g.extends('boolean').default(false))
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            .param('options', (p: any) => p.required(optionsRequired).type(optionsTypeExpr));
+          if (wrapperReturnTypeExpr) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            f = (f as any).returns(wrapperReturnTypeExpr);
+          }
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          .generic('ThrowOnError', (g: any) => g.extends('boolean').default(false))
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          .param('options', (p: any) => p.required(optionsRequired).type(optionsTypeExpr))
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          .do(...(bodyStatements as any[]))
+          return (f as any).do(...(bodyStatements as any[]));
+        })()
       )
+  );
+}
+
+// ── Wrapper-emitted error classes ────────────────────────────────────────────
+
+// Discriminator marker keys. `Symbol.for(...)` so the same symbol is
+// returned from the global registry regardless of which module copy
+// of the generated client is loaded — unlike `instanceof`, which
+// breaks across realm / iframe / worker / multi-bundle boundaries.
+// Mirrors the `@polygonlabs/verror` pattern (WERROR_SYMBOL,
+// MULTIERROR_SYMBOL).
+const TRANSPORT_ERROR_SYMBOL_KEY = '@polygonlabs/zod-to-openapi-heyapi/is-transport-error';
+const UNKNOWN_ERROR_SYMBOL_KEY = '@polygonlabs/zod-to-openapi-heyapi/is-unknown-error';
+
+/**
+ * Emit `TransportError` and `UnknownError` classes plus matching
+ * `isTransportError` / `isUnknownError` helpers in
+ * `registry-validator.gen.ts`. Also registers the type-only `ZodError`
+ * import from `'zod'` that `UnknownError`'s cause field references.
+ *
+ * The two classes split the world by **whether the request reached the
+ * API at all**:
+ *
+ *   - **TransportError** — request never produced an HTTP response.
+ *     Underlying `cause` is whatever `fetch` threw: a `TypeError`
+ *     ("Failed to fetch", DNS failure), an `AbortError`, or a Node
+ *     `SystemError` carrying `.code === 'ECONNRESET'` /
+ *     `'ETIMEDOUT'` / `'ENOTFOUND'`. The body of an HTTP response was
+ *     never seen, so there is nothing to validate against the
+ *     registered schema — the wrapper deliberately does NOT run
+ *     `parseAsync` on these. Wrapping (rather than passing the raw
+ *     native error through) gives consumers a uniform tag-based
+ *     discriminator so they don't have to `instanceof` at every call
+ *     site.
+ *
+ *   - **UnknownError** — request produced an HTTP response, but the
+ *     body did not match any registered error schema. Could be schema
+ *     drift (server bug, stale spec), a foreign error from a CDN /
+ *     gateway / proxy that doesn't speak our schema, or any other
+ *     "got bytes, can't decode" case the runtime can't tell apart.
+ *     The underlying `cause` is the `ZodError` from `parseAsync`; that
+ *     `ZodError`'s own `cause` carries the original wire body so a
+ *     consumer that wants to debug can walk the chain.
+ *
+ * Together they let the consumer narrow `result.error` (or the thrown
+ * value, on `throwOnError: true`) into one of three cases via a
+ * tag-equality check — typed `${Op}Error`, `TransportError`, or
+ * `UnknownError` — without ever needing `instanceof` at the call site.
+ */
+function emitWrapperErrorClasses({ dsl, plugin }: { dsl: Dsl; plugin: PluginLike }): void {
+  // ZodError type import — used in UnknownError's `cause` field.
+  plugin.symbol('ZodError', {
+    external: 'zod',
+    importKind: 'named',
+    kind: 'type',
+    meta: { category: 'type', tool: 'zod', name: 'ZodError' }
+  });
+
+  const transportSymbol = plugin.symbol('TransportError', {
+    meta: { category: 'class', resource: 'wrapper-error', name: 'TransportError' }
+  });
+  const unknownSymbol = plugin.symbol('UnknownError', {
+    meta: { category: 'class', resource: 'wrapper-error', name: 'UnknownError' }
+  });
+  const zodErrorSymbol = plugin.querySymbol({
+    category: 'type',
+    tool: 'zod',
+    name: 'ZodError'
+  });
+  if (!zodErrorSymbol) {
+    throw new Error(`[zod-to-openapi-heyapi] failed to register ZodError import — plugin bug`);
+  }
+
+  // export class TransportError extends Error {
+  //   readonly [Symbol.for('@polygonlabs/zod-to-openapi-heyapi/is-transport-error')] = true;
+  //   readonly cause: Error;
+  //   constructor(cause: Error) {
+  //     super('Request failed before producing an HTTP response', { cause });
+  //     this.cause = cause;
+  //     this.name = 'TransportError';
+  //   }
+  // }
+  //
+  // The marker key is inlined as a `Symbol.for(...)` call rather than
+  // declared as an exported `unique symbol` const. Three reasons:
+  //
+  //   - `Symbol.for(KEY)` returns the same symbol globally regardless
+  //     of which module copy of the generated client is loaded — same
+  //     property `instanceof` would have given us if it worked across
+  //     realms / iframes / workers / multi-bundle boundaries.
+  //   - Inline literals avoid the hey-api symbol-finalName-resolution
+  //     dance: a `dsl.lazy(...)` thunk that needs to reference a const
+  //     symbol's binding name fails during the analyze pass because
+  //     finalName isn't determined yet.
+  //   - Consumers narrow via the emitted `isTransportError` /
+  //     `isUnknownError` helpers, not by importing the symbol const.
+  //     The const would have been a power-user escape hatch for
+  //     hand-rolled narrowing — a small cost compared with a plumbing
+  //     workaround.
+  emitWrapperErrorClass({
+    dsl,
+    plugin,
+    classSymbol: transportSymbol,
+    className: 'TransportError',
+    markerKey: TRANSPORT_ERROR_SYMBOL_KEY,
+    superMessage: 'Request failed before producing an HTTP response',
+    causeTypeExpr: dsl.type('Error'),
+    jsdoc: [
+      '@internal — emitted by `@polygonlabs/zod-to-openapi-heyapi`. Do not',
+      'instantiate from consumer code; the wrapper constructs these in',
+      'response to fetch transport rejections (DNS / abort / `ECONNRESET`).',
+      'Narrow via the emitted `isTransportError` type-predicate guard.'
+    ]
+  });
+  emitWrapperErrorClass({
+    dsl,
+    plugin,
+    classSymbol: unknownSymbol,
+    className: 'UnknownError',
+    markerKey: UNKNOWN_ERROR_SYMBOL_KEY,
+    superMessage: 'API response did not match the registered schema',
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    causeTypeExpr: dsl.type(zodErrorSymbol as any),
+    extraField: {
+      name: 'body',
+      typeExpr: dsl.type('unknown')
+    },
+    jsdoc: [
+      '@internal — emitted by `@polygonlabs/zod-to-openapi-heyapi`. Do not',
+      'instantiate from consumer code; the wrapper constructs these when',
+      '`parseAsync` rejects an HTTP error body that did not match any',
+      'registered error schema. `cause` carries the `ZodError` issues;',
+      '`body` is the original wire body for debugging schema drift.',
+      'Narrow via the emitted `isUnknownError` type-predicate guard.'
+    ]
+  });
+
+  // export const isTransportError = (value: unknown): value is TransportError => …
+  // export const isUnknownError   = (value: unknown): value is UnknownError   => …
+  emitTagGuard({
+    dsl,
+    plugin,
+    name: 'isTransportError',
+    className: 'TransportError',
+    markerKey: TRANSPORT_ERROR_SYMBOL_KEY
+  });
+  emitTagGuard({
+    dsl,
+    plugin,
+    name: 'isUnknownError',
+    className: 'UnknownError',
+    markerKey: UNKNOWN_ERROR_SYMBOL_KEY
+  });
+  // export const isWrapperError = (value): value is TransportError | UnknownError => …
+  // The "is this any wrapper-emitted error" guard, for consumers that
+  // want to log / track the two categories generically without
+  // double-checking each tag.
+  emitUnionTagGuard({
+    dsl,
+    plugin,
+    name: 'isWrapperError',
+    classNames: ['TransportError', 'UnknownError'],
+    markerKeys: [TRANSPORT_ERROR_SYMBOL_KEY, UNKNOWN_ERROR_SYMBOL_KEY]
+  });
+
+  // type WrapErrors<TData, TError, ThrowOnError extends boolean> =
+  //   ThrowOnError extends true
+  //     ? Promise<{
+  //         data: TData extends Record<string, unknown> ? TData[keyof TData] : TData;
+  //         request: Request;
+  //         response: Response;
+  //       }>
+  //     : Promise<
+  //         (
+  //           | {
+  //               data: TData extends Record<string, unknown> ? TData[keyof TData] : TData;
+  //               error: undefined;
+  //             }
+  //           | {
+  //               data: undefined;
+  //               error:
+  //                 | (TError extends Record<string, unknown> ? TError[keyof TError] : TError)
+  //                 | TransportError
+  //                 | UnknownError;
+  //             }
+  //         ) & {
+  //           request: Request;
+  //           response: Response;
+  //         }
+  //       >;
+  //
+  // Mirrors hey-api's `RequestResult<TData, TError, ThrowOnError, 'fields'>`
+  // shape with the wrapper-error classes added to the error union. Defined
+  // locally rather than imported from the consumer's generated client
+  // because the client's import path varies by hey-api config (`./client.gen.ts`
+  // vs `./client/index.ts` etc.) — owning the shape here keeps the wrapper's
+  // return-type contract self-contained. A runtime test asserts the data /
+  // request / response fields stay aligned with hey-api's actual return.
+  emitWrapErrorsAlias({ dsl, plugin });
+}
+
+/**
+ * Emit the `WrapErrors<TData, TError, ThrowOnError>` type alias at file
+ * scope. Mirrors hey-api's `RequestResult<TData, TError, ThrowOnError,
+ * 'fields'>` shape with `TransportError | UnknownError` added to the
+ * error union — single source of truth for the wrapper return type.
+ *
+ * Hand-built via raw `tsFactory`: nested conditional types, type
+ * literals, intersection / union, and infer-style record-flattening
+ * are awkward to thread through the openapi-ts DSL builder, and the
+ * shape is static enough that the `tsFactory` form reads cleaner. The
+ * output is wrapped in `dsl.stmt(rawDecl)` so top-level placement
+ * still goes through the DSL.
+ */
+function emitWrapErrorsAlias({ dsl, plugin }: { dsl: Dsl; plugin: PluginLike }): void {
+  const aliasSymbol = plugin.symbol('WrapErrors', {
+    kind: 'type',
+    meta: { category: 'type', resource: 'wrapper-error', name: 'WrapErrors' }
+  });
+
+  const TData = tsFactory.createTypeReferenceNode('TData');
+  const TError = tsFactory.createTypeReferenceNode('TError');
+  const ThrowOnError = tsFactory.createTypeReferenceNode('ThrowOnError');
+  const RecordStringUnknown = tsFactory.createTypeReferenceNode('Record', [
+    tsFactory.createKeywordTypeNode(SyntaxKind.StringKeyword),
+    tsFactory.createKeywordTypeNode(SyntaxKind.UnknownKeyword)
+  ]);
+
+  // TData extends Record<string, unknown> ? TData[keyof TData] : TData
+  const flattenedData = tsFactory.createConditionalTypeNode(
+    TData,
+    RecordStringUnknown,
+    tsFactory.createIndexedAccessTypeNode(
+      TData,
+      tsFactory.createTypeOperatorNode(SyntaxKind.KeyOfKeyword, TData)
+    ),
+    TData
+  );
+  // TError extends Record<string, unknown> ? TError[keyof TError] : TError
+  const flattenedError = tsFactory.createConditionalTypeNode(
+    TError,
+    RecordStringUnknown,
+    tsFactory.createIndexedAccessTypeNode(
+      TError,
+      tsFactory.createTypeOperatorNode(SyntaxKind.KeyOfKeyword, TError)
+    ),
+    TError
+  );
+
+  // request / response field signatures, shared.
+  const requestField = tsFactory.createPropertySignature(
+    undefined,
+    'request',
+    undefined,
+    tsFactory.createTypeReferenceNode('Request')
+  );
+  const responseField = tsFactory.createPropertySignature(
+    undefined,
+    'response',
+    undefined,
+    tsFactory.createTypeReferenceNode('Response')
+  );
+  const requestResponseLiteral = tsFactory.createTypeLiteralNode([requestField, responseField]);
+
+  // Throw-path branch: { data: <flattenedData>; request; response }
+  const throwBranch = tsFactory.createTypeLiteralNode([
+    tsFactory.createPropertySignature(undefined, 'data', undefined, flattenedData),
+    requestField,
+    responseField
+  ]);
+
+  // No-throw path:
+  //   ({ data: <flattenedData>; error: undefined } | { data: undefined; error: <flattenedError> | TransportError | UnknownError })
+  //   & { request; response }
+  const okMember = tsFactory.createTypeLiteralNode([
+    tsFactory.createPropertySignature(undefined, 'data', undefined, flattenedData),
+    tsFactory.createPropertySignature(
+      undefined,
+      'error',
+      undefined,
+      tsFactory.createKeywordTypeNode(SyntaxKind.UndefinedKeyword)
+    )
+  ]);
+  const errorMember = tsFactory.createTypeLiteralNode([
+    tsFactory.createPropertySignature(
+      undefined,
+      'data',
+      undefined,
+      tsFactory.createKeywordTypeNode(SyntaxKind.UndefinedKeyword)
+    ),
+    tsFactory.createPropertySignature(
+      undefined,
+      'error',
+      undefined,
+      tsFactory.createUnionTypeNode([
+        flattenedError,
+        tsFactory.createTypeReferenceNode('TransportError'),
+        tsFactory.createTypeReferenceNode('UnknownError')
+      ])
+    )
+  ]);
+  const noThrowBranch = tsFactory.createIntersectionTypeNode([
+    tsFactory.createParenthesizedType(tsFactory.createUnionTypeNode([okMember, errorMember])),
+    requestResponseLiteral
+  ]);
+
+  // Promise<ThrowOnError extends true ? <throwBranch> : <noThrowBranch>>
+  // Outer Promise wraps both branches so the resolved alias always
+  // satisfies TS's "async function return type must be the global
+  // Promise<T> type" check (TS1064). Putting the Promise inside each
+  // conditional branch is semantically equivalent but trips the
+  // syntactic check on the wrapper's return-type annotation.
+  const conditional = tsFactory.createTypeReferenceNode('Promise', [
+    tsFactory.createConditionalTypeNode(
+      ThrowOnError,
+      tsFactory.createLiteralTypeNode(tsFactory.createTrue()),
+      throwBranch,
+      noThrowBranch
+    )
+  ]);
+
+  // Use TypeAliasTsDsl through the DSL so plugin.node correctly
+  // places it at top level — `dsl.stmt(rawTypeAliasDecl)` is silently
+  // dropped at top-level by hey-api's render layer (StmtTsDsl is for
+  // statements inside `.do(...)` blocks). TypeAliasTsDsl.type()
+  // accepts a raw `ts.TypeNode` directly via `MaybeTsDsl<ts.TypeNode>`,
+  // so we pass the hand-built conditional `tsFactory` node to it
+  // unchanged.
+  plugin.node(
+    dsl.type
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .alias(aliasSymbol as any)
+      .export()
+      .generic('TData')
+      .generic('TError')
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .generic('ThrowOnError', (g: any) => g.extends('boolean'))
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .type(conditional as any)
+  );
+}
+
+/**
+ * `<subject> instanceof Error` as a raw TS expression — the DSL's
+ * `BinaryTsDsl` doesn't expose `instanceof` as an operator, so we
+ * drop to `ts.factory`. The DSL's `if(...)` slot accepts a raw
+ * `ts.Expression` directly (per its `IfCondition = NodeName |
+ * MaybeTsDsl<ts.Expression>` signature), so no DSL wrap is needed.
+ *
+ * `instanceof Error` is reliable for our discrimination because
+ * fetch transport rejections (`TypeError`, `AbortError`, Node
+ * `SystemError`) all extend the global `Error`, hey-api's wire-shape
+ * error bodies are plain object literals, and the wrapper runs in
+ * the same realm as the fetch call. The earlier `'stack' in err`
+ * duck-type was fragile against debug-mode servers (Express / Koa /
+ * FastAPI) that include stack traces in error JSON.
+ */
+function instanceofErrorExpr(subject: Expression): Expression {
+  return tsFactory.createBinaryExpression(
+    subject,
+    tsFactory.createToken(SyntaxKind.InstanceOfKeyword),
+    tsFactory.createIdentifier('Error')
+  );
+}
+
+/** `Symbol.for('<key>')` as a TS expression — the cross-realm anchor. */
+function symbolForExpr(key: string): CallExpression {
+  return tsFactory.createCallExpression(
+    tsFactory.createPropertyAccessExpression(tsFactory.createIdentifier('Symbol'), 'for'),
+    undefined,
+    [tsFactory.createStringLiteral(key)]
+  );
+}
+
+/**
+ * Shared emit for a wrapper-error class. Each class:
+ *
+ *   - extends `Error`
+ *   - carries a `[Symbol.for(<markerKey>)] = true` discriminator field
+ *     (cross-realm safe — same symbol globally regardless of which
+ *     module copy of the generated client is loaded)
+ *   - narrows `cause` to a specific subtype (`Error` for transport,
+ *     `ZodError` for unknown) so consumers can read `error.cause.<field>`
+ *     without a cast
+ *   - sets `this.name` to the class name for nicer logging
+ *   - is documented `@internal` so consumers see a hint not to
+ *     instantiate or extend the class themselves — it's a
+ *     codegen-emitted marker, not a public surface
+ *
+ * Optional `extraField` adds a second readonly field + constructor
+ * param + assignment (used by `UnknownError` to carry the original
+ * wire body alongside the `ZodError` cause).
+ */
+function emitWrapperErrorClass({
+  dsl,
+  plugin,
+  classSymbol,
+  className,
+  markerKey,
+  superMessage,
+  causeTypeExpr,
+  extraField,
+  jsdoc
+}: {
+  dsl: Dsl;
+  plugin: PluginLike;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  classSymbol: any;
+  className: string;
+  markerKey: string;
+  superMessage: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  causeTypeExpr: any;
+  extraField?: {
+    name: string;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    typeExpr: any;
+  };
+  jsdoc?: ReadonlyArray<string>;
+}): void {
+  // this[Symbol.for(MARKER_KEY)] = true; — computed-key element
+  // access expressed as a raw tsFactory ExpressionStatement, then
+  // wrapped in `dsl.stmt(...)` so the surrounding init block can
+  // accept it. The DSL's `.attr()` is dot-access only and has no
+  // computed-key form. Inline `Symbol.for(KEY)` (rather than a const
+  // binding) sidesteps hey-api's symbol-finalName resolution entirely
+  // — `Symbol.for` is a global call expression, no registered symbol
+  // to resolve.
+  // (this as Record<symbol, unknown>)[Symbol.for(MARKER_KEY)] = true;
+  // The cast is required: a class doesn't have a symbol index
+  // signature, so a bare `this[Symbol.for(...)] = true` triggers
+  // TS7053. The cast is read-only on the runtime side — `this` is
+  // always the actual instance.
+  const recordSymbolUnknown = tsFactory.createTypeReferenceNode('Record', [
+    tsFactory.createKeywordTypeNode(SyntaxKind.SymbolKeyword),
+    tsFactory.createKeywordTypeNode(SyntaxKind.UnknownKeyword)
+  ]);
+  const markerAssignmentStmt = dsl.stmt(
+    tsFactory.createExpressionStatement(
+      tsFactory.createAssignment(
+        tsFactory.createElementAccessExpression(
+          tsFactory.createParenthesizedExpression(
+            tsFactory.createAsExpression(tsFactory.createThis(), recordSymbolUnknown)
+          ),
+          symbolForExpr(markerKey)
+        ),
+        tsFactory.createTrue()
+      )
+    )
+  );
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let classBuilder: any = dsl
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    .class(classSymbol as any)
+    .export()
+    .extends('Error');
+
+  if (jsdoc && jsdoc.length > 0) {
+    // DocTsDsl `lines` arg accepts `MaybeArray<string>` — pass as
+    // an array directly. The callback form (`(d) => d.add(line)`)
+    // appears to mis-fire at render time on this hey-api version
+    // (`d.add is not a function`); the lines-arg form is the
+    // documented entry point and works.
+    classBuilder = classBuilder.doc([...jsdoc]);
+  }
+
+  classBuilder = classBuilder.field('cause', (f: unknown) =>
+    // Declare-and-override `cause` to narrow it from `unknown`
+    // (Error's default). The DSL doesn't expose `declare`, so we
+    // emit `readonly cause: <T>` as a real field and assign it
+    // explicitly in the constructor.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (f as any).readonly().type(causeTypeExpr)
+  );
+
+  if (extraField) {
+    classBuilder = classBuilder.field(extraField.name, (f: unknown) =>
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (f as any).readonly().type(extraField.typeExpr)
+    );
+  }
+
+  plugin.node(
+    classBuilder.init((i: unknown) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let init = (i as any).param('cause', (p: any) => p.type(causeTypeExpr));
+      if (extraField) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        init = init.param(extraField.name, (p: any) => p.type(extraField.typeExpr));
+      }
+      const stmts: unknown[] = [
+        dsl('super').call(
+          dsl.literal(superMessage),
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          dsl.object().prop('cause', dsl.id('cause')) as any
+        ),
+        markerAssignmentStmt,
+        dsl('this').attr('cause').assign(dsl.id('cause')),
+        dsl('this').attr('name').assign(dsl.literal(className))
+      ];
+      if (extraField) {
+        stmts.push(dsl('this').attr(extraField.name).assign(dsl.id(extraField.name)));
+      }
+      return init.do(...stmts);
+    })
+  );
+}
+
+/**
+ * Emit a type-guard helper:
+ *
+ *   export const isTransportError = (value: unknown): value is TransportError =>
+ *     typeof value === 'object' && value !== null &&
+ *     (value as Record<symbol, unknown>)[
+ *       Symbol.for('@polygonlabs/zod-to-openapi-heyapi/is-transport-error')
+ *     ] === true;
+ *
+ * The DSL doesn't expose type predicates (`value is TransportError`)
+ * as a first-class node, so the arrow function is hand-constructed
+ * via `tsFactory` and emitted as a top-level VariableStatement
+ * wrapped in `dsl.stmt(...)`.
+ *
+ * `className` is captured by string rather than by hey-api Symbol
+ * reference because the lazy/Symbol-resolution dance fails during
+ * the analyze pass (finalName isn't available yet). In practice the
+ * class binding names we emit (`TransportError` / `UnknownError`)
+ * are stable — they only get suffix-renamed on collision, and a
+ * collision with a user schema named `TransportError` would already
+ * have broken the consumer's import surface elsewhere.
+ *
+ * The body uses literal-driven shape checks (no `instanceof`) so it
+ * stays cross-realm safe: a class constructor copy loaded from a
+ * different module bundle won't pass `instanceof`, but the global
+ * symbol from `Symbol.for(...)` is identity-stable across module
+ * copies and realms.
+ */
+function emitTagGuard({
+  dsl,
+  plugin,
+  name,
+  className,
+  markerKey
+}: {
+  dsl: Dsl;
+  plugin: PluginLike;
+  name: string;
+  className: string;
+  markerKey: string;
+}): void {
+  const guardSymbol = plugin.symbol(name, {
+    meta: { category: 'utility', resource: 'wrapper-error', name }
+  });
+
+  // (value: unknown): value is <Class> => …
+  const valueParam = tsFactory.createParameterDeclaration(
+    undefined,
+    undefined,
+    'value',
+    undefined,
+    tsFactory.createKeywordTypeNode(SyntaxKind.UnknownKeyword)
+  );
+  const predicate = tsFactory.createTypePredicateNode(
+    undefined,
+    'value',
+    tsFactory.createTypeReferenceNode(className)
+  );
+
+  //   typeof value === 'object'
+  const typeofObject = tsFactory.createBinaryExpression(
+    tsFactory.createTypeOfExpression(tsFactory.createIdentifier('value')),
+    SyntaxKind.EqualsEqualsEqualsToken,
+    tsFactory.createStringLiteral('object')
+  );
+
+  //   value !== null
+  const notNull = tsFactory.createBinaryExpression(
+    tsFactory.createIdentifier('value'),
+    SyntaxKind.ExclamationEqualsEqualsToken,
+    tsFactory.createNull()
+  );
+
+  //   (value as Record<symbol, unknown>)[Symbol.for(KEY)] === true
+  const recordType = tsFactory.createTypeReferenceNode('Record', [
+    tsFactory.createKeywordTypeNode(SyntaxKind.SymbolKeyword),
+    tsFactory.createKeywordTypeNode(SyntaxKind.UnknownKeyword)
+  ]);
+  const markerEqualsTrue = tsFactory.createBinaryExpression(
+    tsFactory.createElementAccessExpression(
+      tsFactory.createParenthesizedExpression(
+        tsFactory.createAsExpression(tsFactory.createIdentifier('value'), recordType)
+      ),
+      symbolForExpr(markerKey)
+    ),
+    SyntaxKind.EqualsEqualsEqualsToken,
+    tsFactory.createTrue()
+  );
+
+  // typeof value === 'object' && value !== null && (...)
+  const body = tsFactory.createBinaryExpression(
+    tsFactory.createBinaryExpression(typeofObject, SyntaxKind.AmpersandAmpersandToken, notNull),
+    SyntaxKind.AmpersandAmpersandToken,
+    markerEqualsTrue
+  );
+
+  const arrow = tsFactory.createArrowFunction(
+    undefined,
+    undefined,
+    [valueParam],
+    predicate,
+    tsFactory.createToken(SyntaxKind.EqualsGreaterThanToken),
+    body
+  );
+
+  // `dsl.const(symbol).export().assign(dsl(rawExpression))` — wrap the
+  // raw arrow as a TsDsl<Expression> via the `$()` overload that
+  // accepts `Expression`. The DSL drives top-level placement +
+  // import wiring; the only escape is the arrow expression itself
+  // (raw because the type-predicate return annotation isn't a
+  // first-class DSL node).
+  plugin.node(
+    dsl
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .const(guardSymbol as any)
+      .export()
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .assign(dsl(arrow as unknown as Expression) as any)
+  );
+}
+
+/**
+ * Emit a union type-guard helper:
+ *
+ *   export const isWrapperError = (value: unknown): value is TransportError | UnknownError =>
+ *     typeof value === 'object' && value !== null && (
+ *       (value as Record<symbol, unknown>)[Symbol.for(KEY_T)] === true ||
+ *       (value as Record<symbol, unknown>)[Symbol.for(KEY_U)] === true
+ *     );
+ *
+ * Same construction as `emitTagGuard` but with multiple markers OR'd
+ * together and a union type predicate. Saves consumers writing
+ * `isTransportError(x) || isUnknownError(x)` at every "log all
+ * wrapper errors generically" call site.
+ */
+function emitUnionTagGuard({
+  dsl,
+  plugin,
+  name,
+  classNames,
+  markerKeys
+}: {
+  dsl: Dsl;
+  plugin: PluginLike;
+  name: string;
+  classNames: ReadonlyArray<string>;
+  markerKeys: ReadonlyArray<string>;
+}): void {
+  if (classNames.length !== markerKeys.length || classNames.length === 0) {
+    throw new Error(
+      `[zod-to-openapi-heyapi] emitUnionTagGuard: classNames and markerKeys ` +
+        `must be non-empty and equal length (got ${classNames.length} / ${markerKeys.length})`
+    );
+  }
+
+  const guardSymbol = plugin.symbol(name, {
+    meta: { category: 'utility', resource: 'wrapper-error', name }
+  });
+
+  const valueParam = tsFactory.createParameterDeclaration(
+    undefined,
+    undefined,
+    'value',
+    undefined,
+    tsFactory.createKeywordTypeNode(SyntaxKind.UnknownKeyword)
+  );
+  // value is TransportError | UnknownError
+  const predicate = tsFactory.createTypePredicateNode(
+    undefined,
+    'value',
+    tsFactory.createUnionTypeNode(classNames.map((c) => tsFactory.createTypeReferenceNode(c)))
+  );
+
+  const typeofObject = tsFactory.createBinaryExpression(
+    tsFactory.createTypeOfExpression(tsFactory.createIdentifier('value')),
+    SyntaxKind.EqualsEqualsEqualsToken,
+    tsFactory.createStringLiteral('object')
+  );
+  const notNull = tsFactory.createBinaryExpression(
+    tsFactory.createIdentifier('value'),
+    SyntaxKind.ExclamationEqualsEqualsToken,
+    tsFactory.createNull()
+  );
+
+  const recordType = tsFactory.createTypeReferenceNode('Record', [
+    tsFactory.createKeywordTypeNode(SyntaxKind.SymbolKeyword),
+    tsFactory.createKeywordTypeNode(SyntaxKind.UnknownKeyword)
+  ]);
+  const markerChecks = markerKeys.map((key) =>
+    tsFactory.createBinaryExpression(
+      tsFactory.createElementAccessExpression(
+        tsFactory.createParenthesizedExpression(
+          tsFactory.createAsExpression(tsFactory.createIdentifier('value'), recordType)
+        ),
+        symbolForExpr(key)
+      ),
+      SyntaxKind.EqualsEqualsEqualsToken,
+      tsFactory.createTrue()
+    )
+  );
+  // OR-fold: a === true || b === true || …
+  const [first, ...rest] = markerChecks;
+  if (!first) {
+    // unreachable (length-check above) but narrows the destructuring
+    throw new Error(`[zod-to-openapi-heyapi] emitUnionTagGuard: empty markerChecks`);
+  }
+  const markerOr = rest.reduce<Expression>(
+    (acc, check) => tsFactory.createBinaryExpression(acc, SyntaxKind.BarBarToken, check),
+    first
+  );
+
+  // Wrap the OR in parens for readable output: `(a || b)` —
+  // ts.factory respects parens in BinaryExpression printout already
+  // because the `&&` binding is tighter than `||`, but render-wise
+  // an explicit parenthesised expression keeps the formatted output
+  // visually clear.
+  const body = tsFactory.createBinaryExpression(
+    tsFactory.createBinaryExpression(typeofObject, SyntaxKind.AmpersandAmpersandToken, notNull),
+    SyntaxKind.AmpersandAmpersandToken,
+    tsFactory.createParenthesizedExpression(markerOr)
+  );
+
+  const arrow = tsFactory.createArrowFunction(
+    undefined,
+    undefined,
+    [valueParam],
+    predicate,
+    tsFactory.createToken(SyntaxKind.EqualsGreaterThanToken),
+    body
+  );
+
+  plugin.node(
+    dsl
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .const(guardSymbol as any)
+      .export()
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .assign(dsl(arrow as unknown as Expression) as any)
   );
 }
 

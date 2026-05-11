@@ -73,8 +73,11 @@ describe('registry plugin emit', () => {
   });
 
   it("imports z from 'zod' so the type aliases can reference z.output", () => {
+    // Import line may be `{ z }` or `{ z, type ZodError }` depending on
+    // whether the file also emits the wrapper-error classes — match
+    // either by allowing additional names after `z`.
     const src = readGenerated();
-    expect(src).toMatch(/import \{ z \} from 'zod'/);
+    expect(src).toMatch(/import \{ z[,}][^}]*\} from 'zod'/);
   });
 
   it('annotates the transformer data parameter as unknown', () => {
@@ -381,34 +384,104 @@ describe('registry plugin emit', () => {
     expect(src).not.toMatch(/getScalarStringErrorTransformer/);
   });
 
-  it('emits a real wrapper that decodes result.error through the error transformer', () => {
+  it('emits TransportError, UnknownError, the type guards, and the union guard', () => {
+    // File-level scaffolding emitted lazily on first use. The two
+    // classes plus their type-guard helpers give consumers a
+    // symbol-based discriminator (cross-realm safe via `Symbol.for(...)`)
+    // so they don't need `instanceof` at narrow sites.
+    const src = readGenerated();
+    // ZodError type imported from 'zod' (named, type-only).
+    expect(src).toMatch(/import \{[^}]*\btype ZodError\b[^}]*\} from 'zod'/);
+    // TransportError carries a symbol-keyed marker assigned in the
+    // constructor — the cast to Record<symbol, unknown> is needed
+    // because a class doesn't have a symbol index signature.
+    // `@internal` JSDoc warns consumers off direct instantiation
+    // (the wrapper produces these; consumer-thrown TransportError
+    // would erode the discriminator's meaning).
+    expect(src).toMatch(
+      /\* @internal[\s\S]*?\* Narrow via the emitted `isTransportError`[\s\S]*?export class TransportError extends Error \{\s*readonly cause: Error;\s*constructor\(cause: Error\) \{\s*super\('Request failed before producing an HTTP response', \{ cause \}\);\s*\(this as Record<symbol, unknown>\)\[Symbol\.for\("@polygonlabs\/zod-to-openapi-heyapi\/is-transport-error"\)\] = true;/
+    );
+    // UnknownError adds a `body: unknown` field carrying the original
+    // wire body — symmetric with `TransportError.cause` (one hop to
+    // the underlying value). The two-arg constructor avoids the
+    // earlier `Object.assign(zodError, { cause })` mutation
+    // workaround.
+    expect(src).toMatch(
+      /\* @internal[\s\S]*?\* `body` is the original wire body[\s\S]*?export class UnknownError extends Error \{\s*readonly cause: ZodError;\s*readonly body: unknown;\s*constructor\(cause: ZodError, body: unknown\) \{\s*super\('API response did not match the registered schema', \{ cause \}\);\s*\(this as Record<symbol, unknown>\)\[Symbol\.for\("@polygonlabs\/zod-to-openapi-heyapi\/is-unknown-error"\)\] = true;\s*this\.cause = cause;\s*this\.name = 'UnknownError';\s*this\.body = body;/
+    );
+    // Type-guard helpers — the only consumer-visible narrowing API.
+    // Type predicate `value is TransportError` lets call sites
+    // narrow without `instanceof` (which fails across realms /
+    // module copies); the symbol comparison is cross-realm safe
+    // because `Symbol.for(...)` returns the same global symbol
+    // regardless of which module copy of the generated client is
+    // loaded.
+    expect(src).toMatch(
+      /export const isTransportError = \(value: unknown\): value is TransportError =>\s*typeof value === "object" && value !== null && \(value as Record<symbol, unknown>\)\[Symbol\.for\("@polygonlabs\/zod-to-openapi-heyapi\/is-transport-error"\)\] === true;/
+    );
+    expect(src).toMatch(
+      /export const isUnknownError = \(value: unknown\): value is UnknownError =>\s*typeof value === "object" && value !== null && \(value as Record<symbol, unknown>\)\[Symbol\.for\("@polygonlabs\/zod-to-openapi-heyapi\/is-unknown-error"\)\] === true;/
+    );
+    // Union guard — for "any wrapper-emitted error" call sites
+    // (logging / metrics) that don't care which category.
+    expect(src).toMatch(
+      /export const isWrapperError = \(value: unknown\): value is TransportError \| UnknownError =>\s*typeof value === "object" && value !== null && \(\(value as Record<symbol, unknown>\)\[Symbol\.for\("@polygonlabs\/zod-to-openapi-heyapi\/is-transport-error"\)\] === true \|\| \(value as Record<symbol, unknown>\)\[Symbol\.for\("@polygonlabs\/zod-to-openapi-heyapi\/is-unknown-error"\)\] === true\);/
+    );
+    // WrapErrors<TData, TError, ThrowOnError> — file-scope alias
+    // wrappers reference for their explicit return-type annotation.
+    // Mirrors hey-api's RequestResult<...>'s shape with
+    // `TransportError | UnknownError` added to the no-throw error
+    // union, so consumers see the widened error type at compile time
+    // (not just at runtime). Single-Promise outer wrap so an `async
+    // (): WrapErrors<...> =>` annotation satisfies TS's "must return
+    // Promise<T>" rule (TS1064).
+    expect(src).toMatch(
+      /export type WrapErrors<TData, TError, ThrowOnError extends boolean> = Promise<\s*ThrowOnError extends true \?/
+    );
+    // Widening lands in the `error` slot of the no-throw branch.
+    expect(src).toMatch(
+      /error: \(TError extends Record<string, unknown> \? TError\[keyof TError\] : TError\) \| TransportError \| UnknownError;/
+    );
+  });
+
+  it('emits a real wrapper that wraps transport vs validation errors distinctly', () => {
     // `createOrFetchResource` has no codec input, but it does declare error
     // schemas — so the wrapper is no longer a re-bind. The body wraps the
-    // SDK call in try/catch (decoding thrown errors on the throwOnError:
-    // true path) and decodes `result.error` in place after the call returns
-    // (throwOnError: false path).
+    // SDK call in try/catch and discriminates between transport (no HTTP
+    // response) and validation (HTTP body didn't match schema) failures.
+    // The wrapper's return-type annotation widens the error union so
+    // consumers must narrow at compile time.
     const src = readGenerated();
-    // Wrapper signature (no input encoding, just error decoding).
     expect(src).toMatch(
-      /export const createOrFetchResource = async <ThrowOnError extends boolean = false>\(options\?: Options<CreateOrFetchResourceData, ThrowOnError>\) => \{/
+      /export const createOrFetchResource = async <ThrowOnError extends boolean = false>\(options\?: Options<CreateOrFetchResourceData, ThrowOnError>\): WrapErrors<CreateOrFetchResourceResponses, CreateOrFetchResourceErrors, ThrowOnError> => \{/
     );
-    // Try block assigns to the outer `let result` — declared with `let` so
-    // it survives the catch.
+    // throwOnError: true catch block — discriminates via
+    // `err instanceof Error` (reliable in the wrapper's same-realm
+    // call site; replaces the earlier `'stack' in err` duck-typed
+    // heuristic which was fragile against debug-mode servers that
+    // include stack traces in error JSON), then either throws
+    // TransportError (no parseAsync) or attempts parseAsync and
+    // throws `UnknownError(zodError, wireBody)` on validation
+    // failure.
     expect(src).toMatch(
-      /createOrFetchResource = async[\s\S]*?let result;\s*try \{\s*result = await createOrFetchResource2\(options\);\s*\}\s*catch \(err\) \{/
+      /catch \(err\) \{\s*if \(err instanceof Error\) \{\s*throw new TransportError\(err as Error\);\s*\}\s*let typedErr;\s*try \{\s*typedErr = await createOrFetchResourceErrorTransformer\(err\);\s*\}\s*catch \(validationError\) \{\s*throw new UnknownError\(validationError as ZodError, err\);\s*\}\s*throw typedErr;\s*\}/
     );
-    // Catch block decodes via the error transformer; on parseAsync failure
-    // the original wire-shape err is re-thrown so non-error throws (network
-    // failures, etc.) pass through untouched.
-    expect(src).toMatch(
-      /catch \(err\) \{\s*let typedErr;\s*try \{\s*typedErr = await createOrFetchResourceErrorTransformer\(err\);\s*\}\s*catch \{\s*throw err;\s*\}\s*throw typedErr;\s*\}/
-    );
-    // throwOnError: false path — decode result.error in place. Cast through
-    // a narrow `{ error?: unknown }` view to satisfy the SDK function's
-    // discriminated-union return type.
+    // throwOnError: false path — decode result.error in place, with
+    // the same transport / validation discrimination. `!= null`
+    // (loose) covers `null` defensively. No catch-and-leave-as-wire
+    // path (that would re-introduce the type/runtime gap); validation
+    // failures land in `result.error` as UnknownError instances so
+    // the type-level union of the result's error field stays honest.
     expect(src).toMatch(/const errorBearing = result as \{\s*error\?: unknown;\s*\};/);
     expect(src).toMatch(
-      /if \(errorBearing\.error !== undefined\) \{\s*try \{\s*errorBearing\.error = await createOrFetchResourceErrorTransformer\(errorBearing\.error\);\s*\}\s*catch \{\s*\}\s*\}/
+      /if \(errorBearing\.error != null\) \{\s*if \(errorBearing\.error instanceof Error\) \{\s*errorBearing\.error = new TransportError\(errorBearing\.error as Error\);\s*\}\s*else \{\s*try \{\s*errorBearing\.error = await createOrFetchResourceErrorTransformer\(errorBearing\.error\);\s*\}\s*catch \(validationError\) \{\s*errorBearing\.error = new UnknownError\(validationError as ZodError, errorBearing\.error\);\s*\}\s*\}\s*\}/
+    );
+    // Return-type cast bridges the SDK's RequestResult<...> to the
+    // wrapper's narrower WrapErrors<...> annotation. The cast is
+    // internal to the generated wrapper; consumers see only the
+    // widened return type and don't write any cast themselves.
+    expect(src).toMatch(
+      /return result as unknown as Awaited<WrapErrors<CreateOrFetchResourceResponses, CreateOrFetchResourceErrors, ThrowOnError>>;/
     );
   });
 
@@ -417,18 +490,13 @@ describe('registry plugin emit', () => {
     // body (`CreateOrderRequest` with `IsoDateCodec` + `Int64Codec`)
     // AND error responses (400 BadRequest, 500 Server). The wrapper's
     // body must run the input transformer first, then make the SDK
-    // call, then decode the error path. Both transformer calls must
-    // appear, in order.
+    // call, then split into transport / validation paths. Both transformer
+    // calls must appear, in order.
     const src = readGenerated();
-    // Both transformers exist for this op.
     expect(src).toMatch(/export const createOrderInputTransformer = /);
     expect(src).toMatch(/export const createOrderErrorTransformer = /);
-    // Wrapper body has the input-encode step before the SDK call AND
-    // the error-decode wrapping around it. The regex captures the
-    // skeleton: input transformer assignment → try { result = ... }
-    // → catch with error transformer.
     expect(src).toMatch(
-      /createOrder = async[\s\S]*?const transformed = await createOrderInputTransformer\(options\);\s*let result;\s*try \{\s*result = await createOrder2\([^)]+\);\s*\}\s*catch \(err\) \{\s*let typedErr;\s*try \{\s*typedErr = await createOrderErrorTransformer\(err\);/
+      /createOrder = async[\s\S]*?const transformed = await createOrderInputTransformer\(options\);\s*let result;\s*try \{\s*result = await createOrder2\([^)]+\);\s*\}\s*catch \(err\) \{\s*if \(err instanceof Error\) \{\s*throw new TransportError\(err as Error\);\s*\}\s*let typedErr;\s*try \{\s*typedErr = await createOrderErrorTransformer\(err\);/
     );
   });
 
