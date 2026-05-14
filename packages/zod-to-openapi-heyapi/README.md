@@ -64,6 +64,17 @@ That's the whole config. The factory locks in the plugin order, the
 and `OpenApiGeneratorV3`) so consumers don't have to wire any of it up
 themselves.
 
+It also flips `includeInEntry: true` on `@hey-api/client-fetch` and
+(when `tanstackReactQuery: true`) on `@tanstack/react-query`, so the
+auto-generated `index.ts` is the **canonical consumer surface**: the
+singleton `client`, every SDK wrapper, both wrapper-error classes plus
+their `is*Error` guards, and every TanStack Query factory all flow
+through `./generated/index.js`. Publishable client packages should
+re-export from `./generated/index.js` and never name a `*.gen.ts` path
+in their hand-written barrel — the layout (which factory file owns
+which op, where the singleton `client` lives) is an internal codegen
+concern that consumers shouldn't have to understand.
+
 For codec-aware TanStack Query factories alongside the SDK wrappers,
 flip `tanstackReactQuery: true`. See [TanStack Query
 factories](#tanstack-query-factories) below for the full picture.
@@ -95,8 +106,21 @@ export default defineConfig({
       generatorClass: OpenApiGeneratorV3,
       $
     })) as never,
-    '@hey-api/typescript',
-    '@hey-api/client-fetch',
+    // `includeInEntry: false` here keeps the wire-shape `${Op}Response` /
+    // `${Op}Error` aliases out of the auto-barrel — this plugin emits
+    // codec-aware aliases under the same names. Without the flag, both
+    // land in the entry barrel and hey-api collision-renames the
+    // typescript plugin's emissions to `${Name}2` (`CreateOrderError2`,
+    // etc.) — reaching for `2`-suffixed names then silently loses the
+    // codec round-trip on the wire-shape side. Either keep this flag, or
+    // leave the typescript plugin out entirely.
+    { name: '@hey-api/typescript', includeInEntry: false },
+    // `includeInEntry: true` (default is false on `@hey-api/client-fetch`)
+    // surfaces the singleton `client` through the auto-barrel so the
+    // consumer's `client.setConfig({ baseUrl })` line resolves from the
+    // canonical entry. No name collision — `client.gen.ts` exports only
+    // `client` and `CreateClientConfig`.
+    { name: '@hey-api/client-fetch', includeInEntry: true },
     // `includeInEntry: false` is required: this plugin owns the public
     // SDK surface and emits a wrapper per operation under the canonical
     // name. Without it, `@hey-api/sdk`'s same-named raw functions would
@@ -605,28 +629,150 @@ be required (asteasolutions defaults to optional otherwise).
 Operations that declare error response schemas get an
 `${opId}ErrorTransformer` (mirrors the success-side `${opId}Transformer`
 shape — `parseAsync` against a single schema or `z.union(...)` for
-multi-status). The SDK wrapper calls it on both error paths so the
-runtime value matches the codec runtime types declared in `${Op}Error`:
+multi-status). The SDK wrapper calls it on both throwOnError paths so
+the runtime value matches the codec runtime types declared in
+`${Op}Error`. Two boundaries the wrapper crosses:
 
-- **`throwOnError: false` path** — after the SDK call returns,
-  `result.error` is decoded in place. If `parseAsync` throws (response
-  body doesn't match any registered error schema), the wire-shape
-  value is left in place rather than propagating a `ZodError` to a
-  caller that asked for non-throwing behaviour. The type/runtime gap
-  re-opens *only* on malformed responses; the well-formed case
-  delivers what the type promises.
-- **`throwOnError: true` path** — the SDK function throws the
-  wire-shape body; the wrapper catches, runs `parseAsync`, and
-  re-throws the decoded shape. If `parseAsync` rejects (network-level
-  error or unexpected body), the original error re-throws raw so
-  upstream stack traces aren't replaced with a parse failure.
+1. **Did the request reach the API at all?** No → `TransportError`.
+   Yes → next.
+2. **Does the response body match a registered error schema?** Yes →
+   typed `${Op}Error`. No → `ResponseValidationError`.
 
-Why a wrapper at all: hey-api's fetch client only invokes the
-`responseTransformer` on 2xx bodies. Error responses bypass it, so the
-plugin has to take the runtime decode into its own hands — otherwise
-the `${Op}Error` types would claim codec runtime shapes (`bigint`,
-`Date`) while the consumer received wire-shape values. The wrapper
-closes that gap.
+Both `TransportError` and `ResponseValidationError` are emitted as classes
+alongside the SDK wrappers — see [The wrapper-emitted error
+classes](#the-wrapper-emitted-error-classes) below.
+
+#### `throwOnError: false`
+
+```ts
+import { isTransportError, isResponseValidationError } from './generated/registry-validator.gen.js';
+
+const { data, error } = await getX();
+if (isTransportError(error)) {
+  // Request never produced an HTTP response. error.cause is the
+  // native fetch error (TypeError / AbortError / Node SystemError
+  // carrying ECONNRESET / ETIMEDOUT / etc.).
+  log.error('network', error.cause);
+} else if (isResponseValidationError(error)) {
+  // The server replied, but the body didn't match any registered
+  // error schema. error.cause is the ZodError carrying parse
+  // issues; error.body is the original wire body (one hop, same
+  // depth as transport's .cause).
+  log.error('schema mismatch', { issues: error.cause.issues, body: error.body });
+} else if (error) {
+  // Typed ${Op}Error — error.code, error.traceId etc. all type-checked.
+  if (error.code === 'not_found') ...
+}
+```
+
+`result.error`'s static type widens to
+`${Op}Error | TransportError | ResponseValidationError | undefined`, so the
+three branches above are exhaustive — TS errors if a consumer reads
+`error.<typed-field>` without narrowing first. The widening is
+delivered by an emitted file-scope `WrapErrors<TData, TError,
+ThrowOnError>` type alias that wraps each per-op return; the two
+`is*Error` helpers are emitted as type predicates
+(`value is TransportError`), so each `if` block narrows `error`
+correctly without further casts.
+
+#### `throwOnError: true`
+
+The wrapper throws one of the same three shapes. Consumer's `catch`
+narrows the same way:
+
+```ts
+try { await getX({ throwOnError: true }); }
+catch (err) {
+  if (isTransportError(err)) { /* … */ }
+  else if (isResponseValidationError(err)) { /* … */ }
+  // else: typed ${Op}Error
+}
+```
+
+A union helper `isWrapperError(value): value is TransportError |
+ResponseValidationError` is also emitted, for "log any wrapper-emitted error
+generically" call sites that don't care which category — saves
+writing `isTransportError(x) || isResponseValidationError(x)`.
+
+#### Why a wrapper at all
+
+`@hey-api/client-fetch` only invokes the `responseTransformer` on
+2xx bodies — error responses bypass it. Without the wrapper, the
+`${Op}Error` types would claim codec runtime shapes (`bigint`,
+`Date`) while the consumer received wire-shape values. The
+TransportError / ResponseValidationError split is what keeps `${Op}Error` narrow
+and honest: when `result.error` is the typed shape, it really is
+the codec runtime shape; non-conforming responses end up in their
+own typed slot.
+
+### The wrapper-emitted error classes
+
+```ts
+/** @internal — codegen-emitted; consumers narrow via isTransportError. */
+class TransportError extends Error {
+  readonly cause: Error;
+  // super message: 'Request failed before producing an HTTP response'
+  // Carries a symbol-keyed marker:
+  //   this[Symbol.for('@polygonlabs/zod-to-openapi-heyapi/is-transport-error')] = true
+}
+
+/** @internal — codegen-emitted; consumers narrow via isResponseValidationError. */
+class ResponseValidationError extends Error {
+  readonly cause: ZodError;        // parseAsync's issues
+  readonly body: unknown;          // original wire body (one hop, no walking)
+  // super message: 'API response did not match the registered schema'
+  // Carries a symbol-keyed marker:
+  //   this[Symbol.for('@polygonlabs/zod-to-openapi-heyapi/is-response-validation-error')] = true
+}
+
+// Type-predicate guards — the only consumer-facing narrowing API.
+declare const isTransportError: (value: unknown) => value is TransportError;
+declare const isResponseValidationError:   (value: unknown) => value is ResponseValidationError;
+declare const isWrapperError:   (value: unknown) => value is TransportError | ResponseValidationError;
+```
+
+Both extend `Error` so they integrate with `try/catch`, structured
+logging (Sentry / pino walk `.cause`), and any tooling that
+introspects error chains. Both are tagged `@internal` — the wrapper
+constructs them; consumer-thrown instances would erode the
+discriminator's meaning.
+
+The two classes split by **whether the request reached the API**.
+That boundary is categorically different from "did the response
+match our schema":
+
+- **TransportError** is for `ECONNRESET` / `ENOTFOUND` /
+  `ETIMEDOUT` / abort / DNS / TLS handshake failures — the request
+  never got an HTTP response back. Retry policies, alerting, and
+  service-level monitoring usually want this category isolated.
+- **ResponseValidationError** is for "got bytes, can't decode" — schema
+  drift, foreign errors from a CDN or gateway, or simply a
+  registered schema that's out of date. The handling here is
+  typically "log the body, file a bug, return a generic 'something
+  went wrong' to the user."
+
+Wrapping `TransportError` (rather than letting native `TypeError` /
+`AbortError` bubble through unchanged) gives consumers a uniform
+narrowing API. The marker is a `Symbol.for(...)` value, not a
+string `_tag` field, so it survives cross-realm boundaries
+(workers, iframes, multiple bundle copies) where `instanceof` loses
+identity — `Symbol.for` returns the same symbol globally regardless
+of which copy of the module is loaded. Two separately-generated
+clients in the same process produce mutually-narrowable
+`TransportError` instances by design; the marker key is intentionally
+shared across all consumers of the plugin.
+
+#### Detecting transport errors
+
+The wrapper discriminates transport rejections from HTTP error bodies
+via `err instanceof Error`. Fetch's transport errors (`TypeError`,
+`AbortError`, Node `SystemError`) all extend the global `Error`
+constructor in the same realm as the wrapper's call site; hey-api's
+wire-shape error bodies are plain object literals, never Error
+instances. (An earlier `'stack' in err` duck-type heuristic was
+rejected: debug-mode servers — Express / Koa / FastAPI — include
+stack traces in error JSON, which would mis-classify a real HTTP
+error body as TransportError and skip `parseAsync` entirely.)
 
 Pass-through ops — those with no input schemas AND no error schemas —
 stay re-binds (`export const ${opId} = ${opId}2`) so the auto-barrel
@@ -635,6 +781,84 @@ errors but no input get a real wrapper; ops with input but no errors
 get the existing input-encoding wrapper; ops with both get both
 pipelines composed in one wrapper body.
 
+#### Consumer narrowing — the canonical pattern
+
+The codegen-emitted `isTransportError` / `isResponseValidationError` /
+`isWrapperError` guards plus the wrapper's widened return type ARE
+the consumer narrowing API. The wrapper's return is statically
+`${Op}Error | TransportError | ResponseValidationError | undefined`; once you
+peel off the wrapper-error branches via the predicates, the
+remaining static type is the typed `${Op}Error` — no `as` casts, no
+type hints, no manual narrowing:
+
+```ts
+import {
+  getX,
+  isTransportError,
+  isResponseValidationError
+} from '@my-org/api-client';
+
+const { data, error } = await getX();
+if (isTransportError(error))      log.network(error.cause);
+else if (isResponseValidationError(error))   log.schemaDrift({ issues: error.cause.issues, body: error.body });
+else if (error)                   handleTyped(error);   // typed ${Op}Error, full field access
+```
+
+The consumer's `@my-org/api-client` package re-exports the
+codegen-emitted guards as part of its public surface. **Don't import
+from `./generated/*.gen.js` directly** — those are codegen artifacts
+that may move or rename. The published package is the contract.
+
+#### Cross-client runtime helpers
+
+For code paths that work across multiple generated clients (logging
+adapters, error-reporting middleware) there's a small structural
+surface published at `@polygonlabs/zod-to-openapi-heyapi/errors`.
+Useful when you don't have the wrapper return type in scope:
+
+```ts
+import {
+  categorizeApiError,
+  getApiErrorMessage,
+  isTransportError,
+  isResponseValidationError,
+  isWrapperError,
+  TRANSPORT_ERROR_MARKER,
+  RESPONSE_VALIDATION_ERROR_MARKER,
+  type TransportError,
+  type ResponseValidationError,
+  type ErrorCategory
+} from '@polygonlabs/zod-to-openapi-heyapi/errors';
+
+const category = categorizeApiError(error);
+switch (category.kind) {
+  case 'transport':           /* category.error: TransportError          */ break;
+  case 'response-validation': /* category.error: ResponseValidationError */ break;
+  case 'native-error':        /* category.error: Error                   */ break;
+  case 'other':               /* category.error: unknown                 */ break;
+}
+```
+
+Same symbol-keyed marker the codegen-emitted guards check (the
+markers come from the global `Symbol.for(...)` registry, so they're
+identity-stable across realms / module copies / iframes / workers).
+Two separately-generated clients in the same process produce
+mutually-narrowable instances.
+
+The runtime helper deliberately **does not** invent a typed-error
+category. The wrapper return already encodes the typed `${Op}Error`
+union statically; a runtime helper inventing a magic-string
+convention (e.g., `{ code: string; message: string }`) for a
+"typed" branch would lose the per-op typing the wrapper return
+carries. Code paths without the wrapper return in scope land typed
+errors in the `other` bucket; consumers with the typed return in
+scope should narrow with the codegen-emitted predicates directly.
+
+`getApiErrorMessage(error, fallback?)` returns `error.message` for
+`Error` instances (including wrapper-emitted ones, which extend
+`Error`) and the supplied fallback otherwise. It does NOT special-
+case typed-error shapes — same reason as above.
+
 ### What's not covered
 
 - **Headers**: schema-typed header maps are out of scope. Headers are
@@ -642,6 +866,49 @@ pipelines composed in one wrapper body.
   recognises a registered headers ZodObject the same way it recognises
   params / query, but the emit needs verification against
   `@hey-api/client-fetch`'s header-serialisation surface.
+
+## `responseStyle` is threaded through wrapper return types
+
+Hey-api supports two response styles, set on the client config or
+per-call options:
+
+- `responseStyle: 'fields'` (default) — wrapper returns the
+  discriminated envelope `{ data, error, request, response }` (no-
+  throw) or `{ data, request, response }` (throw, error path
+  thrown).
+- `responseStyle: 'data'` — wrapper returns the flat payload
+  (`TData` for throw, `TData | undefined` for no-throw — hey-api's
+  runtime swallows errors as `undefined` in `'data'` + no-throw).
+
+The plugin's wrappers thread `TResponseStyle` as a fourth generic
+through `WrapErrors` (error-widening wrappers) and
+`WrapPassThrough` (pass-through wrappers). Pinning the generic at
+the call site narrows the static return to match whichever style
+the runtime selects:
+
+```ts
+import { client, getX } from '@my-org/api-client';
+
+client.setConfig({ responseStyle: 'data' });
+
+// Static return: `Promise<XData>` — flat, no envelope.
+const data = await getX<true, 'data'>();
+
+// Static return: `Promise<XData | undefined>` — flat or undefined.
+const maybe = await getX<false, 'data'>();
+
+// Default 'fields' shape — static return is the discriminated envelope.
+const result = await getX();
+```
+
+Runtime behaviour stays in step: the wrapper's error-wrapping logic
+gates on `'request' in result && 'response' in result` (hey-api
+always emits those two keys in 'fields' mode and never in 'data'
+mode), and the try/catch around the SDK call wraps thrown errors in
+either style. Consumers using `'data'` + `throwOnError: true` catch
+wrapper-emitted `TransportError` / `ResponseValidationError` in
+their `catch` block, narrowing with the codegen-emitted `is*Error`
+predicates.
 
 ## What gets emitted
 
@@ -781,6 +1048,29 @@ without registered input schemas neither produce a codec factory from
 this plugin (no codec runtime shape to type against, or no Response
 type to parameterise) — those go through the upstream plugin
 unchanged.
+
+### Both factory files reach the canonical `index.ts`
+
+`defineRegistryClientConfig` sets `includeInEntry: true` on the
+upstream `@tanstack/react-query` plugin (and filters out its
+colliding `QueryKey` type-alias emission via a predicate, since this
+plugin emits the canonical `QueryKey<TOptions>`). The codec-aware
+factories live in `registry-validator.gen.ts`; the upstream
+factories live in `@tanstack/react-query.gen.ts`; both flow through
+the auto-barrel under the same op-id naming. So a consumer's React
+re-export looks like:
+
+```ts
+// my-api-client/src/react.ts — no `.gen.js` paths
+export {
+  getBlockMetadataOptions, // codec-aware (registry-validator.gen.ts)
+  getMessageOptions, // upstream (@tanstack/react-query.gen.ts)
+  // …
+} from './generated/index.js';
+```
+
+The split-by-codec-status is an internal codegen concern; the
+canonical entry hides it.
 
 ## Codegen drift
 

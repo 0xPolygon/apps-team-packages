@@ -11,26 +11,39 @@ import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
-import { client } from './__generated__/client.gen.ts';
+// Imports through the consumer-facing public surface (public-client.ts)
+// only — never deep into `__generated__/<file>.gen.ts`. Mirrors how a
+// real consumer wires the codegen into a published package; if a
+// plugin change forgets to re-export a helper, this test file (and any
+// consumer) breaks at compile time. Reaching into the deep path would
+// mask that.
+//
+// Every `createOrFetchResource` / `getCodecObject` / `getDateField` /
+// `getErrorsOnly` / `getScalarString` call below resolves to the
+// codec-aware wrapper from `registry-validator.gen.ts` (delegating to
+// `@hey-api/sdk`'s raw emission for HTTP wiring and the upstream
+// transformer for codec decoding). Behaviour is identical to the raw
+// SDK function on the success path and on declared-error responses;
+// only the error-discriminator branch — `TransportError`,
+// `ResponseValidationError` for malformed wire bodies — is a wrapper-only
+// addition, and the tests below that target those branches assert on
+// the wrapper-emitted classes directly.
 import {
+  client,
+  createOrFetchResource,
   createOrder,
   createOrderOptions,
-  createOrFetchResource as createOrFetchResourceWrapper,
-  getErrorsOnly as getErrorsOnlyWrapper,
+  getCodecObject,
+  getDateField,
+  getErrorsOnly,
+  getScalarString,
   listRecentEvents,
   lookupBlock,
   lookupBlockOptions,
   lookupBlockQueryKey,
   submitForReview,
   updateOrder
-} from './__generated__/registry-validator.gen.ts';
-import {
-  createOrFetchResource,
-  getCodecObject,
-  getDateField,
-  getErrorsOnly,
-  getScalarString
-} from './__generated__/sdk.gen.ts';
+} from './public-client.ts';
 
 const BASE_URL = 'http://api.test';
 const server = setupServer();
@@ -368,121 +381,28 @@ describe('input-side codec encoding via the SDK wrapper', () => {
   });
 });
 
-describe('error response codec decoding via the SDK wrapper', () => {
-  // The raw SDK function (in `sdk.gen.ts`) never runs a transformer on
-  // error responses — `client-fetch` only invokes responseTransformer on
-  // 2xx bodies. Without intervention, callers reading `result.error`
-  // would see wire-shape values while the type system promised the codec
-  // runtime shape. The wrapper closes that gap by calling
-  // `${opId}ErrorTransformer` on the error path. These tests exercise
-  // the wrapper directly to verify the runtime now matches the types.
+// Error-handling coverage moved to api-errors.test.ts — exhaustive
+// matrix of category × throwOnError × imperative path. The cases
+// below originally tested codec-field round-trip on typed errors
+// (`traceId: Int64Codec` → bigint), TransportError on abort, and
+// ResponseValidationError on schema mismatch; api-errors.test.ts now covers all
+// three for both throwOnError modes plus exclusivity guarantees and
+// errors-only ops. Hook-side coverage of the same matrix lives in
+// hooks.browser.test.tsx.
 
-  it('decodes throwOnError: false `result.error` through the registered schema (codec field round-trip)', async () => {
-    // ServerError carries `traceId: Int64Codec` (wire string → runtime
-    // bigint). The wrapper must run parseAsync so the caller reads the
-    // bigint that the type promises.
-    server.use(
-      http.post(`${BASE_URL}/fixtures/createOrFetch`, () =>
-        HttpResponse.json(
-          { code: 'internal_error', message: 'kaboom', traceId: '999999999999' },
-          { status: 500 }
-        )
-      )
-    );
-
-    const { data, error } = await createOrFetchResourceWrapper();
-    expect(data).toBeUndefined();
-    expect(error).toBeDefined();
-    if (error && 'traceId' in error) {
-      expect(typeof error.traceId).toBe('bigint');
-      expect(error.traceId).toBe(999999999999n);
-    } else {
-      throw new Error('expected ServerError branch with traceId');
-    }
-  });
-
-  it('decodes thrown errors on the throwOnError: true path', async () => {
-    // The SDK function throws the wire-shape body when throwOnError: true.
-    // The wrapper catches, decodes via the error transformer, and
-    // re-throws the typed shape so the caller's `catch` block sees the
-    // codec runtime value.
-    server.use(
-      http.post(`${BASE_URL}/fixtures/createOrFetch`, () =>
-        HttpResponse.json(
-          { code: 'internal_error', message: 'kaboom', traceId: '42' },
-          { status: 500 }
-        )
-      )
-    );
-
-    let caught: unknown;
-    try {
-      await createOrFetchResourceWrapper({ throwOnError: true });
-    } catch (err) {
-      caught = err;
-    }
-    expect(caught).toBeDefined();
-    if (
-      caught &&
-      typeof caught === 'object' &&
-      'traceId' in caught &&
-      typeof (caught as { traceId: unknown }).traceId === 'bigint'
-    ) {
-      expect((caught as { traceId: bigint }).traceId).toBe(42n);
-    } else {
-      throw new Error('expected typed ServerError with bigint traceId');
-    }
-  });
-
-  it('leaves error as wire-shape when parseAsync rejects (non-throwing path)', async () => {
-    // Server returns a body that doesn't match any registered error
-    // schema (no `code` field). The wrapper's error transformer
-    // throws — but the throwOnError: false caller asked for no
-    // throws, so the wrapper swallows the parse error and leaves the
-    // raw value in `result.error`. The type lie returns *only* for
-    // malformed responses, not the typical case.
-    server.use(
-      http.post(`${BASE_URL}/fixtures/createOrFetch`, () =>
-        HttpResponse.json({ unexpected: 'shape' }, { status: 500 })
-      )
-    );
-
-    const { error } = await createOrFetchResourceWrapper();
-    expect(error).toEqual({ unexpected: 'shape' });
-  });
-
-  it('re-throws raw error when parseAsync rejects (throwOnError: true path)', async () => {
-    // Same malformed-body scenario, but throwOnError: true. The wrapper
-    // tries to decode, fails, and re-throws the original wire-shape
-    // body — caller sees what the SDK function would have thrown
-    // without the wrapper, not a confusing ZodError.
-    server.use(
-      http.post(`${BASE_URL}/fixtures/createOrFetch`, () =>
-        HttpResponse.json({ unexpected: 'shape' }, { status: 500 })
-      )
-    );
-
-    let caught: unknown;
-    try {
-      await createOrFetchResourceWrapper({ throwOnError: true });
-    } catch (err) {
-      caught = err;
-    }
-    expect(caught).toEqual({ unexpected: 'shape' });
-  });
-
-  it('decodes errors-only operation result.error', async () => {
-    // `getErrorsOnly` has no 2xx — the wrapper still has full error
-    // decoding because all the schemas are registered. The codec field
-    // (`traceId` on ServerError) round-trips on the only path that
-    // exists for this op.
+describe('errors-only operation (codec field round-trip)', () => {
+  // Kept here because it's a thin parity test — the wrapper makes the
+  // same parseAsync call regardless of whether 2xx schemas exist.
+  // api-errors.test.ts proves the broader category contract; this one
+  // pins the no-success-branch case specifically.
+  it('decodes errors-only operation result.error through the registered schema', async () => {
     server.use(
       http.get(`${BASE_URL}/fixtures/errorsOnly`, () =>
         HttpResponse.json({ code: 'internal_error', message: 'no', traceId: '7' }, { status: 500 })
       )
     );
 
-    const { error } = await getErrorsOnlyWrapper();
+    const { error } = await getErrorsOnly();
     expect(error).toBeDefined();
     if (error && 'traceId' in error) {
       expect(typeof error.traceId).toBe('bigint');

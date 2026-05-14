@@ -47,3 +47,7 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 
 # pnpm
 package-lock.json
+
+# Vitest browser-mode artifacts (Playwright screenshots / diff outputs).
+# Generated per-run; not deterministic across machines / OSes / CI runners.
+**/test/__screenshots__/

@@ -1,5 +1,127 @@
 # Migration Guide
 
+## 1.2.0 → 1.3.0 (TransportError / ResponseValidationError discrimination — bug fix)
+
+1.2.0's error-decoding wrapper had a hole: when an API returned a body
+that didn't match any registered error schema, the `throwOnError: false`
+path silently left wire-shape values in `result.error` even though the
+type system claimed `result.error` was `z.output<typeof Schema>`. A
+consumer reading `result.error.traceId` (typed `bigint` via `Int64Codec`)
+would get a string at runtime. The `throwOnError: true` path also
+didn't surface validation failures clearly — the original wire-shape
+body re-threw, which caused similar runtime/type drift.
+
+1.3.0 fixes this by emitting two new classes, `TransportError` and
+`ResponseValidationError`, alongside the SDK wrappers, and **widening the
+wrapper's static return type** so the runtime shape and the static
+type stay in sync. The wrapper now sorts every error response into
+one of three categories:
+
+```ts
+type Error = ${Op}Error | TransportError | ResponseValidationError;
+```
+
+`result.error`'s static type widens to that union (delivered by an
+emitted `WrapErrors<TData, TError, ThrowOnError>` file-scope alias
+that wraps each per-op return). Consumers narrow via emitted
+type-predicate guards (`isTransportError` / `isResponseValidationError`) — no
+`instanceof` at the call site:
+
+```ts
+import { isTransportError, isResponseValidationError } from '@my-org/api-client';
+
+const { data, error } = await getX();
+if (isTransportError(error)) {
+  // Request never reached the API. error.cause is the native fetch
+  // error: TypeError / AbortError / Node SystemError with .code.
+} else if (isResponseValidationError(error)) {
+  // Got an HTTP response, body didn't match any registered schema.
+  // error.cause is the ZodError; error.body is the original wire body.
+} else if (error) {
+  // Typed ${Op}Error — codec runtime shapes intact.
+}
+```
+
+The guards are emitted with `value is TransportError` / `value is
+ResponseValidationError` type predicates, so each branch narrows `error` to the
+right shape without further casts. They check a symbol-keyed marker
+(`Symbol.for('@polygonlabs/zod-to-openapi-heyapi/is-transport-error')`,
+likewise for response-validation) — symbol identity from `Symbol.for(...)` is
+stable across realms, workers, iframes, and multiple bundle copies of
+the generated client, which `instanceof` is not.
+
+A union helper `isWrapperError(value): value is TransportError |
+ResponseValidationError` is also emitted for "log any wrapper-emitted error
+generically" call sites that don't care which category.
+
+### Internals: how transport vs schema-mismatch is decided
+
+The wrapper discriminates transport failures from schema-mismatch via
+`err instanceof Error` — fetch's transport rejections (`TypeError`,
+`AbortError`, Node `SystemError`) all extend the global `Error` in
+the same realm as the wrapper's call site, while hey-api's wire-shape
+error bodies are plain object literals. A `'stack' in err` duck-type
+heuristic was tried and rejected: debug-mode servers (Express / Koa /
+FastAPI) include stack traces in error JSON, which would be
+mis-classified as TransportError and skip `parseAsync` entirely —
+the exact failure mode this release sets out to fix.
+
+### Required: handle the new error categories
+
+Existing 1.2.0 consumers that did `if (result.error) { result.error.code }`
+without narrowing will now get a TS error: `result.error.code` doesn't
+exist on `TransportError` or `ResponseValidationError`. The fix is the three-branch
+narrow above.
+
+This is intentional — if you don't surface the unknown / transport cases
+explicitly, your code silently broke on malformed responses under 1.2.0.
+The TS error tells you exactly where to add handling.
+
+For consumers using `throwOnError: true`, the same three categories
+apply to the thrown value — same guards in the catch block.
+
+### Optional: read the wire body when debugging
+
+`ResponseValidationError.cause` is the `ZodError` from `parseAsync` (carries
+`.issues`); `ResponseValidationError.body` is the original HTTP body the server
+sent. Symmetric with `TransportError.cause` (native Error) — both
+fields are one hop from the wrapper-error. When debugging schema
+drift, log the full instance — `pino`, Sentry, and `util.inspect`
+with `{ depth: Infinity }` walk the chain:
+
+```ts
+import { logError } from './logger';
+if (isResponseValidationError(error)) {
+  logError({ err: error, body: error.body });
+}
+```
+
+For `TransportError`, `error.cause` is the native fetch error
+directly, so the same logging pattern surfaces the underlying
+`code: 'ECONNRESET'` or whatever the cause was.
+
+### Why this design
+
+Three alternatives I considered before settling on the discriminated
+classes:
+
+- **Throw on validation failure regardless of throwOnError**: kept the
+  existing `result.error` shape but broke the `throwOnError: false`
+  no-throw contract. Inconsistent semantics for the same underlying
+  problem.
+- **Add an optional `validationError` field to result**: required
+  consumers to check both `result.error` and `result.validationError`,
+  invited mis-handling. Network errors (which shouldn't run through
+  parseAsync) had nowhere clean to live.
+- **Single wrapper class for everything non-typed**: lumped
+  network failures (request never reached the API) with schema
+  mismatches (request reached the API, body didn't conform). Two
+  fundamentally different failure modes that consumers usually want to
+  handle differently.
+
+The two-class split mirrors the boundary "did the request reach the
+API at all" — clean separation, tag-based narrowing, no `instanceof`.
+
 ## 1.1.1 → 1.2.0 (`defineRegistryClientConfig` + codec-aware tanstack factories)
 
 This release adds a `defineRegistryClientConfig` factory and a
@@ -134,21 +256,17 @@ If you previously configured a bigint-aware `queryKeyHashFn` on your
 can remove it — the factory's pre-encoded queryKey contains
 wire-shape strings, not the codec runtime values.
 
-### Bug fix (no consumer action required): error response codec decoding
+### Error response decoding (initial implementation, see 1.2.1 for the fix)
 
-Operations that declare error response schemas now emit an
-`${opId}ErrorTransformer` and a real SDK wrapper that calls it, so the
-runtime value of `result.error` matches the codec runtime types the
-plugin already emits in `${Op}Error`. Previously the `${Op}Error`
-type claimed `z.output<typeof Schema>` (codec runtime shapes —
-`bigint`, `Date`, …) but `client-fetch` only runs response
-transformers on 2xx, so the runtime arrived wire-shape and silently
-diverged from the type. Both `throwOnError: false` (decoded in place
-on `result.error`) and `throwOnError: true` (caught, decoded,
-re-thrown) paths are covered.
+1.2.0 emitted `${opId}ErrorTransformer` and a wrapper that called it,
+intending to make `result.error` carry the codec runtime shape declared
+in `${Op}Error`. The implementation had a hole: `parseAsync` failures
+on the `throwOnError: false` path were silently swallowed, leaving
+wire-shape values in `result.error` and re-introducing the type/runtime
+gap on malformed responses. **1.2.1 fixes this** — see the 1.2.0 → 1.2.1
+section above. New consumers should target 1.2.1 directly.
 
-Two minor wrapper-behaviour changes worth flagging — neither
-requires consumer code changes, but they're observable:
+Two minor wrapper-behaviour changes from 1.2.0 are still relevant:
 
 - `getX === getX2` identity equality no longer holds for any op
   with declared error schemas (the wrapper is a real function, not a

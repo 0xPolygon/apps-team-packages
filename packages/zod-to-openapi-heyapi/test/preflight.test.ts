@@ -97,6 +97,32 @@ describe('@hey-api/sdk plugin pre-flight checks', () => {
     ).not.toThrow(/must be (false|true)/);
   });
 
+  it('does not raise a responseStyle assertion regardless of the configured style', async () => {
+    // `responseStyle` is no longer a pre-flight concern. The emitted
+    // wrapper signature carries a `TResponseStyle` generic that threads
+    // through to `WrapErrors`, conditionally producing hey-api's
+    // 'fields' or 'data' return shape. Static and runtime stay in step
+    // in both modes, so the codegen doesn't gate on the SDK plugin's
+    // `responseStyle` config.
+    //
+    // The handler runs past the pre-flight checks here and reaches
+    // `plugin.forEach`, which our stub doesn't implement — surface as
+    // a `TypeError: plugin.forEach is not a function` rather than any
+    // pre-flight assertion. The regex match below is scoped to
+    // `responseStyle`-related copy so the stub's separate failure
+    // doesn't false-positive.
+    const config = await buildConfig();
+    for (const responseStyle of ['fields', 'data', undefined] as const) {
+      expect(() =>
+        runHandler(config, {
+          includeInEntry: false,
+          transformer: '@polygonlabs/zod-to-openapi-heyapi',
+          responseStyle
+        })
+      ).not.toThrow(/responseStyle/);
+    }
+  });
+
   it('does not throw when @hey-api/sdk is absent (handler proceeds, may fail elsewhere)', async () => {
     // Edge case: SDK plugin not loaded at all. The pre-flight has
     // nothing to check; later steps will fail when they try to

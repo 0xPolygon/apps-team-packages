@@ -13,14 +13,33 @@
 
 import { describe, it } from 'vitest';
 
+// Test-internal raw SDK access — used as the type-level "ground truth"
+// for the non-error-widening wrappers (`getCodecObject`, `lookupBlock`)
+// where the wrapper must return *exactly* what the raw SDK function
+// returns. Wrappers that widen errors (`createOrFetchResource`,
+// `createOrder`, `getErrorsOnly`) deliberately diverge and assert
+// against `WrapErrors<...>` shapes instead, so they don't pull SDK
+// aliases. See `_test-internals.ts` for why this access is segregated
+// from the consumer-facing public surface.
 import type {
-  getCodecObjectOptions,
-  getCodecObjectQueryKey
-} from './__generated__/@tanstack/react-query.gen.ts';
+  _TestInternal_createOrderSdk,
+  _TestInternal_createOrFetchResourceSdk,
+  _TestInternal_getCodecObjectSdk,
+  _TestInternal_getErrorsOnlySdk,
+  _TestInternal_lookupBlockSdk
+} from './_test-internals.ts';
+import type * as schemas from './fixtures/schemas.ts';
+import type { z } from './fixtures/zod.ts';
+// Consumer-facing surface — same path a real consumer would import
+// from (`@my-org/api-client`). Catches barrel regressions: if the
+// plugin emits a symbol but forgets to publish it, this import
+// breaks at compile time.
 import type {
   createOrFetchResource,
   createOrder,
+  CreateOrderError,
   CreateOrderInput,
+  CreateOrderResponse,
   CreateOrFetchResourceError,
   CreateOrFetchResourceErrors,
   CreateOrFetchResourceResponse,
@@ -28,9 +47,12 @@ import type {
   createOrderOptions,
   getCodecObject,
   GetCodecObjectResponse,
+  getCodecObjectOptions,
+  getCodecObjectQueryKey,
   GetCodecObjectResponses,
   GetDateFieldResponse,
   getErrorsOnly,
+  GetErrorsOnlyError,
   ListRecentEventsInput,
   listRecentEventsOptions,
   listRecentEventsQueryKey,
@@ -40,21 +62,10 @@ import type {
   lookupBlockQueryKey,
   SubmitForReviewInput,
   submitForReviewOptions,
+  TransportError,
+  ResponseValidationError,
   UpdateOrderInput
-} from './__generated__/registry-validator.gen.ts';
-// Raw SDK functions used as the type-level "ground truth" — we want our
-// wrappers' return types to match these exactly, so the codec promises
-// the response transformer makes (success body) and the error
-// transformer makes (error body) reach the caller as-is.
-import type {
-  createOrFetchResource as createOrFetchResourceSdk,
-  createOrder as createOrderSdk,
-  getCodecObject as getCodecObjectSdk,
-  getErrorsOnly as getErrorsOnlySdk,
-  lookupBlock as lookupBlockSdk
-} from './__generated__/sdk.gen.ts';
-import type * as schemas from './fixtures/schemas.ts';
-import type { z } from './fixtures/zod.ts';
+} from './public-client.ts';
 
 type Equal<X, Y> =
   (<T>() => T extends X ? 1 : 2) extends <T>() => T extends Y ? 1 : 2 ? true : false;
@@ -224,50 +235,238 @@ type Assertions = [
   // instead of `bigint`). Asserting equality between wrapper and SDK
   // return types catches both regressions.
 
-  // Pass-through (no input, no errors).
-  Expect<
-    Equal<Awaited<ReturnType<typeof getCodecObject>>, Awaited<ReturnType<typeof getCodecObjectSdk>>>
-  >,
-  // Same wrapper with throwOnError: true narrowing.
+  // Pass-through (no input, no errors). The wrapper's return shape
+  // is `WrapPassThrough<TData, ThrowOnError, TResponseStyle>` —
+  // structurally a `RequestResult<TData, unknown, ThrowOnError,
+  // TResponseStyle>` (same discriminated union for 'fields', flat
+  // value for 'data'). The TYPE-AS-ALIAS-NAMES differ between
+  // `WrapPassThrough` and hey-api's `RequestResult`, so structural
+  // `Equal<>` against the SDK return type would fail on the
+  // conditional-type instance check even when the resolved shapes
+  // match.
+  //
+  // Instead, pin the wrapper's data field equality against the SDK's
+  // — that's the contract that actually matters at consumer call
+  // sites (the `request` / `response` envelope is fixed boilerplate;
+  // the typed data is what TS narrows on).
   Expect<
     Equal<
-      Awaited<ReturnType<typeof getCodecObject<true>>>,
-      Awaited<ReturnType<typeof getCodecObjectSdk<true>>>
+      Awaited<ReturnType<typeof getCodecObject<true>>>['data'],
+      Awaited<ReturnType<typeof _TestInternal_getCodecObjectSdk<true>>>['data']
+    >
+  >,
+  // throwOnError: false: the wrapper's data field on the success
+  // branch should match the SDK's union. We project the success
+  // branch via `Extract<…, { error: undefined }>` so the narrow
+  // resolves on both sides.
+  Expect<
+    Equal<
+      Extract<Awaited<ReturnType<typeof getCodecObject<false>>>, { error: undefined }>['data'],
+      Extract<
+        Awaited<ReturnType<typeof _TestInternal_getCodecObjectSdk<false>>>,
+        { error: undefined }
+      >['data']
     >
   >,
 
-  // Codec-input wrapper.
+  // Codec-input wrapper, data-field parity in throw mode (success-path).
   Expect<
     Equal<
-      Awaited<ReturnType<typeof lookupBlock<true>>>,
-      Awaited<ReturnType<typeof lookupBlockSdk<true>>>
+      Awaited<ReturnType<typeof lookupBlock<true>>>['data'],
+      Awaited<ReturnType<typeof _TestInternal_lookupBlockSdk<true>>>['data']
     >
   >,
 
-  // Error-decoding wrapper. Preserving the SDK return type means
-  // `result.error.traceId` is `bigint` (Int64Codec runtime), not
-  // `string` (the wire shape). The runtime test in api.test.ts
-  // proves the runtime decode actually happens; this assertion
-  // proves the type contract the wrapper makes still aligns with
-  // what the SDK function declared.
+  // Error-decoding wrapper widens `result.error` to include the
+  // wrapper-emitted `TransportError` / `ResponseValidationError` classes — the
+  // wrapper return type *deliberately differs* from the SDK return
+  // type. Preserves codec runtime shapes for typed errors
+  // (`result.error.traceId` is `bigint`, not the wire `string`) AND
+  // forces consumers to narrow before reaching typed-error fields.
+  // If this assertion ever loses the wrapper-error union, consumers
+  // re-introduce the silent `result.error.<typed-field>`-on-runtime-
+  // `ResponseValidationError` bug. `<false>` pins the throwOnError-false branch
+  // of the conditional return type so we can read `.error` directly
+  // without union-distribution gymnastics.
   Expect<
     Equal<
-      Awaited<ReturnType<typeof createOrFetchResource>>,
-      Awaited<ReturnType<typeof createOrFetchResourceSdk>>
+      Awaited<ReturnType<typeof createOrFetchResource<false>>>['error'],
+      CreateOrFetchResourceError | TransportError | ResponseValidationError | undefined
     >
   >,
 
   // Combined codec-input + error-decoding op.
   Expect<
     Equal<
-      Awaited<ReturnType<typeof createOrder<true>>>,
-      Awaited<ReturnType<typeof createOrderSdk<true>>>
+      Awaited<ReturnType<typeof createOrder<false>>>['error'],
+      CreateOrderError | TransportError | ResponseValidationError | undefined
     >
   >,
 
-  // Errors-only op.
+  // Errors-only op (no 2xx schemas registered) — `WrapErrors<unknown,
+  // GetErrorsOnlyErrors, ThrowOnError>` still widens the error union.
   Expect<
-    Equal<Awaited<ReturnType<typeof getErrorsOnly>>, Awaited<ReturnType<typeof getErrorsOnlySdk>>>
+    Equal<
+      Awaited<ReturnType<typeof getErrorsOnly<false>>>['error'],
+      GetErrorsOnlyError | TransportError | ResponseValidationError | undefined
+    >
+  >,
+
+  // ── Data-field parity for error-widening wrappers ───────────────────────────
+  //
+  // The error-widening wrappers above pin `['error']`. They MUST NOT
+  // also widen `['data']` — the data branch should match the raw SDK
+  // function's data exactly. A regression that drops the narrow data
+  // type for these wrappers (e.g., re-emits the SDK success shape as
+  // `unknown`) would silently propagate `any`-flavoured values into
+  // consumer code. Asserting equality against the raw SDK's `['data']`
+  // pins this contract without re-stating the shape literally (which
+  // would drift if the underlying schema changes).
+  Expect<
+    Equal<
+      Awaited<ReturnType<typeof createOrFetchResource<false>>>['data'],
+      Awaited<ReturnType<typeof _TestInternal_createOrFetchResourceSdk<false>>>['data']
+    >
+  >,
+  Expect<
+    Equal<
+      Awaited<ReturnType<typeof createOrder<false>>>['data'],
+      Awaited<ReturnType<typeof _TestInternal_createOrderSdk<false>>>['data']
+    >
+  >,
+  Expect<
+    Equal<
+      Awaited<ReturnType<typeof getErrorsOnly<false>>>['data'],
+      Awaited<ReturnType<typeof _TestInternal_getErrorsOnlySdk<false>>>['data']
+    >
+  >,
+
+  // ── responseStyle threading ─────────────────────────────────────────────────
+  //
+  // The wrapper signature carries a fourth `TResponseStyle` generic
+  // that threads through `WrapErrors` and conditionally produces
+  // hey-api's 'fields' or 'data' return shape. These assertions pin
+  // the four-cell matrix (style × throwOnError) so a regression in
+  // any branch surfaces at typecheck.
+  //
+  // The runtime equivalents — proving the wrapper actually returns
+  // the shape claimed here, in both styles — live in
+  // api-errors.test.ts (data-style scenarios) and api.test.ts
+  // (fields-style is the default; covered throughout).
+
+  // 'fields' (default) + throwOnError: true → { data; request; response }
+  Expect<
+    Equal<
+      Awaited<ReturnType<typeof getCodecObject<true, 'fields'>>>,
+      { data: GetCodecObjectResponse; request: Request; response: Response }
+    >
+  >,
+
+  // 'fields' (default) + throwOnError: false → discriminated union
+  // with wrapper-error union on the error path.
+  Expect<
+    Equal<
+      Awaited<ReturnType<typeof createOrder<false, 'fields'>>>['error'],
+      CreateOrderError | TransportError | ResponseValidationError | undefined
+    >
+  >,
+
+  // 'data' + throwOnError: true → flat data (no envelope, no
+  // request/response, no error slot — errors throw).
+  Expect<Equal<Awaited<ReturnType<typeof getCodecObject<true, 'data'>>>, GetCodecObjectResponse>>,
+
+  // 'data' + throwOnError: false → flat data | undefined.
+  // No discriminated union; hey-api's 'data' style swallows errors as
+  // `undefined`, so there's no slot for wrapper errors here.
+  // Consumers wanting wrapper-error narrowing in 'data' mode use
+  // throwOnError: true and catch.
+  Expect<
+    Equal<
+      Awaited<ReturnType<typeof getCodecObject<false, 'data'>>>,
+      GetCodecObjectResponse | undefined
+    >
+  >,
+  // For 'data' mode, the no-throw branch is just the throw-branch
+  // value plus `undefined` (errors swallow to undefined). Cross-check
+  // the two ways the wrapper can be parametrised produce consistent
+  // shapes.
+  Expect<
+    Equal<
+      Awaited<ReturnType<typeof createOrder<false, 'data'>>>,
+      Awaited<ReturnType<typeof createOrder<true, 'data'>>> | undefined
+    >
+  >,
+
+  // Errors-only op + 'data' style: TData is `unknown`, so the
+  // flattened-data shape collapses to `unknown` (and `unknown |
+  // undefined` simplifies back to `unknown`).
+  Expect<Equal<Awaited<ReturnType<typeof getErrorsOnly<false, 'data'>>>, unknown>>,
+
+  // ── Cross-check: 'data' shape parity vs the raw SDK ─────────────────────────
+  //
+  // Hey-api's SDK plugin doesn't thread `TResponseStyle` through the
+  // raw SDK function's signature, but the underlying client's
+  // `RequestResult` does (the same shape `WrapErrors` mirrors). The
+  // wrapper's per-call generic should produce the same 'data'-style
+  // shapes hey-api would in pre-throwing mode.
+  Expect<
+    Equal<
+      Awaited<ReturnType<typeof getCodecObject<true, 'data'>>>,
+      Awaited<ReturnType<typeof _TestInternal_getCodecObjectSdk<true>>>['data']
+    >
+  >,
+
+  // ── WrapErrors style × throwOnError matrix (error-widening wrappers) ────────
+  //
+  // The four cells of the matrix for ops with declared error schemas.
+  // The error-union cell (style='fields', throwOnError=false) is
+  // pinned above; these complete the matrix.
+
+  // 'fields' + throwOnError: true → { data; request; response }.
+  // No error field — errors throw; the wrapper's catch wraps them as
+  // TransportError / ResponseValidationError / typed `${Op}Error`,
+  // surfaced via the consumer's `catch` block (where the value is
+  // `unknown` and the codegen-emitted predicates narrow it). Pinning
+  // the return-side here proves the no-error-field shape lands.
+  Expect<
+    Equal<
+      Awaited<ReturnType<typeof createOrFetchResource<true, 'fields'>>>,
+      {
+        data: CreateOrFetchResourceResponse;
+        request: Request;
+        response: Response;
+      }
+    >
+  >,
+
+  // 'data' + throwOnError: true → flat data. Same hey-api shape as
+  // pass-through 'data' + true, but for an error-widening wrapper.
+  Expect<
+    Equal<
+      Awaited<ReturnType<typeof createOrFetchResource<true, 'data'>>>,
+      CreateOrFetchResourceResponse
+    >
+  >,
+  Expect<Equal<Awaited<ReturnType<typeof createOrder<true, 'data'>>>, CreateOrderResponse>>,
+  // Errors-only op + 'data' + throwOnError: true → unknown (no 2xx
+  // schema means no data to type; hey-api would only throw at runtime).
+  Expect<Equal<Awaited<ReturnType<typeof getErrorsOnly<true, 'data'>>>, unknown>>,
+
+  // ── WrapPassThrough style × throwOnError matrix completion ──────────────────
+  //
+  // Pass-through ops use the narrower `WrapPassThrough` alias. The
+  // 'fields' + throwOnError: false cell is the discriminated union
+  // with a bare `unknown` error (no wrapper-error union — pass-through
+  // wrappers don't wrap errors at runtime).
+  Expect<Equal<Awaited<ReturnType<typeof getCodecObject<false, 'fields'>>>['error'], unknown>>,
+  Expect<
+    Equal<
+      Extract<
+        Awaited<ReturnType<typeof getCodecObject<false, 'fields'>>>,
+        { error: undefined }
+      >['data'],
+      GetCodecObjectResponse
+    >
   >
 ];
 
