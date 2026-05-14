@@ -1,5 +1,262 @@
 # @polygonlabs/zod-to-openapi-heyapi
 
+## 1.3.0
+
+### Minor Changes
+
+- f7e1148: Complete the auto-generated `index.ts` as the canonical consumer
+  surface.
+
+  `defineRegistryClientConfig` now sets `includeInEntry: true` on
+  `@hey-api/client-fetch` (so the singleton `client` reaches the
+  auto-barrel) and on `@tanstack/react-query` (so non-codec ops'
+  `${Op}Options` / `${Op}QueryKey` factories and codec ops'
+  `${Op}Mutation` factories reach it too). The upstream tanstack
+  plugin's colliding `QueryKey` alias is suppressed via a predicate so
+  this plugin's canonical `QueryKey<TOptions>` is the only one in the
+  entry.
+
+  Before this change, consumer packages wiring up their public surface
+  had to hand-roll re-exports from `client.gen.ts` and
+  `@tanstack/react-query.gen.ts` to fill the gap — encoding internal
+  codegen file layout in the consumer's hand-written barrel. The split
+  across multiple `*.gen.ts` files (one canonical name per op id, but
+  across files chosen by codec status / HTTP verb) is non-intuitive
+  and shouldn't be something the consumer has to understand.
+
+  The result: a publishable client package's hand-written barrel can
+  re-export from `./generated/index.js` without ever naming a
+  `*.gen.ts` path. See `apps-team-ts-template/packages/example-client/src/index.ts`
+  for the reference shape.
+
+- fa6f86a: New entry: `@polygonlabs/zod-to-openapi-heyapi/errors`.
+
+  Small structural helpers for code paths that work across multiple
+  generated clients (logging adapters, generic error-reporting
+  middleware). Surface:
+  - `isTransportError`, `isUnknownError`, `isWrapperError` — same
+    type-predicate guards the codegen emits per-client, but importable
+    from the plugin itself for cross-client / no-import-cycle code.
+  - `TransportError`, `UnknownError` — structural `interface`s matching
+    the codegen-emitted classes.
+  - `categorizeApiError(value)` — returns a discriminated union
+    (`transport` / `unknown` / `native-error` / `other`).
+    Deliberately no `'typed'` branch: the wrapper return already encodes
+    the typed `${Op}Error` union statically, so consumers with the typed
+    return in scope narrow with the codegen-emitted predicates directly.
+    The `'other'` bucket carries values as `unknown` for consumer code
+    to narrow with per-op types — never a magic-string convention here.
+  - `getApiErrorMessage(value, fallback?)` — returns `error.message`
+    for `Error` instances, fallback otherwise.
+  - `TRANSPORT_ERROR_MARKER`, `UNKNOWN_ERROR_MARKER` — symbol-key
+    constants for power users.
+
+  Import via the published subpath (`/errors`); the plugin's main entry
+  stays codegen-only.
+
+  ```ts
+  import { categorizeApiError, isTransportError } from '@polygonlabs/zod-to-openapi-heyapi/errors';
+
+  const category = categorizeApiError(error);
+  switch (category.kind) {
+    case 'transport':
+      /* category.error: TransportError */ break;
+    case 'unknown':
+      /* category.error: UnknownError   */ break;
+    case 'native-error':
+      /* category.error: Error          */ break;
+    case 'other':
+      /* category.error: unknown        */ break;
+  }
+  ```
+
+  Same symbol-keyed markers the codegen-emitted guards check (the markers
+  come from the global `Symbol.for(...)` registry, so they're
+  identity-stable across realms / module copies / iframes / workers).
+
+- 275a9e5: Thread `TResponseStyle` through wrapper return types so the wrapper's
+  static type tracks hey-api's `responseStyle` runtime in both modes.
+
+  `WrapErrors<TData, TError, ThrowOnError, TResponseStyle = 'fields'>`
+  takes a fourth `TResponseStyle` generic that conditionally produces
+  hey-api's `'fields'` (`{ data, error, request, response }`) or
+  `'data'` (flat `TData` / `TData | undefined`) return shape. Every
+  emitted wrapper signature — error-widening AND pass-through —
+  carries the same fourth generic. Pass-through ops use a sibling alias
+  `WrapPassThrough<TData, ThrowOnError, TResponseStyle>` with the same
+  conditional structure minus the `TError` generic and the
+  wrapper-error union (pass-throughs don't wrap errors at runtime).
+
+  Pinning the generic at the call site narrows the static return to
+  match whatever runtime style the client / call options select:
+
+  ```ts
+  client.setConfig({ responseStyle: 'data' });
+  const data = await getX<true, 'data'>(); // flat TData
+  const maybe = await getX<false, 'data'>(); // TData | undefined
+  const fields = await getX<false>(); // { data, error, ... }
+  ```
+
+  Runtime behaviour stays in step. The wrapper's error-wrapping gate
+  switched its 'fields'-style discriminator to
+  `'request' in result && 'response' in result` — hey-api's runtime
+  omits the `data` / `error` keys on the unused half of the envelope,
+  but always emits `request` and `response` in 'fields' mode and never
+  in 'data' mode. So:
+  - `'fields'` + `throwOnError: false`: the envelope is present;
+    `result.error` is wrapped in-place as before.
+  - `'fields'` + `throwOnError: true`: the SDK throws; the wrapper's
+    catch block wraps and rethrows as before.
+  - `'data'` + `throwOnError: false`: hey-api returns the flat payload
+    on success or `undefined` on error; the discriminator skips the
+    wrap (no envelope to mutate).
+  - `'data'` + `throwOnError: true`: hey-api throws; the wrapper's
+    catch block wraps and rethrows. Consumers catch and narrow with
+    the codegen-emitted `is*Error` predicates.
+
+  Polish from the same review pass:
+  - Tighten the wrapper's error-bearing entry check from
+    `errorBearing.error != null` to
+    `typeof errorBearing.error === 'object' && errorBearing.error !== null`,
+    defending against the hostile `error: 0` / `error: ''` / `error: false`
+    cases that would otherwise fall through to `parseAsync(<primitive>)`
+    and mis-classify as a `ResponseValidationError`.
+  - Drop the redundant `{ cause }` option from `super(message, …)` in
+    emitted wrapper-error class constructors. The class declares
+    `readonly cause: <T>` and assigns it explicitly via
+    `this.cause = cause` — the super-side option was assigning the
+    same value twice for no observable benefit.
+  - Add data-field parity assertions in `types.test.ts` for the
+    error-widening wrappers (createOrFetchResource, createOrder,
+    getErrorsOnly) against the raw SDK functions exposed via
+    `_test-internals.ts`. The previous coverage pinned `['error']` only;
+    this pins `['data'] === SDK['data']` so a regression that widens
+    the data branch (e.g., re-emits as unknown) is caught at typecheck.
+
+  Coverage matrix:
+  - `types.test.ts`: complete style × throwOnError matrix for both
+    `WrapErrors` (error-widening wrappers) and `WrapPassThrough`
+    (pass-throughs), plus data-shape parity against the raw SDK return.
+  - `api-errors.test.ts`: new `'data'`-style runtime suite covering
+    success, transport, response-validation, and typed-error categories
+    for both `throwOnError` modes (errors swallow to `undefined` on
+    no-throw).
+  - `hooks.browser.test.tsx`: `useMutation` `'data'`-mode coverage of
+    the same four categories, plus the no-throw `'data'` swallowed-
+    undefined path. Query side stays unchanged — codec-aware queryFn
+    calls the raw SDK with `throwOnError: true` by design.
+
+  Also ignores `test/__screenshots__/` — vitest browser-mode artifact
+  not deterministic across machines.
+
+- d2b9a29: Fix: error-decoding wrapper now wraps non-conforming responses into
+  typed discriminator classes instead of leaking wire-shape values into
+  `result.error` (1.2.0 silently swallowed `parseAsync` failures on
+  the `throwOnError: false` path) or throwing opaque rejections (1.2.0's
+  `throwOnError: true` path re-threw the original wire-shape body).
+
+  The plugin emits two classes alongside the SDK wrappers:
+  - **`TransportError`** — request never produced an HTTP response.
+    `cause` is the native fetch error (`TypeError`, `AbortError`, Node
+    `SystemError` carrying `.code === 'ECONNRESET'` / `'ETIMEDOUT'` /
+    `'ENOTFOUND'`). `parseAsync` is **not** run against transport
+    failures — there is no body to validate, so wrapping in a
+    schema-mismatch error would be wrong.
+  - **`UnknownError`** — request produced an HTTP body, but the body
+    did not match any registered error schema. `cause` is the
+    `ZodError` from `parseAsync`; `body: unknown` is the original wire
+    body for debugging schema drift. Both fields are one hop from the
+    wrapper-error — symmetric with `TransportError.cause`.
+
+  Both classes are tagged `@internal` in JSDoc — codegen-emitted, not
+  consumer-instantiable.
+
+  Wrapper internals discriminate transport from schema-mismatch via
+  `err instanceof Error` directly. Fetch's transport rejections
+  (`TypeError`, `AbortError`, Node `SystemError`) all extend the global
+  `Error` in the wrapper's realm; hey-api's wire-shape error bodies are
+  plain object literals.
+
+  Consumer narrowing — three branches via emitted type-predicate
+  guards, no `instanceof`:
+
+  ```ts
+  import { isTransportError, isUnknownError } from '@my-org/api-client';
+
+  const { error } = await getX();
+  if (isTransportError(error)) {
+    // network / abort / DNS — error.cause is the native Error
+  } else if (isUnknownError(error)) {
+    // schema mismatch — error.cause is the ZodError, error.body is the wire body
+  } else if (error) {
+    // typed `${Op}Error`
+  }
+  ```
+
+  A third helper `isWrapperError(value): value is TransportError |
+UnknownError` is also emitted, for "log any wrapper-emitted error
+  generically" call sites.
+
+  The guards check a symbol-keyed marker (`Symbol.for(...)`), stable
+  across realms, workers, iframes, and multiple bundle copies of the
+  generated client. The same marker key (`@polygonlabs/zod-to-openapi-heyapi/is-{transport,unknown}-error`)
+  is used by every generated client, so two separately-generated clients
+  in the same process produce mutually-narrowable instances.
+
+  `result.error`'s **static** type now widens to
+  `${Op}Error | TransportError | UnknownError | undefined` (delivered
+  by an emitted file-scope `WrapErrors<TData, TError, ThrowOnError>`
+  type alias that wraps each per-op return). Existing 1.2.0 callers
+  written against `result.error.<typed-field>` without narrowing will
+  get a TS error — that's the feature, since silent runtime divergence
+  on malformed responses is the bug this release fixes.
+
+  The same shape applies to `throwOnError: true`: the thrown value is
+  `${Op}Error | TransportError | UnknownError`, and the consumer's
+  `catch` block narrows the same way.
+
+  The codec contract for `${Op}Error` stays narrow at the type level
+  (`z.output<typeof Schema>`) so consumers reading `result.error.<field>`
+  after the typed-error branch always see the codec runtime shape —
+  never a wire-shape leak, never a `ZodError`. Type and runtime are
+  kept in sync.
+
+### Patch Changes
+
+- 7ed8705: Rename `UnknownError` → `ResponseValidationError`.
+
+  The old name described the consumer's perception ("we don't know what
+  this is"). The class is structurally always
+  `new ResponseValidationError(zodError, wireBody)` — `cause` is
+  `ZodError`, never anything else; `body` is the wire payload that
+  failed parse. Naming it after the layer (response-side validation)
+  is symmetric with `TransportError` (transport-layer failure) and
+  disambiguates from request-side `z.encode` failures the plugin also
+  runs.
+
+  Mechanical rename surface:
+  - `UnknownError` → `ResponseValidationError`
+  - Marker key: `@polygonlabs/zod-to-openapi-heyapi/is-unknown-error`
+    → `@polygonlabs/zod-to-openapi-heyapi/is-response-validation-error`
+  - Guard: `isUnknownError` → `isResponseValidationError`
+  - `UNKNOWN_ERROR_MARKER` → `RESPONSE_VALIDATION_ERROR_MARKER` in the
+    `/errors` subpath
+  - `categorizeApiError` discriminator: `kind: 'unknown'`
+    → `kind: 'response-validation'`
+  - `isWrapperError` and its predicate union update accordingly
+
+  Also: the structural `ResponseValidationError.cause` type in the
+  `/errors` subpath now claims the full `ZodError` (not the prior
+  asymmetric `{ issues }` shape), so cross-client consumers reach
+  `.format()` / `.flatten()` / `.issues` without a cast. `zod` is
+  already a peer dependency (every generated client imports it for
+  `parseAsync`); the import is type-only — the `/errors` module has
+  no runtime dependency on `zod`.
+
+  Marked as `patch` because the wrapper-error surface introduced in the
+  same release (1.3.0) is still pre-release; there are no on-npm
+  consumers to break.
+
 ## 1.2.0
 
 ### Minor Changes
