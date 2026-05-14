@@ -1,9 +1,7 @@
 {
-  "extends": ["@tsconfig/node24", "@tsconfig/node-ts"],
-  "compilerOptions": {
-    "noEmit": true,
-    "customConditions": ["@polygonlabs/source"]
-  },
+  "extends": "./tsconfig.base.json",
+  "compileOnSave": false,
+  "files": [],
   "references": [
     { "path": "packages/apps-team-lint" },
     { "path": "packages/express" },

@@ -18,5 +18,5 @@ export default defineConfig([
       ]
     }
   },
-  { ignores: ['.claude/**', '**/dist/**'] }
+  { ignores: ['.claude/**', '**/dist/**', '**/out-tsc/**'] }
 ]);
