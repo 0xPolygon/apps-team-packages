@@ -306,8 +306,8 @@ importers:
   packages/wallet-kit:
     devDependencies:
       '@0xsequence/connect':
-        specifier: ^6.0.5
-        version: 6.0.5(0xsequence@2.3.43(ethers@6.16.0))(@0xsequence/hooks@6.0.5(@0xsequence/api@3.0.6)(@0xsequence/indexer@3.0.6)(@0xsequence/metadata@2.3.43)(@0xsequence/wallet-primitives@3.0.6(typescript@5.9.3)(zod@4.3.6))(@tanstack/react-query@5.100.1(react@19.2.5))(react-dom@19.2.5(react@19.2.5))(react@19.2.5)(viem@2.48.4(typescript@5.9.3)(zod@4.3.6)))(@databeat/tracker@0.9.3)(@react-oauth/google@0.11.1(react-dom@19.2.5(react@19.2.5))(react@19.2.5))(@tanstack/react-query@5.100.1(react@19.2.5))(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(ethers@6.16.0)(react-apple-signin-auth@1.1.2(react-dom@19.2.5(react@19.2.5))(react@19.2.5))(react-dom@19.2.5(react@19.2.5))(react-hook-form@7.73.1(react@19.2.5))(react@19.2.5)(typescript@5.9.3)(viem@2.48.4(typescript@5.9.3)(zod@4.3.6))(wagmi@3.6.4(@tanstack/query-core@5.100.1)(@tanstack/react-query@5.100.1(react@19.2.5))(@types/react@19.2.14)(react@19.2.5)(typescript@5.9.3)(viem@2.48.4(typescript@5.9.3)(zod@4.3.6)))(zod@4.3.6)
+        specifier: ^6.0.6
+        version: 6.0.6(0xsequence@2.3.43(ethers@6.16.0))(@0xsequence/hooks@6.0.6(@0xsequence/api@3.0.6)(@0xsequence/indexer@3.0.6)(@0xsequence/metadata@2.3.43)(@0xsequence/wallet-primitives@3.0.6(typescript@5.9.3)(zod@4.3.6))(@tanstack/react-query@5.100.1(react@19.2.5))(react-dom@19.2.5(react@19.2.5))(react@19.2.5)(viem@2.48.4(typescript@5.9.3)(zod@4.3.6)))(@databeat/tracker@0.9.3)(@react-oauth/google@0.11.1(react-dom@19.2.5(react@19.2.5))(react@19.2.5))(@tanstack/react-query@5.100.1(react@19.2.5))(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(ethers@6.16.0)(react-apple-signin-auth@1.1.2(react-dom@19.2.5(react@19.2.5))(react@19.2.5))(react-dom@19.2.5(react@19.2.5))(react-hook-form@7.73.1(react@19.2.5))(react@19.2.5)(typescript@5.9.3)(viem@2.48.4(typescript@5.9.3)(zod@4.3.6))(wagmi@3.6.4(@tanstack/query-core@5.100.1)(@tanstack/react-query@5.100.1(react@19.2.5))(@types/react@19.2.14)(react@19.2.5)(typescript@5.9.3)(viem@2.48.4(typescript@5.9.3)(zod@4.3.6)))(zod@4.3.6)
       '@tanstack/react-query':
         specifier: ^5.59.13
         version: 5.100.1(react@19.2.5)
@@ -467,11 +467,11 @@ packages:
     peerDependencies:
       ethers: '>=6'
 
-  '@0xsequence/connect@6.0.5':
-    resolution: {integrity: sha512-JHKBFoXwaELrY13DmOYnbrYQIStWuCMbpYcKhc3QbwSWplSUPmX1q12v3sfRPMcSwv42dezAJlLjCBQ6nKS/vw==}
+  '@0xsequence/connect@6.0.6':
+    resolution: {integrity: sha512-quE5F4xoDMWMEQOHi1hETiLTQs+Ct1zr+hWMK3LzohDbLbB7OLfHT/7VvJvGNK67o4iKCgkfZFerwuolCP/Cxg==}
     peerDependencies:
       0xsequence: '>= 2.3.43'
-      '@0xsequence/hooks': 6.0.5
+      '@0xsequence/hooks': 6.0.6
       '@coinbase/wallet-sdk': ^4.3.6
       '@databeat/tracker': ^0.9.3
       '@metamask/sdk': ~0.33.1
@@ -520,8 +520,8 @@ packages:
   '@0xsequence/guard@3.0.6':
     resolution: {integrity: sha512-codsLEGSh+PACHlAJOk1mBlrmYwuuolmLo2pzBfu9ekzUbtGIYbbaUebbzcK7r3ZSjcvMG3R+Mzqx5041WVK1Q==}
 
-  '@0xsequence/hooks@6.0.5':
-    resolution: {integrity: sha512-nTZjOab0G6rUDeIWiuXX19/AoCgCcZ/aIulMWu/+5tvPvPyqdwymUSylVTkA4NUBXSwnGIqfN1aOOpP6cnxrpw==}
+  '@0xsequence/hooks@6.0.6':
+    resolution: {integrity: sha512-KPJerhUTXT3B/IFO4FwtvVgAPo0ONxVww+L8GWrpIM5lZHYOBlkVA2QdXK585FGkrjosHYKenNCk61H9kZxyvA==}
     peerDependencies:
       '@0xsequence/api': '>=3.0.1'
       '@0xsequence/indexer': '>=3.0.1'
@@ -5040,6 +5040,7 @@ packages:
 
   uuid@10.0.0:
     resolution: {integrity: sha512-8XkAphELsDnEGrDxUOHB3RGvXz6TeuYSGEZBOjtTtPm2lwhGBjLgOzLHB63IUWfBpNucQjND6d3AOudO+H3RWQ==}
+    deprecated: uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).
     hasBin: true
 
   vary@1.1.2:
@@ -5345,7 +5346,7 @@ snapshots:
       '@0xsequence/wallet': 2.3.43(ethers@6.16.0)
       ethers: 6.16.0
 
-  '@0xsequence/connect@6.0.5(0xsequence@2.3.43(ethers@6.16.0))(@0xsequence/hooks@6.0.5(@0xsequence/api@3.0.6)(@0xsequence/indexer@3.0.6)(@0xsequence/metadata@2.3.43)(@0xsequence/wallet-primitives@3.0.6(typescript@5.9.3)(zod@4.3.6))(@tanstack/react-query@5.100.1(react@19.2.5))(react-dom@19.2.5(react@19.2.5))(react@19.2.5)(viem@2.48.4(typescript@5.9.3)(zod@4.3.6)))(@databeat/tracker@0.9.3)(@react-oauth/google@0.11.1(react-dom@19.2.5(react@19.2.5))(react@19.2.5))(@tanstack/react-query@5.100.1(react@19.2.5))(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(ethers@6.16.0)(react-apple-signin-auth@1.1.2(react-dom@19.2.5(react@19.2.5))(react@19.2.5))(react-dom@19.2.5(react@19.2.5))(react-hook-form@7.73.1(react@19.2.5))(react@19.2.5)(typescript@5.9.3)(viem@2.48.4(typescript@5.9.3)(zod@4.3.6))(wagmi@3.6.4(@tanstack/query-core@5.100.1)(@tanstack/react-query@5.100.1(react@19.2.5))(@types/react@19.2.14)(react@19.2.5)(typescript@5.9.3)(viem@2.48.4(typescript@5.9.3)(zod@4.3.6)))(zod@4.3.6)':
+  '@0xsequence/connect@6.0.6(0xsequence@2.3.43(ethers@6.16.0))(@0xsequence/hooks@6.0.6(@0xsequence/api@3.0.6)(@0xsequence/indexer@3.0.6)(@0xsequence/metadata@2.3.43)(@0xsequence/wallet-primitives@3.0.6(typescript@5.9.3)(zod@4.3.6))(@tanstack/react-query@5.100.1(react@19.2.5))(react-dom@19.2.5(react@19.2.5))(react@19.2.5)(viem@2.48.4(typescript@5.9.3)(zod@4.3.6)))(@databeat/tracker@0.9.3)(@react-oauth/google@0.11.1(react-dom@19.2.5(react@19.2.5))(react@19.2.5))(@tanstack/react-query@5.100.1(react@19.2.5))(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(ethers@6.16.0)(react-apple-signin-auth@1.1.2(react-dom@19.2.5(react@19.2.5))(react@19.2.5))(react-dom@19.2.5(react@19.2.5))(react-hook-form@7.73.1(react@19.2.5))(react@19.2.5)(typescript@5.9.3)(viem@2.48.4(typescript@5.9.3)(zod@4.3.6))(wagmi@3.6.4(@tanstack/query-core@5.100.1)(@tanstack/react-query@5.100.1(react@19.2.5))(@types/react@19.2.14)(react@19.2.5)(typescript@5.9.3)(viem@2.48.4(typescript@5.9.3)(zod@4.3.6)))(zod@4.3.6)':
     dependencies:
       0xsequence: 2.3.43(ethers@6.16.0)
       '@0xsequence/api': 3.0.6
@@ -5354,7 +5355,7 @@ snapshots:
       '@0xsequence/dapp-client': 3.0.6(typescript@5.9.3)(zod@4.3.6)
       '@0xsequence/design-system': 3.2.9(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(motion@12.38.0(react-dom@19.2.5(react@19.2.5))(react@19.2.5))(react-dom@19.2.5(react@19.2.5))(react-hook-form@7.73.1(react@19.2.5))(react@19.2.5)
       '@0xsequence/ethauth': 1.0.0(ethers@6.16.0)
-      '@0xsequence/hooks': 6.0.5(@0xsequence/api@3.0.6)(@0xsequence/indexer@3.0.6)(@0xsequence/metadata@2.3.43)(@0xsequence/wallet-primitives@3.0.6(typescript@5.9.3)(zod@4.3.6))(@tanstack/react-query@5.100.1(react@19.2.5))(react-dom@19.2.5(react@19.2.5))(react@19.2.5)(viem@2.48.4(typescript@5.9.3)(zod@4.3.6))
+      '@0xsequence/hooks': 6.0.6(@0xsequence/api@3.0.6)(@0xsequence/indexer@3.0.6)(@0xsequence/metadata@2.3.43)(@0xsequence/wallet-primitives@3.0.6(typescript@5.9.3)(zod@4.3.6))(@tanstack/react-query@5.100.1(react@19.2.5))(react-dom@19.2.5(react@19.2.5))(react@19.2.5)(viem@2.48.4(typescript@5.9.3)(zod@4.3.6))
       '@0xsequence/indexer': 3.0.6
       '@0xsequence/provider': 2.3.43(ethers@6.16.0)
       '@0xsequence/waas': 2.3.43(ethers@6.16.0)
@@ -5453,7 +5454,7 @@ snapshots:
       - typescript
       - zod
 
-  '@0xsequence/hooks@6.0.5(@0xsequence/api@3.0.6)(@0xsequence/indexer@3.0.6)(@0xsequence/metadata@2.3.43)(@0xsequence/wallet-primitives@3.0.6(typescript@5.9.3)(zod@4.3.6))(@tanstack/react-query@5.100.1(react@19.2.5))(react-dom@19.2.5(react@19.2.5))(react@19.2.5)(viem@2.48.4(typescript@5.9.3)(zod@4.3.6))':
+  '@0xsequence/hooks@6.0.6(@0xsequence/api@3.0.6)(@0xsequence/indexer@3.0.6)(@0xsequence/metadata@2.3.43)(@0xsequence/wallet-primitives@3.0.6(typescript@5.9.3)(zod@4.3.6))(@tanstack/react-query@5.100.1(react@19.2.5))(react-dom@19.2.5(react@19.2.5))(react@19.2.5)(viem@2.48.4(typescript@5.9.3)(zod@4.3.6))':
     dependencies:
       '@0xsequence/api': 3.0.6
       '@0xsequence/indexer': 3.0.6
