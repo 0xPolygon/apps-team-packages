@@ -309,3 +309,12 @@ export type OperationsOf<
 export type SchemesOf<
   F extends () => TypedRegistry<Record<string, RouteWithOpId>, Record<string, true>>
 > = ReturnType<F> extends TypedRegistry<Record<string, RouteWithOpId>, infer S> ? S : never;
+
+// Re-export the inference types and helper from the public surface so
+// `tsc --declaration` in consumer packages can name them without needing
+// a deep import into `./dist/inferErrorResponses.js`. Without this, `tsc`
+// emits TS2742 in consumers whose inferred `buildRegistry` (or chain
+// helpers like `addBlockRoutes`) return type references `MergedRoute` —
+// the type would only be reachable via the package's internal subpath.
+export type { InferredStandardErrorResponses, MergedRoute } from './inferErrorResponses.ts';
+export { inferStandardErrorResponses } from './inferErrorResponses.ts';
