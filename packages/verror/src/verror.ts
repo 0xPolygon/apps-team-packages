@@ -60,10 +60,22 @@ export class VError extends Error {
   readonly info: Record<string, unknown>;
 
   constructor(message: string, options?: VErrorOptions) {
-    const { cause, constructorOpt, info: infoOpt = {}, skipCauseMessage } = options ?? {};
+    const { cause, constructorOpt, info: infoOpt = {} } = options ?? {};
+
+    // W-by-default classes (WError, HTTPError, and any subclass that sets
+    // the marker on its prototype) suppress cause-message accumulation.
+    // Read from the *prototype* via `new.target` so the marker is visible
+    // here in the base constructor, before subclass instance-field
+    // initialisers have run. `new.target` points at the most-derived
+    // constructor; prototype-chain lookup picks the symbol up no matter
+    // which ancestor set it.
+    const isWError =
+      new.target !== undefined &&
+      WERROR_SYMBOL in new.target.prototype &&
+      (new.target.prototype as Record<symbol, unknown>)[WERROR_SYMBOL] === true;
 
     let fullMessage = message;
-    if (cause != null && !skipCauseMessage) {
+    if (cause != null && !isWError) {
       const causeMsg = VError.accumulateCauseMessage(cause);
       if (causeMsg) fullMessage = message === '' ? causeMsg : `${message}: ${causeMsg}`;
     }
@@ -235,38 +247,41 @@ export const MULTIERROR_SYMBOL: unique symbol = Symbol.for('@polygonlabs/verror/
 
 /**
  * A "wrapped error" — like VError but the cause's message is intentionally
- * NOT appended to this error's own message.  The cause is still traversable
- * via `VError.cause()` and visible in `toString()`, but cause chains remain
- * separate log entries rather than a single ever-growing message string.
+ * NOT appended to this error's own message. The cause is still traversable
+ * via `VError.cause()` and serialised under `cause` by `serializeError` /
+ * `toJSON`, but neither `.message` nor `.toString()` mention it.
  *
  * Use WError when you want to wrap a lower-level error with a distinct
- * higher-level description without the noise of duplicating the cause message.
+ * higher-level description without the noise (or risk) of duplicating the
+ * cause message. The boundary semantics are uniform across `.message` and
+ * `.toString()` — anywhere the error is stringified, only its own message
+ * surfaces. Code that wants the cause walks `err.cause` explicitly.
+ *
+ * Identity is signalled by `WERROR_SYMBOL` on this class's prototype (set
+ * in the static block below). `VError`'s constructor reads it via
+ * `new.target.prototype` during `super()` and suppresses cause-message
+ * accumulation. Subclasses inherit the marker automatically — no custom
+ * constructor or per-class wiring needed.
  */
 export class WError extends VError {
   override readonly name: string = 'WError';
 
-  // Presence of this property (checked via WERROR_SYMBOL) identifies WError
-  // and its subclasses across module boundaries without relying on instanceof.
-  readonly [WERROR_SYMBOL] = true;
-
-  constructor(
-    message: string,
-    options: Omit<VErrorOptions, 'skipCauseMessage'> & { cause: Error }
-  ) {
-    super(message, { ...options, skipCauseMessage: true });
+  static {
+    // Symbol on the prototype (not an instance field) so `VError`'s
+    // constructor sees it through `new.target.prototype` during `super()`,
+    // before any subclass instance-field initialisers have run. Any class
+    // extending WError (or any class that sets the same marker on its own
+    // prototype, e.g. `HTTPError`) is treated as a boundary wrapper.
+    (WError.prototype as unknown as Record<symbol, unknown>)[WERROR_SYMBOL] = true;
   }
 
-  override toString(): string {
-    const name =
-      (Object.prototype.hasOwnProperty.call(this, 'name') && this.name) ||
-      this.constructor.name ||
-      this.constructor.prototype.name;
-    let str = this.message ? `${name}: ${this.message}` : name;
-    const cause = (this as { cause?: unknown }).cause;
-    if (cause instanceof Error && cause.message) {
-      str += `; caused by ${cause.toString()}`;
-    }
-    return str;
+  // Type-narrowing constructor: WError exists to wrap something, so
+  // `cause: Error` is required on the public API. The runtime behaviour
+  // (suppress cause-message accumulation) is derived from the prototype
+  // marker above and works equally well for any subclass — this override
+  // is purely about the type signature at the call site.
+  constructor(message: string, options: VErrorOptions & { cause: Error }) {
+    super(message, options);
   }
 }
 
