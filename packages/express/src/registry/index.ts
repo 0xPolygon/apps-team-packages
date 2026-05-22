@@ -27,7 +27,7 @@ import type { Request, RequestHandler, Router as RouterType } from 'express';
 
 import { Router } from 'express';
 
-import { NotAuthenticated } from '@polygonlabs/verror';
+import { HTTPError } from '@polygonlabs/verror';
 
 import type { ZodErrorTree } from './errorSchemas.ts';
 import type {
@@ -39,6 +39,7 @@ import type {
   OperationsManifest
 } from './types.ts';
 
+import { sendErrorResponse, sendHttpErrorResponse } from '../respond.ts';
 import { openApiToExpressPath } from './pathMatching.ts';
 import { createRequestValidator, createResponseValidator } from './validation.ts';
 
@@ -318,7 +319,7 @@ function createAuthMiddleware(
     handlersForOp.push({ name, handler });
   }
 
-  return async (req, _res, next) => {
+  return async (req, res, next) => {
     try {
       const auth: Record<string, unknown> = {};
       for (const { name, handler } of handlersForOp) {
@@ -331,17 +332,19 @@ function createAuthMiddleware(
       (req as Request & { auth?: Record<string, unknown> }).auth = auth;
       next();
     } catch (err) {
-      // Surface a clear default if the auth handler threw a non-HTTPError —
-      // wrap as NotAuthenticated so the response is 401 instead of 500.
-      // HTTPError subclasses (NotAuthenticated, Forbidden, etc) pass through.
-      if (err instanceof Error && err.name !== 'NotAuthenticated' && err.name !== 'Forbidden') {
-        const isHttpError = typeof (err as { statusCode?: unknown }).statusCode === 'number';
-        if (!isHttpError) {
-          next(new NotAuthenticated('authentication failed', { cause: err }));
-          return;
-        }
+      // Respond directly. The auth handler is user code: it picks the
+      // status by throwing a specific HTTPError subclass (NotAuthenticated,
+      // Forbidden, etc.). We honour that choice. A non-HTTPError throw
+      // means the auth handler had an unexpected failure — default to 401
+      // with a generic message so credentials-validation failures don't
+      // surface as 500s. No log on 4xx (client fault); a 5xx from a
+      // handler-thrown HTTPError is expected to have been logged by the
+      // auth handler before the throw (team convention).
+      if (err instanceof HTTPError) {
+        sendHttpErrorResponse(res, err);
+        return;
       }
-      next(err);
+      sendErrorResponse(res, 401, 'authentication failed');
     }
   };
 }

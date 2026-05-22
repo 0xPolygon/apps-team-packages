@@ -42,6 +42,10 @@ import type { z } from 'zod';
 
 import { OpenAPIRegistry as OpenAPIRegistryClass } from '@asteasolutions/zod-to-openapi';
 
+import type { MergedRoute } from './inferErrorResponses.ts';
+
+import { inferStandardErrorResponses } from './inferErrorResponses.ts';
+
 /** A registered route — RouteConfig with required operationId. */
 export type RouteWithOpId = RouteConfig & { operationId: string };
 
@@ -131,12 +135,28 @@ export class TypedRegistry<
    * Requires `operationId` on the route — it's the accumulator key.
    * (RouteConfig upstream types it optional, but every operation that
    * needs typed handler binding downstream must declare one anyway.)
+   *
+   * Standard framework-emitted error responses (400 for validation, 401
+   * for auth, 500 always) are auto-injected into `responses` based on
+   * what the route declares — see `inferErrorResponses.ts` for the rules
+   * and rationale. User-authored response slots win over inferred ones,
+   * so a route can still override a status code's shape by declaring it.
    */
   registerPath<const O extends RouteWithOpId>(
     route: O
-  ): TypedRegistry<Ops & { [K in O['operationId']]: O }, Schemes> {
-    this.inner.registerPath(route);
-    return this as unknown as TypedRegistry<Ops & { [K in O['operationId']]: O }, Schemes>;
+  ): TypedRegistry<Ops & { [K in O['operationId']]: MergedRoute<O> }, Schemes> {
+    const merged = {
+      ...route,
+      responses: {
+        ...inferStandardErrorResponses(route),
+        ...route.responses
+      }
+    } as O;
+    this.inner.registerPath(merged);
+    return this as unknown as TypedRegistry<
+      Ops & { [K in O['operationId']]: MergedRoute<O> },
+      Schemes
+    >;
   }
 
   /**

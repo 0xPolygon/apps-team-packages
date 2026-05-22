@@ -92,27 +92,32 @@ describe('WError — cause message is NOT appended', () => {
 });
 
 describe('WError — toString', () => {
-  it('message with cause', () => {
+  // WError.toString returns ONLY the wrapper's own `name: message`. The
+  // cause is reachable via `err.cause` / `VError.cause(err)` and walked
+  // by the serialiser for logs, but never re-appended to a stringified
+  // form. This is the boundary contract: anywhere a WError is coerced
+  // to string (template literals, accidental `${err}` in a hand-rolled
+  // response message, console formatters), only the boundary-author's
+  // message surfaces — never the underlying cause.
+
+  it('message — cause text does NOT leak into toString', () => {
     const root = new Error('root cause');
     expect(new WError('proximate cause: 3 issues', { cause: root }).toString()).toBe(
-      'WError: proximate cause: 3 issues; caused by Error: root cause'
+      'WError: proximate cause: 3 issues'
     );
   });
 
-  it('chained WErrors', () => {
+  it('chained WErrors — each layer toStrings to its own', () => {
     const root = new Error('root cause');
     const mid = new WError('proximate cause: 3 issues', { cause: root });
     const top = new WError('top', { cause: mid });
-    expect(top.toString()).toBe(
-      'WError: top; caused by WError: proximate cause: 3 issues; caused by Error: root cause'
-    );
+    expect(top.toString()).toBe('WError: top');
+    expect(mid.toString()).toBe('WError: proximate cause: 3 issues');
   });
 
-  it('caused by VError', () => {
+  it('caused by VError — VError cause text does NOT leak through W boundary', () => {
     const root = new Error('root cause');
     const vErr = new VError('mid', { cause: root });
-    expect(new WError('top', { cause: vErr }).toString()).toBe(
-      'WError: top; caused by VError: mid: root cause'
-    );
+    expect(new WError('top', { cause: vErr }).toString()).toBe('WError: top');
   });
 });

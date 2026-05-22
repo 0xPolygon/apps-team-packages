@@ -96,7 +96,7 @@ describe('createErrorHandler sanitises ethers fetch errors end-to-end', () => {
   });
 
   it('captured log err.info.requestUrl is reduced to origin, not full URL', () => {
-    const errLogs = captured.filter((c) => c.level === 'debug' && c.message === 'unhandled error');
+    const errLogs = captured.filter((c) => c.level === 'error' && c.message === 'unhandled error');
     expect(errLogs).property('length').greaterThan(0);
     const err = errLogs[0]?.err as { info?: { requestUrl?: string } } | undefined;
     expect(err?.info).property('requestUrl', `http://localhost:${rpcPort}`);

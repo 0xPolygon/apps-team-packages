@@ -45,6 +45,12 @@ new VError('msg', { cause: new Error(), info: { k: 1 } });
 
 // ── WError constructor ──────────────────────────────────────────────────────
 
+// WError exists to wrap a cause. The constructor signature narrows
+// `VErrorOptions` to require `cause: Error` so the type system surfaces a
+// "you didn't wrap anything" mistake at the call site. The runtime W-semantics
+// (suppress cause-message accumulation) come from `WERROR_SYMBOL` on the
+// prototype.
+
 // @ts-expect-error options are required because cause is mandatory
 new WError('msg');
 
@@ -54,7 +60,7 @@ new WError('msg', {});
 // @ts-expect-error cause must be an Error, not an arbitrary value
 new WError('msg', { cause: 'not an error' });
 
-// @ts-expect-error skipCauseMessage is omitted from WError options — it is internal
+// @ts-expect-error skipCauseMessage has been removed from VErrorOptions
 new WError('msg', { cause: new Error(), skipCauseMessage: true });
 
 // valid forms

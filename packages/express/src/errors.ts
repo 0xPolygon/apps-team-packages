@@ -13,10 +13,12 @@ import { getLogger } from './context.ts';
  * Responsibilities:
  *   - Map `HTTPError` subclass `statusCode` onto the HTTP response status.
  *     Anything that is not an `HTTPError` becomes 500.
- *   - Log 5xx responses at debug level via `getLogger()`, so every entry
- *     inherits the per-request `requestId` for Datadog correlation. 4xx
- *     responses are not logged here — they are client-facing validation
- *     errors, not server faults.
+ *   - Log non-`HTTPError` throws at error level via `getLogger()` — they
+ *     are unhandled server faults that nothing else in the request
+ *     lifecycle has logged. `HTTPError` throws are not logged here: the
+ *     thrower is expected to have logged the cause before wrapping (the
+ *     standard "use WError / HTTPError at boundaries" convention), and
+ *     4xx is itself the client's signal.
  *   - Sanitise the error before deriving an HTTP response message from it,
  *     so `err.message` — which the service author has implicitly chosen as
  *     the client-visible message by throwing a `VError` or letting the
@@ -38,12 +40,11 @@ import { getLogger } from './context.ts';
  */
 export function createErrorHandler(): ErrorRequestHandler {
   return (err, _req, res, _next) => {
-    const status = err instanceof HTTPError ? err.statusCode : 500;
-
-    if (status >= 500) {
-      getLogger().debug({ err }, 'unhandled error');
+    if (!(err instanceof HTTPError)) {
+      getLogger().error({ err }, 'unhandled error');
     }
 
+    const status = err instanceof HTTPError ? err.statusCode : 500;
     const sanitised = sanitiseEthersFetchError(err);
     const message =
       sanitised?.message ?? (err instanceof Error ? err.message : 'Internal server error');

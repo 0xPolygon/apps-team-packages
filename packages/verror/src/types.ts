@@ -7,9 +7,4 @@ export interface VErrorOptions {
    * Defaults to the constructor of the class being instantiated.
    */
   constructorOpt?: ((...args: unknown[]) => unknown) | null;
-  /**
-   * @internal Used by WError to suppress cause message appending.
-   * Do not set this directly — use WError instead.
-   */
-  skipCauseMessage?: boolean;
 }
