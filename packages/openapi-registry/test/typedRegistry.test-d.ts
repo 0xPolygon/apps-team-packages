@@ -14,6 +14,7 @@
 
 import { z } from 'zod';
 
+import type { ErrorResponseSchema, ValidationErrorResponseSchema } from '../src/error-schemas.ts';
 import type {
   EmptyOperationsManifestError,
   OperationsOf,
@@ -363,4 +364,156 @@ void discardedReturns;
   // @ts-expect-error a populated manifest is NOT the brand string
   const branded: EmptyOperationsManifestError = {} as Ops;
   void branded;
+}
+
+// === registerPath auto-injects 500 into the response accumulator ============
+
+// Every route gets a 500 in its accumulated `responses` type, regardless of
+// whether the user authored one. The codegen client picks this up so callers
+// can pattern-match `5xx` errors without per-route boilerplate.
+{
+  const r = new TypedRegistry().registerPath({
+    operationId: 'plain',
+    method: 'get',
+    path: '/x',
+    responses: okResponse
+  });
+
+  // 500 is present and its schema is ErrorResponseSchema.
+  const fiveHundred: {
+    description: string;
+    content: { 'application/json': { schema: typeof ErrorResponseSchema } };
+  } = r.ops.plain.responses[500];
+  void fiveHundred;
+
+  // The user-authored 200 still surfaces alongside.
+  const twoHundred = r.ops.plain.responses[200];
+  void twoHundred;
+}
+
+// === registerPath auto-injects 400 when request validation is declared ======
+
+// Any of `request.{params,query,body,headers}` triggers the 400 narrow.
+{
+  const r = new TypedRegistry().registerPath({
+    operationId: 'withBody',
+    method: 'post',
+    path: '/x',
+    request: {
+      body: { content: { 'application/json': { schema: z.object({ text: z.string() }) } } }
+    },
+    responses: okResponse
+  });
+
+  // 400 surfaces in the accumulator with ValidationErrorResponseSchema.
+  const fourHundred: {
+    description: string;
+    content: { 'application/json': { schema: typeof ValidationErrorResponseSchema } };
+  } = r.ops.withBody.responses[400];
+  void fourHundred;
+}
+
+// === registerPath does NOT inject 400 when request validation is absent =====
+
+{
+  const r = new TypedRegistry().registerPath({
+    operationId: 'plain',
+    method: 'get',
+    path: '/x',
+    responses: okResponse
+  });
+
+  // @ts-expect-error 400 was not declared and not inferred — must NOT be on responses
+  const fourHundred = r.ops.plain.responses[400];
+  void fourHundred;
+}
+
+// === registerPath auto-injects 401 when security is declared ================
+
+{
+  const r = new TypedRegistry()
+    .registerSecurityScheme('ApiKeyAuth', { type: 'apiKey', name: 'x-api-key', in: 'header' })
+    .registerPath({
+      operationId: 'authed',
+      method: 'get',
+      path: '/x',
+      security: [{ ApiKeyAuth: [] }],
+      responses: okResponse
+    });
+
+  const fourOhOne: {
+    description: string;
+    content: { 'application/json': { schema: typeof ErrorResponseSchema } };
+  } = r.ops.authed.responses[401];
+  void fourOhOne;
+}
+
+// === registerPath does NOT inject 401 when security is absent ===============
+
+{
+  const r = new TypedRegistry().registerPath({
+    operationId: 'plain',
+    method: 'get',
+    path: '/x',
+    responses: okResponse
+  });
+
+  // @ts-expect-error 401 must NOT be on responses for an unsecured route
+  const fourOhOne = r.ops.plain.responses[401];
+  void fourOhOne;
+}
+
+// === 403 and 404 are NEVER auto-injected (handler-emitted, not framework) ===
+
+{
+  const r = new TypedRegistry()
+    .registerSecurityScheme('ApiKeyAuth', { type: 'apiKey', name: 'x-api-key', in: 'header' })
+    .registerPath({
+      operationId: 'authedWithBody',
+      method: 'post',
+      path: '/x',
+      security: [{ ApiKeyAuth: [] }],
+      request: {
+        body: { content: { 'application/json': { schema: z.object({}) } } }
+      },
+      responses: okResponse
+    });
+
+  // @ts-expect-error 403 must NOT be auto-injected — authz is handler-level
+  const fourOhThree = r.ops.authedWithBody.responses[403];
+  void fourOhThree;
+
+  // @ts-expect-error 404 must NOT be auto-injected — lookup misses are handler-level
+  const fourOhFour = r.ops.authedWithBody.responses[404];
+  void fourOhFour;
+}
+
+// === User-authored responses win over inferred ones =========================
+
+// A route that declares its own 500 with a custom schema must end up with
+// that custom schema in the accumulator, not ErrorResponseSchema.
+{
+  const CustomFiveHundred = z.object({ custom: z.literal(true) });
+  const r = new TypedRegistry().registerPath({
+    operationId: 'customFiveHundred',
+    method: 'get',
+    path: '/x',
+    responses: {
+      200: { description: 'ok', content: { 'application/json': { schema: z.object({}) } } },
+      500: {
+        description: 'custom 500',
+        content: { 'application/json': { schema: CustomFiveHundred } }
+      }
+    }
+  });
+
+  // The user's custom schema is what surfaces — not ErrorResponseSchema.
+  const fiveHundredSchema: typeof CustomFiveHundred =
+    r.ops.customFiveHundred.responses[500].content['application/json'].schema;
+  void fiveHundredSchema;
+
+  // @ts-expect-error the inferred ErrorResponseSchema must NOT be the schema for this slot
+  const wrongSchema: typeof ErrorResponseSchema =
+    r.ops.customFiveHundred.responses[500].content['application/json'].schema;
+  void wrongSchema;
 }
