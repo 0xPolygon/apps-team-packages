@@ -33,7 +33,7 @@
     "test": "vitest run",
     "lint": "eslint .",
     "clean": "rm -rf node_modules dist out-tsc *.tsbuildinfo",
-    "prepublishOnly": "pnpm run build:clean"
+    "prepublishOnly": "pnpm run build"
   },
   "dependencies": {
     "@commitlint/config-conventional": "^19.0.0",
