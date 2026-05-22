@@ -33,6 +33,7 @@ import { TypedRegistry } from '@polygonlabs/openapi-registry';
 import { Int64Codec, IsoDateCodec } from '@polygonlabs/zod-codecs';
 
 import type { HandlerMap } from '../../src/registry/index.ts';
+import type { Captured } from '../helpers/captureLogger.ts';
 
 import { setupLogger } from '../../src/context.ts';
 import { createErrorHandler } from '../../src/errors.ts';
@@ -258,21 +259,24 @@ const handlers: HandlerMap<Operations> = {
 
 describe('registry-driven router integration', () => {
   let app!: Express;
+  let captured!: Captured[];
 
   beforeAll(async () => {
     // Real logger captured to an in-memory stream — primes the
     // `setupLogger` fallback so `getLogger()` inside `createErrorHandler`
-    // resolves to a working logger when 5xx responses are emitted.
-    // The captured array is intentionally unused; tests assert on the HTTP
-    // response, not on log lines.
-    const { logger } = await makeCaptureLogger();
+    // resolves to a working logger when 5xx responses are emitted. The
+    // captured array is also asserted on by the response-validation tests
+    // below to confirm 5xx emissions log at `error` level (so Sentry
+    // alerts fire on server bugs).
+    const cap = await makeCaptureLogger();
+    captured = cap.captured;
 
     const registry = buildRegistry();
     const router = createRegistryRouter({ registry }).implement(handlers);
 
     app = express();
     app.use(json());
-    app.use(setupLogger(logger));
+    app.use(setupLogger(cap.logger));
     app.use(router.toExpress());
     app.use(createErrorHandler());
   });
@@ -399,6 +403,28 @@ describe('registry-driven router integration', () => {
     it('routes z.encode failures from res.json to the global error handler (500)', async () => {
       const r = await supertest(app).get('/bad-shape').expect(500);
       expect(r.body).toMatchObject({ error: true });
+    });
+
+    it('encode failures surface a safe hand-written message, not the ZodError text', async () => {
+      const r = await supertest(app).get('/bad-shape').expect(500);
+      expect(r.body).property('message', 'Response failed schema validation');
+      expect(JSON.stringify(r.body)).not.contain('invalid_type');
+      expect(JSON.stringify(r.body)).not.contain('"code"');
+    });
+
+    it('encode failures attach operationId to info for triage', async () => {
+      const r = await supertest(app).get('/bad-shape').expect(500);
+      expect(r.body).nested.property('info.operationId', 'badShape');
+    });
+
+    it('encode failures log at error level at the detection site (Sentry-visible)', async () => {
+      captured.length = 0;
+      await supertest(app).get('/bad-shape').expect(500);
+      const errorLogs = captured.filter(
+        (c) => c.level === 'error' && c.message === 'response failed schema validation'
+      );
+      expect(errorLogs).property('length').greaterThan(0);
+      expect(errorLogs[0]).property('operationId', 'badShape');
     });
   });
 });
