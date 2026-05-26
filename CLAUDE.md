@@ -56,6 +56,19 @@ Per-package `package.json` scripts:
 - `build`: `pnpm run typecheck && tsc -b tsconfig.lib.json` for library
   packages — target the lib config explicitly so the build emits the library
   payload only, not the spec output.
+- `build:clean`: same as `build` with an `rm -rf dist out-tsc *.tsbuildinfo`
+  between the typecheck and the lib rebuild. For ad-hoc local use only when
+  you want to discard incremental state and rebuild from scratch.
+- `prepublishOnly`: `pnpm run build`. **Never** point this at `build:clean`.
+  `changesets publish` invokes every package's `prepublishOnly` in
+  topological order, but the npm registry upload is async — the next
+  package's hook starts before the previous publish settles. If package A's
+  `build:clean` is mid-`rm` when package B's `prepublishOnly` (which
+  typechecks B's full graph including upstream `dist/`s via `tsconfig.lib.json`'s
+  `customConditions: []`) runs, B fails with `TS2307: Cannot find module
+  '@polygonlabs/A'`. Using `build` (idempotent, no rm) closes the window.
+  See `apps-team-packages` failed run 26293267252 for the original
+  manifestation during the `@polygonlabs/express@3.0.0` release.
 
 ## Adding a New Package
 

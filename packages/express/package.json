@@ -44,7 +44,7 @@
     "test": "vitest run",
     "lint": "eslint .",
     "clean": "rm -rf node_modules dist out-tsc *.tsbuildinfo",
-    "prepublishOnly": "pnpm run build:clean"
+    "prepublishOnly": "pnpm run build"
   },
   "devDependencies": {
     "@asteasolutions/zod-to-openapi": "^8.5.0",

@@ -27,7 +27,7 @@
     "typecheck": "tsc -b",
     "lint": "eslint .",
     "clean": "rm -rf node_modules dist out-tsc *.tsbuildinfo",
-    "prepublishOnly": "pnpm run build:clean"
+    "prepublishOnly": "pnpm run build"
   },
   "dependencies": {
     "@inquirer/prompts": "^7.0.0",
