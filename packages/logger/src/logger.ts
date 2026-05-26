@@ -2,9 +2,7 @@ import type { DestinationStream, Logger, LoggerOptions } from 'pino';
 
 import { pino, stdSerializers } from 'pino';
 
-import { VError, WERROR_SYMBOL } from '@polygonlabs/verror';
-
-import { sanitiseEthersFetchError } from './sanitise.ts';
+import { sanitiseEthersFetchError, VError, WERROR_SYMBOL } from '@polygonlabs/verror';
 
 /**
  * Duck-typed interface for Sentry error capturing. Matches the surface of
@@ -121,15 +119,21 @@ export async function createLogger(options?: CreateLoggerOptions): Promise<Logge
     serializers: {
       // Extend pino's standard err serializer with two transforms:
       //
-      // 1. Ethers fetch-error sanitisation. If `err` (or anything in its
-      //    `.cause` chain) matches the v5 or v6 fetch-error fingerprint,
-      //    replace it with a sanitised clone whose messages and stacks are
-      //    URL-stripped and whose ethers-node `info.requestUrl` is reduced
-      //    to origin. The wrapping cause chain is preserved, so operators
-      //    still see "what was being attempted" above the RPC failure.
-      //    This runs across EVERY log call that passes `{ err }` — not
-      //    just HTTP handlers — because the leak applies to any logger
-      //    consumer that passes an ethers error.
+      // 1. RPC fetch-error sanitisation. If `err` (or anything in its
+      //    `.cause` chain) matches the ethers v5/v6 or viem fetch-error
+      //    fingerprint, replace it with a sanitised clone whose messages
+      //    and stacks are URL-stripped and whose detected node's
+      //    `info.requestUrl` is reduced to origin (ethers) or emptied
+      //    (viem, which carries the URL only in message text). The
+      //    wrapping cause chain is preserved, so operators still see
+      //    "what was being attempted" above the RPC failure. This runs
+      //    across EVERY log call that passes `{ err }` — not just HTTP
+      //    handlers — because the leak applies to any logger consumer
+      //    that passes an RPC error. The same sanitiser fires inside
+      //    `@polygonlabs/verror`'s `serializeError` / `VError.toJSON`
+      //    so persistence paths (Firestore, status routes, Sentry) are
+      //    safe by default; calling it here too keeps pino's standard
+      //    `err` serializer pipeline operating on a safe `Error` value.
       //
       // 2. VError.info chain-merge. VError.info() walks the full cause
       //    chain and merges info from all links, whereas stdSerializers.err

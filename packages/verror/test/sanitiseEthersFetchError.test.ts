@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import { BadRequest, NotFound, VError, WError } from '@polygonlabs/verror';
-
-import { sanitiseEthersFetchError } from '../src/index.ts';
+import { BadRequest, NotFound } from '../src/http.ts';
+import { sanitiseEthersFetchError } from '../src/sanitise.ts';
+import { serializeError, VError, WError } from '../src/verror.ts';
 
 function buildV6Error(secret = 'SECRET'): Error {
   return Object.assign(
@@ -54,11 +54,14 @@ describe('sanitiseEthersFetchError — non-ethers inputs', () => {
     expect(sanitiseEthersFetchError({ info: { requestUrl: 'http://x' } })).equal(null);
   });
 
-  it('returns null for a plain Error with a URL in its message but no ethers fingerprint', () => {
-    // Non-ethers HTTP clients (viem, web3, custom fetch wrappers) that leak
-    // URLs via `err.message` are out of scope — this sanitiser is specifically
-    // for ethers fetch errors. Other library-specific leaks get their own
-    // detector if and when we add support for them.
+  it('returns null for a plain Error with a URL in its message but no library fingerprint', () => {
+    // HTTP clients we have no detector for (web3, custom fetch wrappers,
+    // generic node-fetch failures) that leak URLs only via `err.message`
+    // are out of scope — without a structural fingerprint we can't safely
+    // distinguish a leaky RPC error from a benign error that happens to
+    // mention a URL. The viem and ethers detectors below cover the
+    // libraries the team actually uses; add another when a new RPC
+    // library shows up.
     const err = new Error('fetch failed: https://api.example/private?token=X returned 401');
     expect(sanitiseEthersFetchError(err)).equal(null);
   });
@@ -160,6 +163,102 @@ describe('sanitiseEthersFetchError — ethers v5 shape', () => {
     expect(sanitised).not.property('url');
     expect(sanitised).not.property('body');
     expect(sanitised).not.property('responseText');
+  });
+});
+
+describe('sanitiseEthersFetchError — viem shape', () => {
+  // viem `BaseError` populates `metaMessages: string[]` with lines like
+  // "URL: https://…/?token=…" and "Request body: {...}", and rolls every
+  // child's compound text up into each parent's `message`. The detector
+  // fingerprints on `name === 'RpcRequestError' | 'HttpRequestError'` plus
+  // the `metaMessages` array marker.
+  function buildViemRpcRequestError(secret = 'SECRET'): Error {
+    const url = `https://rpc.polygon.tools/internal/evm/1?token=${secret}`;
+    const body = `{"method":"eth_estimateGas","params":[{}]}`;
+    const message = `RPC Request failed.\n\nURL: ${url}\nRequest body: ${body}\n\nDetails: ...\nVersion: viem@2.38.1`;
+    return Object.assign(new Error(message), {
+      name: 'RpcRequestError',
+      shortMessage: 'RPC Request failed.',
+      metaMessages: [`URL: ${url}`, `Request body: ${body}`],
+      details: 'Internal JSON-RPC error.',
+      version: 'viem@2.38.1'
+    });
+  }
+
+  it('detects a viem RpcRequestError and strips the URL from message and stack', () => {
+    const err = buildViemRpcRequestError('TOKEN_DEEP');
+    err.stack = `RpcRequestError: RPC Request failed.\n    at fetch (https://rpc.polygon.tools/internal/evm/1?token=TOKEN_DEEP)\n    at handler (/app/idle.ts:116:13)`;
+    const sanitised = sanitiseEthersFetchError(err);
+    expect(sanitised).instanceOf(Error);
+    expect(sanitised?.message).not.contain('TOKEN_DEEP');
+    expect(sanitised?.stack ?? '').not.contain('TOKEN_DEEP');
+    expect(sanitised?.message).contain('RPC Request failed.');
+  });
+
+  it('does not falsely match an unrelated error class that happens to share the name', () => {
+    // Without the metaMessages-array marker, the name alone is too weak a
+    // fingerprint. This is a defence-in-depth guard against a stray
+    // application error class colliding with viem's naming.
+    const lookalike = Object.assign(new Error('not really viem'), {
+      name: 'RpcRequestError'
+    });
+    expect(sanitiseEthersFetchError(lookalike)).equal(null);
+  });
+
+  it('detects a viem chain wrapped with VError — reproduces the rebalancer service-status leak', () => {
+    // Mirrors the cause chain observed on l2-spol-rebalancer-mainnet's
+    // /service-status: a VError thrown from the handler wraps a
+    // ContractFunctionExecutionError that nests through several viem
+    // exec errors down to the RpcRequestError carrying the token URL.
+    // Every wrapping viem error echoes the URL in its own compound
+    // message — defence-in-depth URL stripping must clean all of them.
+    const SECRET = 'D7E70C45-4CA6-47F2-B4CF-15BB4580E927';
+    const url = `https://rpc.polygon.tools/internal/evm/1?token=${SECRET}`;
+    const rpcErr = buildViemRpcRequestError(SECRET);
+    const innerFeeCap = Object.assign(
+      new Error(
+        `The fee cap (\`maxFeePerGas\` = 0.076 gwei) cannot be lower than the block base fee.\n\nURL: ${url}\nVersion: viem@2.38.1`
+      ),
+      {
+        name: 'FeeCapTooLowError',
+        cause: rpcErr,
+        shortMessage:
+          'The fee cap (`maxFeePerGas` = 0.076 gwei) cannot be lower than the block base fee.'
+      }
+    );
+    const contractErr = Object.assign(
+      new Error(
+        `Contract Call failed.\n\nURL: ${url}\nDocs: https://viem.sh/docs/contract/writeContract\nVersion: viem@2.38.1`
+      ),
+      {
+        name: 'ContractFunctionExecutionError',
+        cause: innerFeeCap,
+        shortMessage: 'Contract Call failed.'
+      }
+    );
+    const outer = new VError('Error sending updateL2ExchangeRate transaction', {
+      cause: contractErr,
+      info: { operatorAddress: '0x348E8742a8B4bc6A16197bb3A9177Ad21c7e3a43' }
+    });
+
+    const sanitised = sanitiseEthersFetchError(outer);
+    expect(sanitised).instanceOf(Error);
+    // No node in the chain may carry the token.
+    const chainJson = JSON.stringify(sanitised, (_k, v) => {
+      if (v instanceof Error) {
+        return {
+          name: v.name,
+          message: v.message,
+          stack: v.stack,
+          cause: (v as { cause?: unknown }).cause
+        };
+      }
+      return v;
+    });
+    expect(chainJson).not.contain(SECRET);
+    // The outer wrapper's info is preserved — operators still see what was attempted.
+    const sanitisedInfo = (sanitised as Error & { info?: Record<string, unknown> }).info;
+    expect(sanitisedInfo).property('operatorAddress', '0x348E8742a8B4bc6A16197bb3A9177Ad21c7e3a43');
   });
 });
 
@@ -296,5 +395,123 @@ describe('sanitiseEthersFetchError — ethers error wrapped as VError/WError cau
     expect(chain[0]?.stack ?? '').not.contain('makeInnerEthers');
     expect(chain[0]?.stack ?? '').not.contain('makeMid');
     expect(chain[1]?.stack ?? '').not.contain('makeInnerEthers');
+  });
+});
+
+describe('serializeError — auto-sanitises RPC fetch errors', () => {
+  // The whole reason sanitiseEthersFetchError lives in @polygonlabs/verror
+  // rather than @polygonlabs/logger: every persistence path that hits
+  // `serializeError` must be safe by default. Logger consumers historically
+  // got URL-stripping via the pino `err` serializer, but anything else that
+  // serialised an error (Firestore writes for state-machine `lastError`,
+  // `/service-status`-style routes returning the JSON shape directly,
+  // Sentry's error capture, persisted Multi​Error errors[] arrays) had to
+  // remember to call the sanitiser by hand — and didn't, which is how the
+  // l2-spol-rebalancer-mainnet /service-status leak (2026-05-19) happened.
+  // These tests pin the auto-sanitise behaviour into the public contract
+  // of `serializeError` and `VError.toJSON` so the leak class can't recur.
+
+  function buildV6Error(secret: string): Error {
+    return Object.assign(
+      new Error(
+        `server response 401 Unauthorized (info={ "requestUrl": "http://host/?token=${secret}" })`
+      ),
+      {
+        shortMessage: 'server response 401 Unauthorized',
+        code: 'SERVER_ERROR',
+        info: { requestUrl: `http://host/?token=${secret}`, responseStatus: '401 Unauthorized' }
+      }
+    );
+  }
+
+  it('serializeError strips URLs when given a plain ethers v6 error', () => {
+    const SECRET = 'SERIALIZE_V6_SECRET';
+    const json = serializeError(buildV6Error(SECRET));
+    expect(JSON.stringify(json)).not.contain(SECRET);
+    // The structured `info.requestUrl` is reduced to origin so operators
+    // still see *which host* the call hit, just not the token.
+    const info = (json as { info?: { requestUrl?: string } }).info;
+    expect(info).property('requestUrl', 'http://host');
+  });
+
+  it('serializeError strips URLs when a VError wraps the RPC failure', () => {
+    const SECRET = 'SERIALIZE_VERROR_SECRET';
+    const wrapped = new VError('Failed to fetch block number', {
+      cause: buildV6Error(SECRET),
+      info: { operatorAddress: '0xabc' }
+    });
+    const json = serializeError(wrapped);
+    // The full nested JSON shape is URL-free.
+    expect(JSON.stringify(json)).not.contain(SECRET);
+    // The wrapper's `info` survives sanitisation — operators keep the
+    // "what was being attempted" context even after the URL strip.
+    expect((json as { info?: Record<string, unknown> }).info).property('operatorAddress', '0xabc');
+    // The wrapper's shortMessage survives too rather than collapsing to
+    // the full sanitised compound message.
+    expect((json as { shortMessage?: string }).shortMessage).equal('Failed to fetch block number');
+  });
+
+  it('JSON.stringify(verror) is also safe — VError.toJSON sanitises on direct calls', () => {
+    // Defence in depth: callers may bypass `serializeError` entirely and
+    // serialise via `JSON.stringify`. The auto-sanitise on toJSON catches
+    // this path too.
+    const SECRET = 'JSON_STRINGIFY_SECRET';
+    const wrapped = new VError('upstream RPC unreachable', { cause: buildV6Error(SECRET) });
+    const stringified = JSON.stringify(wrapped);
+    expect(stringified).not.contain(SECRET);
+  });
+
+  it('serializeError on a non-RPC error is unchanged (no false sanitisation)', () => {
+    // A plain Error or a VError without an RPC fingerprint anywhere in the
+    // chain must serialise exactly as before — the auto-sanitise hook is
+    // a no-op when there's nothing to strip. Pins the "no collateral
+    // damage" property: changing the canonical shape for non-RPC errors
+    // would break every existing log/persist site.
+    const wrapped = new VError('database connection reset', {
+      info: { connectionId: 42 }
+    });
+    const json = serializeError(wrapped);
+    expect(json).property('name', 'VError');
+    expect(json).property('message', 'database connection reset');
+    expect(json).property('shortMessage', 'database connection reset');
+    expect((json as { info?: Record<string, unknown> }).info).property('connectionId', 42);
+  });
+
+  it('reproduces the l2-spol-rebalancer /service-status leak end-to-end', () => {
+    // Exact viem chain shape observed on l2-spol-rebalancer-mainnet's
+    // /service-status response: a VError thrown from the idle handler
+    // wraps viem's ContractFunctionExecutionError → … → RpcRequestError
+    // carrying the token URL. Pre-fix: `serializeError(err)` produced JSON
+    // with the token verbatim. Post-fix: the token is gone at every
+    // nesting level.
+    const SECRET = 'D7E70C45-4CA6-47F2-B4CF-15BB4580E927';
+    const url = `https://rpc.polygon.tools/internal/evm/1?token=${SECRET}`;
+    const rpcErr = Object.assign(
+      new Error(`RPC Request failed.\n\nURL: ${url}\nVersion: viem@2.38.1`),
+      {
+        name: 'RpcRequestError',
+        shortMessage: 'RPC Request failed.',
+        metaMessages: [`URL: ${url}`]
+      }
+    );
+    const contractErr = Object.assign(
+      new Error(`Contract Call failed.\n\nURL: ${url}\nVersion: viem@2.38.1`),
+      {
+        name: 'ContractFunctionExecutionError',
+        cause: rpcErr,
+        shortMessage: 'Contract Call failed.'
+      }
+    );
+    const outer = new VError('Error sending updateL2ExchangeRate transaction', {
+      cause: contractErr,
+      info: { operatorAddress: '0x348E8742a8B4bc6A16197bb3A9177Ad21c7e3a43' }
+    });
+
+    const json = serializeError(outer);
+    expect(JSON.stringify(json)).not.contain(SECRET);
+    expect((json as { info?: Record<string, unknown> }).info).property(
+      'operatorAddress',
+      '0x348E8742a8B4bc6A16197bb3A9177Ad21c7e3a43'
+    );
   });
 });
