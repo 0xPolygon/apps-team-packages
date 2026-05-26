@@ -1,6 +1,7 @@
 ---
 '@polygonlabs/verror': minor
 '@polygonlabs/logger': minor
+'@polygonlabs/express': minor
 ---
 
 Closes an RPC-token leak class: `serializeError` and `VError.toJSON` now
@@ -21,11 +22,10 @@ inherits URL stripping via the per-node walk.
 
 ## Why this is in `@polygonlabs/verror` now
 
-`sanitiseEthersFetchError` is an Error primitive — peer with `cause`,
-`info`, `fullStack` — not a logging concern. It lived in
-`@polygonlabs/logger` historically because logger was the first
-consumer, but that meant every other persistence path had to remember
-to wire it in by hand. The
+The sanitiser is an Error primitive — peer with `cause`, `info`,
+`fullStack` — not a logging concern. It lived in `@polygonlabs/logger`
+historically because logger was the first consumer, but that meant every
+other persistence path had to remember to wire it in by hand. The
 [l2-spol-rebalancer-mainnet](https://github.com/0xPolygon/lst-api/tree/main/packages/l2-spol-rebalancer)
 `/service-status` leak (2026-05-19) happened because the state machine's
 `setError` action called `serializeError(err)` on a viem-wrapped
@@ -33,13 +33,30 @@ to wire it in by hand. The
 Moving the sanitiser down the dep graph and invoking it inside
 `serializeError` removes the footgun for every future caller.
 
+## `serializeError` is now the canonical entry point
+
+`sanitiseRpcFetchError` is exported (and re-exported by
+`@polygonlabs/logger` for back-compat) but marked `@internal` — services
+should prefer `serializeError` / `VError.toJSON` for any serialisation
+work. The lower-level primitive is appropriate only for pipelines that
+need `Error`-in/`Error`-out semantics (the canonical case is logger's
+pino `err` serializer, which feeds the sanitised clone into pino's
+`stdSerializers.err`).
+
+`@polygonlabs/express`'s `createErrorHandler` has been migrated to
+`serializeError` accordingly — it now reads `message` off the serialised
+shape rather than calling the sanitiser directly. The exported behaviour
+is unchanged.
+
 ## Backward compatibility
 
-- `@polygonlabs/logger` continues to export `sanitiseEthersFetchError`
-  (re-exported from `@polygonlabs/verror`), so existing
-  `import { sanitiseEthersFetchError } from '@polygonlabs/logger'`
-  sites — `@polygonlabs/express`'s `createErrorHandler()`, services
-  wiring it manually — keep working without code change.
+- `sanitiseRpcFetchError` is still re-exported from `@polygonlabs/logger`
+  so any existing
+  `import { sanitiseRpcFetchError } from '@polygonlabs/logger'` site
+  keeps working without code change. (The previous name —
+  `sanitiseEthersFetchError` — was renamed in this release since the
+  function now covers viem; the rename hits any direct caller at
+  typecheck time rather than silently.)
 - Public type signatures unchanged.
 - Behaviour change for `serializeError`: a chain containing an RPC
   fetch error now produces sanitised JSON instead of the verbatim

@@ -2,7 +2,7 @@ import type { DestinationStream, Logger, LoggerOptions } from 'pino';
 
 import { pino, stdSerializers } from 'pino';
 
-import { sanitiseEthersFetchError, VError, WERROR_SYMBOL } from '@polygonlabs/verror';
+import { sanitiseRpcFetchError, VError, WERROR_SYMBOL } from '@polygonlabs/verror';
 
 /**
  * Duck-typed interface for Sentry error capturing. Matches the surface of
@@ -146,7 +146,7 @@ export async function createLogger(options?: CreateLoggerOptions): Promise<Logge
       //    `@err.info.requestUrl` in Datadog is the origin, never the
       //    full URL.
       err(err: unknown) {
-        const safeErr: unknown = sanitiseEthersFetchError(err) ?? err;
+        const safeErr: unknown = sanitiseRpcFetchError(err) ?? err;
 
         const base = stdSerializers.err(safeErr as Error);
         if (safeErr instanceof Error) {

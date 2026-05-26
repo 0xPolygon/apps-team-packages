@@ -219,16 +219,21 @@ function sanitiseNode(e: Error, detected: Detected | null): Error {
  * Flattening the chain to a single RPC-only clone throws away the first
  * half — which is exactly the half operators reach for when debugging.
  *
- * Callers rarely invoke this directly: `serializeError` and `VError.toJSON`
- * call it at their entry, so any persistence path (logs, status routes,
- * Sentry, Firestore) is safe by default. Direct invocation is supported
- * for consumers that need a sanitised `Error` value rather than a
- * serialised `Record` — `@polygonlabs/logger`'s pino `err` serializer
- * uses it that way to keep `Error`-typed inputs to pino's `stdSerializers`
- * pipeline, and `@polygonlabs/express`'s global error handler uses the
- * sanitised clone's `.message` directly for HTTP response bodies.
+ * @internal
+ *
+ * Prefer `serializeError` / `VError.toJSON` for any serialisation path —
+ * they call this function at their entry, so logs, status routes, Sentry
+ * events, Firestore documents, and `JSON.stringify(err)` are all safe by
+ * default without the caller knowing this function exists. This export
+ * is a building block for the narrow set of pipelines that need an
+ * `Error`-in/`Error`-out sanitiser rather than a serialised `Record`:
+ * the canonical example is `@polygonlabs/logger`'s pino `err` serializer,
+ * which feeds the sanitised clone into pino's `stdSerializers.err` to
+ * inherit pino's standard error shape. Adding a new direct call site is
+ * a signal to review whether `serializeError` would do — almost always
+ * the answer is yes.
  */
-export function sanitiseEthersFetchError(err: unknown): Error | null {
+export function sanitiseRpcFetchError(err: unknown): Error | null {
   if (!(err instanceof Error)) return null;
 
   const chain = walkCauseChain(err);

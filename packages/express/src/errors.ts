@@ -1,7 +1,6 @@
 import type { ErrorRequestHandler } from 'express';
 
-import { sanitiseEthersFetchError } from '@polygonlabs/logger';
-import { HTTPError } from '@polygonlabs/verror';
+import { HTTPError, serializeError } from '@polygonlabs/verror';
 
 import { getLogger } from './context.ts';
 
@@ -23,7 +22,7 @@ import { getLogger } from './context.ts';
  *     so `err.message` — which the service author has implicitly chosen as
  *     the client-visible message by throwing a `VError` or letting the
  *     error bubble unwrapped — never leaks `?token=<secret>` from an
- *     underlying ethers RPC URL.
+ *     underlying RPC URL (ethers v5/v6 or viem).
  *
  * Whether the client sees "Failed to fetch block number: server response
  * 401 Unauthorized (…)" or a terse hand-written string is a service-author
@@ -33,10 +32,12 @@ import { getLogger } from './context.ts';
  * URL-free.
  *
  * Log-side URL sanitisation happens inside `@polygonlabs/logger`'s pino
- * err serializer, not here — every service that logs an ethers error
+ * err serializer, not here — every service that logs an RPC error
  * anywhere (request handler, cron, background worker, unhandled
  * rejection) gets the same protection, not just ones that reach this
- * middleware.
+ * middleware. Persistence-side sanitisation runs inside
+ * `@polygonlabs/verror`'s `serializeError` / `VError.toJSON`, covering
+ * Firestore writes, status routes, Sentry events, and `JSON.stringify`.
  */
 export function createErrorHandler(): ErrorRequestHandler {
   return (err, _req, res, _next) => {
@@ -45,9 +46,14 @@ export function createErrorHandler(): ErrorRequestHandler {
     }
 
     const status = err instanceof HTTPError ? err.statusCode : 500;
-    const sanitised = sanitiseEthersFetchError(err);
+    // `serializeError` auto-sanitises RPC fetch errors (ethers v5/v6,
+    // viem) — its `message` field is URL-free even when `err.message`
+    // would have leaked a `?token=<secret>` from an underlying RPC URL.
+    // Non-RPC errors pass through untouched.
+    const serialized = serializeError(err);
     const message =
-      sanitised?.message ?? (err instanceof Error ? err.message : 'Internal server error');
+      (typeof serialized?.message === 'string' ? serialized.message : undefined) ??
+      (err instanceof Error ? err.message : 'Internal server error');
 
     const body: Record<string, unknown> = { error: true, message };
 

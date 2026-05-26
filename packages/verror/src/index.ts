@@ -6,7 +6,7 @@ export {
   WERROR_SYMBOL,
   MULTIERROR_SYMBOL
 } from './verror.ts';
-export { sanitiseEthersFetchError } from './sanitise.ts';
+export { sanitiseRpcFetchError } from './sanitise.ts';
 export type { VErrorOptions } from './types.ts';
 export {
   HTTPError,

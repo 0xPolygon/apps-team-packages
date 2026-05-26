@@ -123,24 +123,27 @@ No `declare module 'express-serve-static-core'` augmentation, no global
 type mutation on `Request`. Call sites explicitly import `getLogger` from
 this package.
 
-## Ethers fetch-error sanitisation
+## RPC fetch-error sanitisation
 
-`JsonRpcProvider`, `FallbackProvider`, and anything built on either ethers
-v5's `Logger.throwError` or ethers v6's `FetchRequest` embed the full
-request URL — including any `?token=<secret>` query string — in several
-places on the thrown error. The structural detection and URL-stripping
-that keeps those tokens out of log output lives in
-[`@polygonlabs/logger`](../logger)'s pino `err` serializer, so every
-`{ err }` log call everywhere in a service is protected automatically —
-not only those routed through this package's error handler. See the
-logger's README for shape details and the `sanitiseEthersFetchError`
-export that drives it.
+Ethers (v5 `Logger.throwError`, v6 `FetchRequest`) and viem
+(`RpcRequestError`, `HttpRequestError`) embed the full request URL —
+including any `?token=<secret>` query string — in several places on the
+thrown error. URL-stripping is built into `@polygonlabs/verror`'s
+`serializeError` and `VError.toJSON`, so every persistence path that
+hands an error to either of them is safe by default — including
+`@polygonlabs/logger`'s pino `err` serializer, this package's error
+handler, Firestore writes, status routes, Sentry events, and
+`JSON.stringify(err)`. Logger's pino pipeline also runs the sanitiser
+directly on the `Error` value (so pino's standard serializer sees a
+URL-free `message` and `stack`). See the logger's README for the broader
+shape of log-side sanitisation.
 
 ### How `createErrorHandler` uses it for the response body
 
-When the error middleware runs, it calls `sanitiseEthersFetchError` on
-the raw error and uses the sanitised clone's `.message` for the response
-body. Whatever the service author intended to bubble up — the `VError`'s
+When the error middleware runs, it passes the raw error to
+`serializeError` and uses the serialised shape's `message` field for the
+response body. `serializeError` auto-sanitises RPC fetch errors, so
+whatever the service author intended to bubble up — the `VError`'s
 compound message, a `WError`'s own text, an `HTTPError` subclass's
 literal — arrives at the client with every URL in it reduced to its
 origin. The handler does not second-guess the service author's choice of

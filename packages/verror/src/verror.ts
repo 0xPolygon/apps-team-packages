@@ -1,6 +1,6 @@
 import type { VErrorOptions } from './types.ts';
 
-import { sanitiseEthersFetchError } from './sanitise.ts';
+import { sanitiseRpcFetchError } from './sanitise.ts';
 
 /**
  * Serialises any Error to the canonical VError JSON shape so that the full
@@ -15,7 +15,7 @@ import { sanitiseEthersFetchError } from './sanitise.ts';
  * Auto-sanitises RPC fetch errors (ethers v5/v6, viem) — any URL embedded
  * in `message`, `stack`, or `info.requestUrl` is reduced to its origin so
  * `?token=<secret>` query strings never reach the serialised output. The
- * caller does not have to remember to invoke `sanitiseEthersFetchError`
+ * caller does not have to remember to invoke `sanitiseRpcFetchError`
  * itself; every persistence path (logs via `@polygonlabs/logger`, status
  * routes, Firestore documents, Sentry events) that hands an error to
  * `serializeError` is safe by default. See `./sanitise.ts` for the
@@ -27,7 +27,7 @@ export function serializeError(err: unknown): Record<string, unknown> | undefine
   // is already URL-stripped. The clone chain produced by sanitisation is
   // plain Errors (with `name`, `info`, `shortMessage` preserved where
   // present), so the plain-Error branch below carries those through.
-  const safe = sanitiseEthersFetchError(err) ?? err;
+  const safe = sanitiseRpcFetchError(err) ?? err;
   // VError (and subclasses like HTTPError) already have toJSON — delegate so
   // that subclass-specific fields (statusCode, errors, etc.) are included.
   // Sanitised clones are plain Errors and fall through to the plain branch.
@@ -143,7 +143,7 @@ export class VError extends Error {
     // entry paths. When the call came in via `serializeError`, this
     // second sanitise is a no-op (idempotent) walk on an already-clean
     // chain.
-    const safe = sanitiseEthersFetchError(this) ?? this;
+    const safe = sanitiseRpcFetchError(this) ?? this;
     if (safe !== this) {
       // Sanitised clone is a plain Error — `serializeError` dispatches
       // it to the plain-Error branch, preserving `name`, `info`,

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { BadRequest, NotFound } from '../src/http.ts';
-import { sanitiseEthersFetchError } from '../src/sanitise.ts';
+import { sanitiseRpcFetchError } from '../src/sanitise.ts';
 import { serializeError, VError, WError } from '../src/verror.ts';
 
 function buildV6Error(secret = 'SECRET'): Error {
@@ -32,26 +32,26 @@ function buildV5Error(secret = 'SECRET'): Error {
   );
 }
 
-describe('sanitiseEthersFetchError — non-ethers inputs', () => {
+describe('sanitiseRpcFetchError — non-ethers inputs', () => {
   it('returns null for a plain Error', () => {
-    expect(sanitiseEthersFetchError(new Error('boom'))).equal(null);
+    expect(sanitiseRpcFetchError(new Error('boom'))).equal(null);
   });
 
   it('returns null for an HTTPError subclass (no info.requestUrl)', () => {
-    expect(sanitiseEthersFetchError(new NotFound('GET /missing'))).equal(null);
-    expect(sanitiseEthersFetchError(new BadRequest('bad'))).equal(null);
+    expect(sanitiseRpcFetchError(new NotFound('GET /missing'))).equal(null);
+    expect(sanitiseRpcFetchError(new BadRequest('bad'))).equal(null);
   });
 
   it('returns null for a VError with info but no requestUrl key', () => {
     const err = new VError('wrapped', { info: { txHash: '0xabc' } });
-    expect(sanitiseEthersFetchError(err)).equal(null);
+    expect(sanitiseRpcFetchError(err)).equal(null);
   });
 
   it('returns null for non-Error values', () => {
-    expect(sanitiseEthersFetchError(undefined)).equal(null);
-    expect(sanitiseEthersFetchError(null)).equal(null);
-    expect(sanitiseEthersFetchError('string error')).equal(null);
-    expect(sanitiseEthersFetchError({ info: { requestUrl: 'http://x' } })).equal(null);
+    expect(sanitiseRpcFetchError(undefined)).equal(null);
+    expect(sanitiseRpcFetchError(null)).equal(null);
+    expect(sanitiseRpcFetchError('string error')).equal(null);
+    expect(sanitiseRpcFetchError({ info: { requestUrl: 'http://x' } })).equal(null);
   });
 
   it('returns null for a plain Error with a URL in its message but no library fingerprint', () => {
@@ -63,7 +63,7 @@ describe('sanitiseEthersFetchError — non-ethers inputs', () => {
     // libraries the team actually uses; add another when a new RPC
     // library shows up.
     const err = new Error('fetch failed: https://api.example/private?token=X returned 401');
-    expect(sanitiseEthersFetchError(err)).equal(null);
+    expect(sanitiseRpcFetchError(err)).equal(null);
   });
 
   it('returns a sanitised Error for an Error-shaped object carrying info.requestUrl', () => {
@@ -75,7 +75,7 @@ describe('sanitiseEthersFetchError — non-ethers inputs', () => {
         code: 'SERVER_ERROR'
       }
     );
-    const sanitised = sanitiseEthersFetchError(err) as Error & {
+    const sanitised = sanitiseRpcFetchError(err) as Error & {
       info?: { requestUrl?: string };
     };
     expect(sanitised).instanceOf(Error);
@@ -85,7 +85,7 @@ describe('sanitiseEthersFetchError — non-ethers inputs', () => {
   });
 });
 
-describe('sanitiseEthersFetchError — ethers v5 shape', () => {
+describe('sanitiseRpcFetchError — ethers v5 shape', () => {
   // v5 attaches params (url, body, status, etc.) directly to the Error,
   // uses `reason` as the safe summary, and raises these codes from fetch.
   function buildV5Error(overrides?: {
@@ -112,7 +112,7 @@ describe('sanitiseEthersFetchError — ethers v5 shape', () => {
   }
 
   it('detects a SERVER_ERROR v5 shape and rebuilds its info', () => {
-    const sanitised = sanitiseEthersFetchError(buildV5Error()) as Error & {
+    const sanitised = sanitiseRpcFetchError(buildV5Error()) as Error & {
       info?: Record<string, unknown>;
     };
     expect(sanitised.info).property('requestUrl', 'https://host.example');
@@ -124,17 +124,17 @@ describe('sanitiseEthersFetchError — ethers v5 shape', () => {
   it('strips the full URL from the sanitised clone stack trace', () => {
     const err = buildV5Error();
     err.stack = `Error: bad response (url="https://host.example/?token=SECRET")\n    at rpc (/app/provider.js:10:5)`;
-    const sanitised = sanitiseEthersFetchError(err);
+    const sanitised = sanitiseRpcFetchError(err);
     expect(sanitised).property('stack').a('string');
     expect(sanitised?.stack ?? '').not.contain('SECRET');
   });
 
   it('also detects TIMEOUT and NETWORK_ERROR codes', () => {
+    expect(sanitiseRpcFetchError(buildV5Error({ code: 'TIMEOUT', reason: 'timeout' }))).instanceOf(
+      Error
+    );
     expect(
-      sanitiseEthersFetchError(buildV5Error({ code: 'TIMEOUT', reason: 'timeout' }))
-    ).instanceOf(Error);
-    expect(
-      sanitiseEthersFetchError(buildV5Error({ code: 'NETWORK_ERROR', reason: 'connection failed' }))
+      sanitiseRpcFetchError(buildV5Error({ code: 'NETWORK_ERROR', reason: 'connection failed' }))
     ).instanceOf(Error);
   });
 
@@ -144,7 +144,7 @@ describe('sanitiseEthersFetchError — ethers v5 shape', () => {
       reason: 'call revert exception',
       url: 'https://host.example/?token=SECRET'
     });
-    expect(sanitiseEthersFetchError(callException)).equal(null);
+    expect(sanitiseRpcFetchError(callException)).equal(null);
   });
 
   it('detects a v5 shape even when `reason` is missing from the raw error', () => {
@@ -155,18 +155,18 @@ describe('sanitiseEthersFetchError — ethers v5 shape', () => {
       code: 'SERVER_ERROR',
       url: 'https://host.example/?token=SECRET'
     });
-    expect(sanitiseEthersFetchError(err)).instanceOf(Error);
+    expect(sanitiseRpcFetchError(err)).instanceOf(Error);
   });
 
   it('does not copy leaky v5 top-level fields (body, responseText, url) onto the sanitised clone', () => {
-    const sanitised = sanitiseEthersFetchError(buildV5Error()) as Error & Record<string, unknown>;
+    const sanitised = sanitiseRpcFetchError(buildV5Error()) as Error & Record<string, unknown>;
     expect(sanitised).not.property('url');
     expect(sanitised).not.property('body');
     expect(sanitised).not.property('responseText');
   });
 });
 
-describe('sanitiseEthersFetchError — viem shape', () => {
+describe('sanitiseRpcFetchError — viem shape', () => {
   // viem `BaseError` populates `metaMessages: string[]` with lines like
   // "URL: https://…/?token=…" and "Request body: {...}", and rolls every
   // child's compound text up into each parent's `message`. The detector
@@ -188,7 +188,7 @@ describe('sanitiseEthersFetchError — viem shape', () => {
   it('detects a viem RpcRequestError and strips the URL from message and stack', () => {
     const err = buildViemRpcRequestError('TOKEN_DEEP');
     err.stack = `RpcRequestError: RPC Request failed.\n    at fetch (https://rpc.polygon.tools/internal/evm/1?token=TOKEN_DEEP)\n    at handler (/app/idle.ts:116:13)`;
-    const sanitised = sanitiseEthersFetchError(err);
+    const sanitised = sanitiseRpcFetchError(err);
     expect(sanitised).instanceOf(Error);
     expect(sanitised?.message).not.contain('TOKEN_DEEP');
     expect(sanitised?.stack ?? '').not.contain('TOKEN_DEEP');
@@ -202,7 +202,7 @@ describe('sanitiseEthersFetchError — viem shape', () => {
     const lookalike = Object.assign(new Error('not really viem'), {
       name: 'RpcRequestError'
     });
-    expect(sanitiseEthersFetchError(lookalike)).equal(null);
+    expect(sanitiseRpcFetchError(lookalike)).equal(null);
   });
 
   it('detects a viem chain wrapped with VError — reproduces the rebalancer service-status leak', () => {
@@ -241,7 +241,7 @@ describe('sanitiseEthersFetchError — viem shape', () => {
       info: { operatorAddress: '0x348E8742a8B4bc6A16197bb3A9177Ad21c7e3a43' }
     });
 
-    const sanitised = sanitiseEthersFetchError(outer);
+    const sanitised = sanitiseRpcFetchError(outer);
     expect(sanitised).instanceOf(Error);
     // No node in the chain may carry the token.
     const chainJson = JSON.stringify(sanitised, (_k, v) => {
@@ -262,13 +262,13 @@ describe('sanitiseEthersFetchError — viem shape', () => {
   });
 });
 
-describe('sanitiseEthersFetchError — ethers error wrapped as VError/WError cause', () => {
+describe('sanitiseRpcFetchError — ethers error wrapped as VError/WError cause', () => {
   const SECRET = 'TEST_SECRET_ABC123';
 
   it('detects a v6 ethers error wrapped with VError — outer wrapper and cause chain are preserved', () => {
     const ethersErr = buildV6Error(SECRET);
     const wrapped = new VError('Failed to fetch block number', { cause: ethersErr });
-    const sanitised = sanitiseEthersFetchError(wrapped) as Error & { cause?: unknown };
+    const sanitised = sanitiseRpcFetchError(wrapped) as Error & { cause?: unknown };
 
     // Outer node preserves the wrapper's context.
     expect(sanitised.message).contain('Failed to fetch block number');
@@ -282,7 +282,7 @@ describe('sanitiseEthersFetchError — ethers error wrapped as VError/WError cau
   it('detects a v5 ethers error wrapped with VError — outer wrapper and cause chain are preserved', () => {
     const ethersErr = buildV5Error(SECRET);
     const wrapped = new VError('upstream RPC unreachable', { cause: ethersErr });
-    const sanitised = sanitiseEthersFetchError(wrapped) as Error & { cause?: unknown };
+    const sanitised = sanitiseRpcFetchError(wrapped) as Error & { cause?: unknown };
 
     expect(sanitised.message).contain('upstream RPC unreachable');
     expect(JSON.stringify(sanitised)).not.contain(SECRET);
@@ -295,7 +295,7 @@ describe('sanitiseEthersFetchError — ethers error wrapped as VError/WError cau
     const ethersErr = buildV6Error(SECRET);
     const mid = new VError('mid-layer', { cause: ethersErr });
     const outer = new VError('outer boundary', { cause: mid });
-    const sanitised = sanitiseEthersFetchError(outer);
+    const sanitised = sanitiseRpcFetchError(outer);
 
     const chain: Error[] = [];
     let cur: unknown = sanitised;
@@ -314,7 +314,7 @@ describe('sanitiseEthersFetchError — ethers error wrapped as VError/WError cau
   it('detects through a WError wrap and strips the URL from the top-level message', () => {
     const ethersErr = buildV6Error(SECRET);
     const wrapped = new WError('block-number route failed', { cause: ethersErr });
-    const sanitised = sanitiseEthersFetchError(wrapped);
+    const sanitised = sanitiseRpcFetchError(wrapped);
     expect(sanitised?.message).not.contain(SECRET);
   });
 
@@ -332,14 +332,14 @@ describe('sanitiseEthersFetchError — ethers error wrapped as VError/WError cau
     // whether the defence-in-depth strip is still load-bearing.
     expect(wrapped.message).contain(SECRET);
 
-    const sanitised = sanitiseEthersFetchError(wrapped);
+    const sanitised = sanitiseRpcFetchError(wrapped);
     expect(sanitised?.message).not.contain(SECRET);
   });
 
   it('returns null when a VError has no ethers error anywhere in its chain', () => {
     const inner = new Error('database connection reset');
     const wrapped = new VError('query failed', { cause: inner });
-    expect(sanitiseEthersFetchError(wrapped)).equal(null);
+    expect(sanitiseRpcFetchError(wrapped)).equal(null);
   });
 
   it("preserves non-ethers wrapper VError's info through to the sanitised clone", () => {
@@ -348,7 +348,7 @@ describe('sanitiseEthersFetchError — ethers error wrapped as VError/WError cau
       cause: ethersErr,
       info: { userId: 'user-42', operation: 'blockNumber.get' }
     });
-    const sanitised = sanitiseEthersFetchError(wrapped) as Error & {
+    const sanitised = sanitiseRpcFetchError(wrapped) as Error & {
       info?: { userId?: string; operation?: string };
     };
     // VError info on the wrapper is preserved on the outer sanitised node —
@@ -384,7 +384,7 @@ describe('sanitiseEthersFetchError — ethers error wrapped as VError/WError cau
     expect(midSource?.stack ?? '').not.contain('makeInnerEthers');
 
     // Now verify the sanitised clones preserve that independence.
-    const sanitised = sanitiseEthersFetchError(outerSource);
+    const sanitised = sanitiseRpcFetchError(outerSource);
     const chain: Array<Error & { cause?: unknown }> = [];
     let cur: unknown = sanitised;
     while (cur instanceof Error) {
@@ -399,7 +399,7 @@ describe('sanitiseEthersFetchError — ethers error wrapped as VError/WError cau
 });
 
 describe('serializeError — auto-sanitises RPC fetch errors', () => {
-  // The whole reason sanitiseEthersFetchError lives in @polygonlabs/verror
+  // The whole reason sanitiseRpcFetchError lives in @polygonlabs/verror
   // rather than @polygonlabs/logger: every persistence path that hits
   // `serializeError` must be safe by default. Logger consumers historically
   // got URL-stripping via the pino `err` serializer, but anything else that

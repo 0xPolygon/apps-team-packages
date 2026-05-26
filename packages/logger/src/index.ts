@@ -5,5 +5,5 @@ export type { CreateLoggerOptions, SentryAdapter } from './logger.ts';
 // concern. Keeping the re-export means existing import sites
 // (`@polygonlabs/express`, services that wire it manually) keep working
 // without a code change.
-export { sanitiseEthersFetchError } from '@polygonlabs/verror';
+export { sanitiseRpcFetchError } from '@polygonlabs/verror';
 export type { DestinationStream, Level, Logger } from 'pino';
