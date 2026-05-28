@@ -48,7 +48,7 @@ import { WalletKitProvider } from '@polygonlabs/wallet-kit';
   onConnect={(event) => trackWalletConnect(event)}
   onSanctioned={(address) => showSanctionModal(address)}
   onProviderError={(error) => Sentry.captureException(error)}
-  onScreeningError={(event) => Sentry.captureException(event.error, { tags: { source: event.source } })}
+  onScreeningError={(event) => Sentry.captureException(event.error)}
 >
   {children}
 </WalletKitProvider>;
@@ -58,7 +58,7 @@ import { WalletKitProvider } from '@polygonlabs/wallet-kit';
 
 `onProviderError` fires when wallet-kit fails to resolve the EIP1193 provider from the connected wagmi connector. Connectors that lazily attach `getProvider` (e.g. Safe via WalletConnect during the session handshake) are handled silently — only genuine failures of a present `getProvider` are surfaced. If you omit the callback the kit logs to `console.error` so the failure isn't lost; provide it to route to Sentry/telemetry and suppress the default log.
 
-`onScreeningError` fires when prescreen or TRM screening fails. The screener still falls back to TRM (for prescreen failures) or fails open (for TRM failures) — the callback is purely for observability. The event payload distinguishes the two failure paths via `source: 'prescreen' | 'trm'` and includes the normalised address. If you omit the callback the kit logs to `console.error`; provide it to route to Sentry/telemetry and suppress the default log.
+`onScreeningError` fires when the gateway screening call fails. The screener fails open — the callback is purely for observability. The event payload includes the normalised address and the raw error. If you omit the callback the kit logs to `console.error`; provide it to route to Sentry/telemetry and suppress the default log.
 
 ## Hook
 

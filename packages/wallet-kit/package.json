@@ -37,7 +37,9 @@
     "clean": "rm -rf node_modules dist out-tsc *.tsbuildinfo",
     "prepublishOnly": "pnpm run build"
   },
-  "dependencies": {},
+  "dependencies": {
+    "@polygonlabs/api-gateway-client": "^2.0.3"
+  },
   "peerDependencies": {
     "@0xsequence/connect": "^6.0.0",
     "@tanstack/react-query": ">=5",
