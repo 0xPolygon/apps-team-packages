@@ -1,5 +1,34 @@
 # Migration Guide
 
+## Upgrading to the typed screening client (2.x)
+
+`createScreener` now calls the API gateway's typed
+`GET /api/screening/addresses/{address}` endpoint via
+`@polygonlabs/api-gateway-client` and returns the gateway's
+`blocked` boolean directly. Consumer-visible changes:
+
+- **More addresses block.** The previous shape applied a
+  provider-specific ownership-risk heuristic and let other risk types
+  through. The gateway's policy now catches all risk types at the
+  configured High threshold.
+- **`prescreen` removed from `ScreeningConfig`.** The gateway has its
+  own internal blocklist (`blocklist.json` in api-gateway) that's
+  validated at startup and checked before the upstream screening call.
+  If you were passing `prescreen: isLocallyBlocked` or similar, drop
+  it — the gateway covers that responsibility now.
+- **`ScreeningErrorEvent.source` removed**, and the
+  `ScreeningErrorSource` type is no longer exported. There's only one
+  failure path (the gateway call), so the field had nothing to
+  discriminate. If you were switching on `event.source`, drop the
+  switch and handle the event unconditionally.
+- **`apiOrigin` contract is host-only** (e.g.
+  `https://api-gateway.polygon.technology`). The typed client adds
+  the `/api/screening/addresses/{address}` path itself. No change
+  if you were already passing a host-only origin.
+
+`createScreener`, `Screener`, `OnScreeningError`, and
+`ScreeningErrorEvent` keep their other exported fields.
+
 ## Adopting `@polygonlabs/wallet-kit`
 
 Use this guide when a frontend already owns its own Sequence Connect setup,
@@ -53,8 +82,7 @@ import { WalletKitProvider } from '@polygonlabs/wallet-kit';
   screening={
     appEnv === 'production'
       ? {
-          apiKey: openApiV2ApiKey,
-          prescreen: async (address) => isLocallyBlocked(address)
+          apiKey: openApiV2ApiKey
         }
       : false
   }
@@ -184,9 +212,9 @@ the app.
 - Sequence v3 wallets are identified separately from generic smart-contract
   wallets. They should not show the external-SCW warning, but should still avoid
   ERC20 permit paths when `requiresApproveInsteadOfPermit` is true.
-- TRM failures fail open, matching the existing apps-team frontend behaviour.
-  Pass `onScreeningError` on the provider to route prescreen and TRM failures
-  to telemetry; the event payload distinguishes sources via `source: 'prescreen' | 'trm'`.
+- Screening failures fail open, matching the existing apps-team frontend
+  behaviour. Pass `onScreeningError` on the provider to route gateway-call
+  failures to telemetry.
 
 ### Verification checklist
 
