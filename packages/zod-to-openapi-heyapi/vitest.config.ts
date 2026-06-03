@@ -49,6 +49,22 @@ export default defineConfig({
     // Auto JSX so `.tsx` test files don't need explicit React imports.
     jsx: 'automatic'
   },
+  // Pre-bundle the JSX runtime so Vite's dep optimizer doesn't discover it
+  // mid-run. With `jsx: 'automatic'`, the JSX transform injects an import of
+  // `react/jsx-dev-runtime` at render time — it appears in no source `import`
+  // statement, so Vite's initial scan misses it. The first hook render then
+  // pulls it in, Vite re-optimizes and triggers a full page reload, and that
+  // reload races the in-flight dynamic import of the test module: the browser
+  // run fails with "Failed to fetch dynamically imported module" even though
+  // every assertion would pass (it flaked exactly this way on PR #55 CI while
+  // passing locally). The statically-imported libs (@tanstack/react-query,
+  // @testing-library/react, msw, msw/browser) are already found by the scan;
+  // only the transform-injected runtime needs to be declared by hand. Listing
+  // `react` and the prod `jsx-runtime` alongside keeps the pre-bundle stable
+  // regardless of dev/prod transform selection.
+  optimizeDeps: {
+    include: ['react', 'react/jsx-dev-runtime', 'react/jsx-runtime']
+  },
   test: {
     projects: [
       {
