@@ -11,5 +11,15 @@ jobs:
   ci:
     name: CI - lint / typecheck / test
     runs-on: ubuntu-latest
+    # Cap the whole job well under GitHub's 360-minute default. A hung
+    # step (notably `playwright install` stalling after its download
+    # completes — see run 26579281009, which sat idle for 6h before the
+    # default timeout killed it) should fail in minutes, not burn a
+    # runner for a quarter day. Normal runs finish in 2-4 min; 20 leaves
+    # generous headroom for a cold pnpm store or a slow browser download.
+    # A job-level timeout can only be set by the workflow that defines the
+    # job, so it lives here in the trigger, not in the shared composite
+    # action.
+    timeout-minutes: 20
     steps:
       - uses: 0xPolygon/pipelines/.github/actions/ci@main
