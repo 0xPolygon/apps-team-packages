@@ -14,6 +14,13 @@ minimumReleaseAgeExclude:
 overrides:
   katex: ^0.16.38
 onlyBuiltDependencies:
+  # Runs a postinstall hook that downloads the Chromium binary into
+  # ~/.cache/ms-playwright. This is how zod-to-openapi-heyapi's browser-mode
+  # vitest suite gets its browser — declaratively, at install time, instead
+  # of a `playwright install` invocation before every test run. Without this
+  # allowlist entry our default block on dependency build scripts would
+  # silently skip the download and the browser tests would fail to launch.
+  - '@playwright/browser-chromium'
   - esbuild
 trustPolicy: no-downgrade
 trustPolicyExclude:
