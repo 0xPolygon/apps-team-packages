@@ -1,5 +1,7 @@
 import type { VErrorOptions } from './types.ts';
 
+import { sanitiseRpcFetchError } from './sanitise.ts';
+
 /**
  * Serialises any Error to the canonical VError JSON shape so that the full
  * cause chain is preserved when errors are transmitted over RPC or stored in
@@ -9,21 +11,45 @@ import type { VErrorOptions } from './types.ts';
  *
  * Called automatically by `VError.toJSON()`.  Export it if you need to
  * serialise errors that are not necessarily VErrors themselves.
+ *
+ * Auto-sanitises RPC fetch errors (ethers v5/v6, viem) — any URL embedded
+ * in `message`, `stack`, or `info.requestUrl` is reduced to its origin so
+ * `?token=<secret>` query strings never reach the serialised output. The
+ * caller does not have to remember to invoke `sanitiseRpcFetchError`
+ * itself; every persistence path (logs via `@polygonlabs/logger`, status
+ * routes, Firestore documents, Sentry events) that hands an error to
+ * `serializeError` is safe by default. See `./sanitise.ts` for the
+ * detection rules and how to extend them.
  */
 export function serializeError(err: unknown): Record<string, unknown> | undefined {
   if (!(err instanceof Error)) return undefined;
+  // Sanitise first so the rest of the function operates on a chain that
+  // is already URL-stripped. The clone chain produced by sanitisation is
+  // plain Errors (with `name`, `info`, `shortMessage` preserved where
+  // present), so the plain-Error branch below carries those through.
+  const safe = sanitiseRpcFetchError(err) ?? err;
   // VError (and subclasses like HTTPError) already have toJSON — delegate so
   // that subclass-specific fields (statusCode, errors, etc.) are included.
-  if (typeof (err as VError).toJSON === 'function') {
-    return (err as VError).toJSON();
+  // Sanitised clones are plain Errors and fall through to the plain branch.
+  if (typeof (safe as VError).toJSON === 'function') {
+    return (safe as VError).toJSON();
   }
-  // Plain Error: produce the same shape so the receiver can handle it uniformly.
+  // Plain Error: produce the same shape so the receiver can handle it
+  // uniformly. `shortMessage` and `info` are preserved when present on
+  // the source (sanitised VError clones carry both); plain Errors without
+  // them fall back to `message` and `{}` respectively, matching the
+  // pre-sanitisation behaviour.
+  const sourceShort = (safe as { shortMessage?: unknown }).shortMessage;
+  const sourceInfo = (safe as { info?: unknown }).info;
   return {
-    name: err.name,
-    message: err.message,
-    shortMessage: err.message,
-    cause: serializeError((err as { cause?: unknown }).cause),
-    info: {}
+    name: safe.name,
+    message: safe.message,
+    shortMessage: typeof sourceShort === 'string' ? sourceShort : safe.message,
+    cause: serializeError((safe as { cause?: unknown }).cause),
+    info:
+      sourceInfo && typeof sourceInfo === 'object' && !Array.isArray(sourceInfo)
+        ? (sourceInfo as Record<string, unknown>)
+        : {}
   };
 }
 
@@ -111,6 +137,20 @@ export class VError extends Error {
   }
 
   toJSON(): Record<string, unknown> {
+    // Defence in depth: callers may invoke toJSON directly via
+    // `JSON.stringify(verror)` without going through `serializeError`.
+    // Sanitise here too so the URL-stripping guarantee holds on both
+    // entry paths. When the call came in via `serializeError`, this
+    // second sanitise is a no-op (idempotent) walk on an already-clean
+    // chain.
+    const safe = sanitiseRpcFetchError(this) ?? this;
+    if (safe !== this) {
+      // Sanitised clone is a plain Error — `serializeError` dispatches
+      // it to the plain-Error branch, preserving `name`, `info`,
+      // `shortMessage` from the clone and walking the rest of the chain.
+      const serialized = serializeError(safe);
+      if (serialized) return serialized;
+    }
     return {
       name: this.name,
       message: this.message,
