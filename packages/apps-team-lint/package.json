@@ -13,6 +13,10 @@
       "types": "./src/index.ts",
       "default": "./src/index.ts"
     },
+    "./astro": {
+      "types": "./src/astro.ts",
+      "default": "./src/astro.ts"
+    },
     "./commitlint": {
       "types": "./src/commitlint.ts",
       "default": "./src/commitlint.ts"
@@ -40,7 +44,9 @@
     "@typescript-eslint/utils": "^8.56.1",
     "eslint-config-prettier": "^10.1.8",
     "eslint-import-resolver-typescript": "^4.4.4",
+    "eslint-plugin-astro": "^1.7.0",
     "eslint-plugin-import-x": "^4.16.2",
+    "eslint-plugin-jsx-a11y": "^6.10.2",
     "eslint-plugin-perfectionist": "^5.6.0",
     "globals": "^17.4.0",
     "typescript-eslint": "^8.56.1"
@@ -60,6 +66,10 @@
       ".": {
         "types": "./dist/index.d.ts",
         "default": "./dist/index.js"
+      },
+      "./astro": {
+        "types": "./dist/astro.d.ts",
+        "default": "./dist/astro.js"
       },
       "./commitlint": {
         "types": "./dist/commitlint.d.ts",
