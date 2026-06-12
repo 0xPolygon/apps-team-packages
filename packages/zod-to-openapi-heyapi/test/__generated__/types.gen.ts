@@ -229,6 +229,22 @@ export type ResourceCreated = {
  */
 export type ItemId = string;
 
+export type CreateOrderRequest = {
+    reference: string;
+    scheduledFor: string;
+    priority: string;
+};
+
+export type UpdateOrderRequest = {
+    scheduledFor?: string;
+    priority?: string;
+};
+
+export type SubmitForReviewRequest = {
+    comment?: string;
+    scheduledFor?: string;
+};
+
 /**
  * Item identifier
  */
@@ -877,11 +893,7 @@ export type ListRecentEventsResponses = {
 export type ListRecentEventsResponse = ListRecentEventsResponses[keyof ListRecentEventsResponses];
 
 export type CreateOrderData = {
-    body: {
-        reference: string;
-        scheduledFor: string;
-        priority: string;
-    };
+    body: CreateOrderRequest;
     path?: never;
     query?: never;
     url: '/fixtures/orders';
@@ -910,10 +922,7 @@ export type CreateOrderResponses = {
 export type CreateOrderResponse = CreateOrderResponses[keyof CreateOrderResponses];
 
 export type UpdateOrderData = {
-    body: {
-        scheduledFor?: string;
-        priority?: string;
-    };
+    body: UpdateOrderRequest;
     path: {
         orderId: string;
     };
@@ -931,10 +940,7 @@ export type UpdateOrderResponses = {
 export type UpdateOrderResponse = UpdateOrderResponses[keyof UpdateOrderResponses];
 
 export type SubmitForReviewData = {
-    body?: {
-        comment?: string;
-        scheduledFor?: string;
-    };
+    body?: SubmitForReviewRequest;
     path?: never;
     query?: never;
     url: '/fixtures/reviews';

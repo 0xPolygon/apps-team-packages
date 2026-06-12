@@ -313,11 +313,17 @@ schemas, same validation on both sides of the wire.
 
 The `schemasFrom` ↔ registered-name agreement is enforced at codegen. The
 plugin dynamic-imports `schemasFrom` and, for **every schema referenced as a
-`$ref` from a route response**, verifies:
+`$ref` from a route response** and **every registered request-slot schema**,
+verifies:
 
 1. The module has a named export with that exact name.
 2. The export is a Zod schema (duck-typed: has `_def` or a `parseAsync`
    method).
+
+This is a pure string-membership check over export names — no schema
+instances are compared — so it holds even when codegen runs under a
+module-evaluation split (see
+[How input schema names are resolved](#how-input-schema-names-are-resolved)).
 
 Mismatches fail the codegen step with an aggregated error listing every
 issue at once, so a typo or forgotten export surfaces immediately on the
@@ -337,16 +343,18 @@ consumer's build.
 
 ### What the audit ignores
 
-The audit walks **only** schemas that appear as a `$ref` in a route response.
-Schemas registered for other purposes never reach the generated client and
-don't need a matching Zod export:
+The audit walks **only** names the generated client will actually import:
+response `$ref` targets and registered request-slot schemas. Schemas
+registered for other purposes never reach the generated client and don't
+need a matching Zod export:
 
 - Path / query / header parameters registered via `registry.registerParameter(...)`.
   zod-to-openapi v8's `OpenApiGeneratorV3` lifts parameter schemas into
   `components.schemas` as well as `components.parameters` — the audit
   ignores them because the plugin doesn't emit any import for them.
-- Request body schemas (the SDK plugin generates request types from the
-  spec; no Zod transformer is involved on the request side).
+- Anonymous inline request schemas (codec-free; codec-bearing ones fail
+  codegen before the audit even runs — see
+  [How input schema names are resolved](#how-input-schema-names-are-resolved)).
 - Internal building blocks composed into other schemas (e.g. an
   `AddressSchema` factored out of a larger object) — they only need the
   outer registered schema's export.
@@ -522,9 +530,10 @@ export const getBlockNumber = async <ThrowOnError extends boolean = false>(
 ) => await getBlockNumber2(options);
 ```
 
-For ops whose `request.{params, query, body}` schema is exported from
-`schemasFrom` (any named export — no `.openapi('Name')` chain
-required), the wrapper additionally encodes the runtime → wire
+For ops whose `request.{params, query, body}` schema is registered
+(`.openapi('Name')` chained, or the value returned by
+`register('Name', schema)`) and exported from `schemasFrom` under the
+registered name, the wrapper additionally encodes the runtime → wire
 direction before delegating:
 
 ```ts
@@ -559,21 +568,43 @@ as on the response side.
 
 ### How input schema names are resolved
 
-The plugin dynamic-imports `schemasFrom` at codegen time (already does
-this for the response audit) and builds a `Map<ZodType-instance,
-exportName>` from the named exports. For each route's input slot, it
-looks up the slot's ZodType in the map. Found → use the export name as
-the import binding. Not found → silently skip input-encoding for that
-slot.
+The plugin reads the slot name from **registration metadata**: the
+refId that `.openapi('Name')` or `register('Name', schema)` attached
+to the schema instance the route holds. The registered name becomes
+the import binding, exactly as it does for response schemas — and the
+same [codegen-time audit](#codegen-time-audit) verifies a Zod-shaped
+named export exists under that name in `schemasFrom`.
 
-The user-side rule is just: **export the schema, and use that same
-exported instance in the route**.
+Because the refId travels with the instances the registry itself hands
+the plugin, resolution never depends on comparing instances against a
+separately imported copy of the schemas module. That makes it immune
+to module-evaluation splits: openapi-ts loads the codegen config
+through c12/jiti, and under a custom export condition (e.g.
+`NODE_OPTIONS='--conditions=@polygonlabs/source'` for build-free
+codegen) the schemas package's `.ts` source can be evaluated twice —
+once in the config loader's cache, once natively. Names are identical
+across evaluations; instances are not. (An earlier instance-identity
+lookup silently dropped every codec input transformer under exactly
+that split.)
+
+An unregistered slot is silently skipped only when it is codec-free
+(the anonymous-inline-schema case, `params: z.object({ id: z.uuid() })`
+written directly in the route). A codec-bearing slot that is not
+registered **fails the codegen**, listing the offending operation/slot
+pairs and the remedy — skipping it would emit a client that types the
+slot wire-shaped and never runs `z.encode`, sending wire-invalid
+values (a `Date` as a locale string) while compiling clean.
+
+The user-side rule: **register the schema, export it under the
+registered name, and use that registered instance in the route**.
 
 ```ts
-// schemas.ts — plain export, no .openapi('Name') chain required
-export const BlockNumberPathParams = z.object({ blockNumber: Int64Codec });
+// schemas.ts — registered, export name === registered name
+export const BlockNumberPathParams = z
+  .object({ blockNumber: Int64Codec })
+  .openapi('BlockNumberPathParams');
 
-// routes/blocks.ts — same instance in request.params
+// routes/blocks.ts — the registered export in request.params
 import { BlockNumberPathParams } from '../schemas.ts';
 registry.registerPath({
   operationId: 'getBlockMetadata',
@@ -584,20 +615,14 @@ registry.registerPath({
 });
 ```
 
-`.openapi('Name')` chains are only needed where the OpenAPI generator
-needs them (response schemas that should `$ref` rather than inline,
-body schemas you want named in the spec). For path / query slots,
-`OpenApiGeneratorV3` inlines per-parameter schemas regardless, so a
-chain is purely cosmetic.
-
-Identity matters because `.openapi('Name')` and `register('Name',
-schema)` both *clone* the schema (asteasolutions creates a new
-instance via `new this.constructor(this._def)` so chained metadata
-calls don't accumulate). If you chain `.openapi('Foo')` on the export
-and call `register('Foo', x)` somewhere else, the post-`register`
-clone is a different instance from your export — identity lookup
-won't find it and input encoding silently skips. Pick one source for
-the schema instance (the export) and use it everywhere.
+One sharp edge: `.openapi('Name')` and `register('Name', schema)`
+both *clone* the schema (asteasolutions creates a new instance via
+`new this.constructor(this._def)` so chained metadata calls don't
+accumulate), and the registration metadata lives on the **returned**
+instance. The route must hold that returned value — chaining
+`.openapi(...)` at the export site (as above) makes this automatic. A
+route that holds the pre-`.openapi` / pre-`register` original carries
+no refId and behaves like an unregistered slot.
 
 ### Per-slot optionality
 
@@ -1136,10 +1161,11 @@ Recommended migration steps:
    // Drop the type alias — see step 3.
    ```
 
-2. **Building blocks and parameter / query schemas can keep the `Schema`
-   suffix.** The plugin's audit ignores them, and keeping the suffix
-   distinguishes "this is a Zod schema, not a registered component" at call
-   sites.
+2. **Unregistered building blocks can keep the `Schema` suffix.** The
+   plugin's audit ignores them, and keeping the suffix distinguishes "this
+   is a Zod schema, not a registered component" at call sites. Registered
+   request-slot schemas (params / query / body used in routes) follow
+   step 1 — their export name must match the registered name.
 
 3. **Replace the type alias with `z.output<typeof Schema>` (or `z.infer`)
    inline at the call site:**

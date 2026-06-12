@@ -1,5 +1,76 @@
 # Migration Guide
 
+## 1.3.0 → 2.0.0 (registration-based input-slot naming — breaking)
+
+2.0.0 changes how the plugin resolves a route's
+`request.{params, query, body, headers}` schema to the name the generated
+client imports. 1.x matched the slot's schema instance against
+`schemasFrom`'s named exports **by instance identity**. 2.0.0 reads the
+**registration name** (the refId that `.openapi('Name')` /
+`register('Name', schema)` attached to the instance the route holds) and
+audits that an export exists under that name.
+
+### Why
+
+The identity lookup was unsound. openapi-ts loads the codegen config
+through c12/jiti; under a custom export condition (e.g.
+`NODE_OPTIONS='--conditions=@polygonlabs/source'` for build-free
+monorepo codegen) the schemas package's `.ts` source is evaluated twice —
+once in the config loader's module cache (the instances the registry
+holds) and once natively (the instances the plugin's own
+`await import(schemasFrom)` saw). Same source, same names, different
+object identity: the lookup found nothing and **silently dropped every
+codec input transformer** from the emitted client, which then sent
+wire-invalid values (a `Date` as a locale string) while compiling clean.
+
+Registration metadata travels with the instances the registry itself
+hands the plugin, so resolution no longer consults a second module
+evaluation at all. The plugin's dynamic import of `schemasFrom` survives
+only as a string-membership audit over export names, which is immune to
+the split by construction.
+
+### Required: register codec-bearing input schemas
+
+Any schema used in a route's `request` block that contains a codec must
+now be registered, with the export name matching the registered name:
+
+```ts
+// before (1.x) — plain export, resolved by instance identity
+export const BlockNumberPathParams = z.object({ blockNumber: Int64Codec });
+
+// after (2.0) — registered, resolved by name
+export const BlockNumberPathParams = z
+  .object({ blockNumber: Int64Codec })
+  .openapi('BlockNumberPathParams');
+```
+
+The route keeps using the export as before — `.openapi(...)` returns the
+registered instance, so chaining at the export site is all it takes.
+Unregistered codec-bearing slots **fail codegen** with an error listing
+every offending `operation / request.<slot>` pair and this exact remedy,
+so the migration is mechanical: run codegen, register and export what the
+error names, regenerate the spec (registered schemas become named
+components / `$ref`s), rerun codegen.
+
+This reverses the 1.1.1 "you can drop `.openapi('Name')` on input
+schemas" relaxation — that advice only worked because of the identity
+lookup this release removes.
+
+Codec-free behaviour is unchanged: anonymous inline request schemas
+(`params: z.object({ id: z.uuid() })` written in the route) are still
+skipped silently, and codec-free registered slots resolve by name just
+like codec-bearing ones.
+
+### Removed: misalignment warning
+
+The 1.x `console.warn` for a refId-bearing slot that wasn't
+identity-equal to the export is gone. That situation (e.g. the route
+holds the post-`register()` clone while the export is the pre-`register`
+original) now simply resolves by name — the generated client imports the
+export under the registered name, which validates the same wire shape.
+If the name isn't exported at all, the codegen-time audit fails with the
+exact name to export.
+
 ## 1.2.0 → 1.3.0 (TransportError / ResponseValidationError discrimination — bug fix)
 
 1.2.0's error-decoding wrapper had a hole: when an API returned a body
