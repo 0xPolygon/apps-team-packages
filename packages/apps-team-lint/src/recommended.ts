@@ -6,7 +6,7 @@ import perfectionist from 'eslint-plugin-perfectionist';
 import { defineConfig, globalIgnores } from 'eslint/config';
 import globals from 'globals';
 
-import { allCodeFiles, internalPattern } from './constants.ts';
+import { allCodeFiles, internalPattern, sortImportsOptions } from './constants.ts';
 
 export interface RecommendedOptions {
   globals?: 'node' | 'browser' | Record<string, boolean>;
@@ -37,24 +37,7 @@ export function recommended(options?: RecommendedOptions) {
         perfectionist
       },
       rules: {
-        'perfectionist/sort-imports': [
-          'error',
-          {
-            type: 'natural',
-            internalPattern: [internalPattern],
-            groups: [
-              'type-import',
-              'value-builtin',
-              'value-external',
-              'type-internal',
-              'value-internal',
-              ['type-parent', 'type-sibling', 'type-index'],
-              ['value-parent', 'value-sibling', 'value-index'],
-              'ts-equals-import',
-              'unknown'
-            ]
-          }
-        ]
+        'perfectionist/sort-imports': ['error', sortImportsOptions]
       }
     },
     {

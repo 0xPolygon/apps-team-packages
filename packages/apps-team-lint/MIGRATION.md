@@ -8,6 +8,79 @@ upgrading across multiple versions.
 | 1.x  | 2.0 | [1.x → 2.0](#1x--20) |
 | 0.x  | 1.0 | [0.x → 1.0](#0x--10) |
 
+Feature adoption (non-breaking): [Adopting `astro()`](#adopting-astro).
+
+---
+
+## Adopting `astro()`
+
+> Shipped in the minor release that introduces the `/astro` subpath — the exact
+> version is minted by changesets at release time.
+
+`@polygonlabs/apps-team-lint/astro` is a new, additive subpath export — nothing
+changes for repos without `.astro` files, and no upgrade step is required to
+keep using `recommended()`/`typescript()`/`frontend()`.
+
+If you previously wired `eslint-plugin-astro` into your config by hand (a common
+stopgap before this export existed), switch to `astro()` and delete the manual
+plumbing it now owns — the Astro parser/processor, the TypeScript parser for the
+frontmatter, browser globals for the inline `<script>` virtual files
+(`**/*.astro/*.{js,ts}`), and the generated `.astro/**` ignore:
+
+```diff
+ // eslint.config.js
+ import { defineConfig } from 'eslint/config';
+-import eslintPluginAstro from 'eslint-plugin-astro';
+ import globals from 'globals';
+
+ import { recommended, typescript } from '@polygonlabs/apps-team-lint';
++import { astro } from '@polygonlabs/apps-team-lint/astro';
+
+ export default defineConfig([
+   ...recommended({ globals: 'node' }),
+   ...typescript(),
+-  ...eslintPluginAstro.configs.recommended,
++  ...astro(),
+
+-  // Browser globals for client code: inline <script> blocks AND the
+-  // standalone client modules they import.
++  // astro() sets browser globals for inline <script> blocks itself. A
++  // standalone client module imported by a <script> (e.g. src/scripts/app.ts)
++  // is an ordinary file, NOT an Astro virtual — so it still needs browser
++  // globals here. Keep this block, just drop the **/*.astro/*.{js,ts} glob
++  // that astro() now owns.
+   {
+-    files: ['src/scripts/**/*.{js,ts}', '**/*.astro/*.{js,ts}'],
++    files: ['src/scripts/**/*.{js,ts}'],
+     languageOptions: { globals: { ...globals.browser } },
+   },
+
+   {
+-    ignores: ['dist/**', '.astro/**'],
++    ignores: ['dist/**'],
+   },
+ ]);
+```
+
+Then remove `eslint-plugin-astro` (and `eslint-plugin-jsx-a11y`, if you added
+it) from your `devDependencies` — both are provided transitively by this
+package. Keep the `globals` import if you still have a browser-globals block for
+standalone client modules (above); drop it only if you have none.
+
+Notes when adopting:
+
+- **Accessibility (jsx-a11y recommended) is on by default.** Expect new a11y
+  findings on existing templates; fix them, or pass `astro({ a11y: false })` for
+  genuinely internal tooling.
+- **`astro/no-set-html-directive` is enforced as an error.** `astro/no-unsafe-inline-scripts`
+  is deliberately *not* enabled — see the [README](./README.md#a-deliberate-omission).
+- **Client `<script>` blocks lint as TypeScript** via the `client-side-ts`
+  processor — Astro's first-class inline pattern is supported. Type-*aware*
+  rules don't run inside `<script>` or `.astro` files (those virtual files
+  aren't in a tsconfig project); `astro check` covers type errors there.
+- **Trialing this from a worktree before release?** Consume it with `link:`,
+  not `file:` — see [Testing an unpublished build](./README.md#testing-an-unpublished-build).
+
 ---
 
 ## 1.x → 2.0

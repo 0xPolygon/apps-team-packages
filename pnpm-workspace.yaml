@@ -16,10 +16,18 @@ overrides:
 onlyBuiltDependencies:
   # Runs a postinstall hook that downloads the Chromium binary into
   # ~/.cache/ms-playwright. This is how zod-to-openapi-heyapi's browser-mode
-  # vitest suite gets its browser — declaratively, at install time, instead
-  # of a `playwright install` invocation before every test run. Without this
+  # vitest suite gets its browser — declaratively, at install time. Without this
   # allowlist entry our default block on dependency build scripts would
   # silently skip the download and the browser tests would fail to launch.
+  #
+  # CAVEAT: this postinstall only fires on a COLD install. On a warm pnpm store
+  # (CI cache hit) pnpm restores the package from its side-effects cache and
+  # skips the build script — but the browser lives in ~/.cache/ms-playwright,
+  # outside the store, so it is neither re-run nor cached, and the browser tests
+  # fail with "Executable doesn't exist". zod-to-openapi-heyapi's `test` script
+  # therefore re-ensures the browser with an idempotent `playwright install
+  # chromium` (a no-op when already present); that is the deterministic safety
+  # net — this postinstall is just the cold-path optimisation.
   - '@playwright/browser-chromium'
   - esbuild
 trustPolicy: no-downgrade

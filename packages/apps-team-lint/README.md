@@ -40,10 +40,26 @@ can be removed from your devDependencies:
 - `typescript-eslint`
 - `@commitlint/config-conventional`
 
+### Testing an unpublished build
+
+To consume an unpublished build of this package in another repo (e.g. to trial
+a change before release), **`link:` the package directory — do not `file:` it**:
+
+```bash
+pnpm add -D "link:../path/to/apps-team-packages/packages/apps-team-lint"
+```
+
+`link:` points at the live package directory, so the exports resolve the
+TypeScript source directly — no build step. `file:` instead *packs* the
+directory honoring `files` (which ships only `dist/`), which is publish-shaped
+and omits `src/`, so the source exports fail to resolve. Use `file:` / `pnpm
+pack` only to validate the published artifact.
+
 ## ESLint
 
-Three composable function exports, each returning a flat config array.
-Always spread `recommended()` first.
+Three composable function exports from the main entry point, each returning a
+flat config array. Always spread `recommended()` first. Astro projects also get
+an [`astro()`](#astro-components) export from the `/astro` subpath.
 
 ### Single-package repo — Node.js
 
@@ -77,6 +93,83 @@ export default defineConfig([
 > **Monorepo?** Each workspace package needs its own `eslint.config.js` and
 > must pass `tsconfigRootDir: import.meta.dirname` to `typescript()`. See
 > [Monorepo setup](#monorepo-setup) below.
+
+### Astro components
+
+Astro support ships as a separate subpath export —
+`@polygonlabs/apps-team-lint/astro` — because most repos have no `.astro` files
+and shouldn't pay to load the Astro toolchain just by importing the package.
+Spread `astro()` **after** `recommended()` and `typescript()`:
+
+```js
+// eslint.config.js
+import { defineConfig } from 'eslint/config';
+
+import { recommended, typescript } from '@polygonlabs/apps-team-lint';
+import { astro } from '@polygonlabs/apps-team-lint/astro';
+
+export default defineConfig([
+  ...recommended({ globals: 'browser' }),
+  ...typescript(),
+  ...astro(),
+]);
+```
+
+`eslint-plugin-astro` and `eslint-plugin-jsx-a11y` are provided transitively —
+no need to install them. `astro()` builds on `eslint-plugin-astro`'s recommended
+config (the Astro parser, the `<script>`-extracting processor, and per-region
+globals: Node for the build-time frontmatter, browser for client `<script>`
+blocks) and adds:
+
+- the `client-side-ts` processor, so client `<script>` blocks are linted as
+  **TypeScript** — inline `<script>` (including TS) is Astro's first-class,
+  bundled pattern, and the team's rules apply inside it;
+- the TypeScript parser for the frontmatter, so typed frontmatter
+  (`interface Props`, `const x: T = …`) parses instead of erroring;
+- the team's import-sorting, `import-x/no-duplicates`, and `no-param-reassign`
+  rules on the `.astro` frontmatter (which `recommended()`/`typescript()` skip,
+  since their file globs match the virtual `<script>` files but not the
+  `.astro` file itself);
+- `astro/no-set-html-directive` as a security error;
+- the jsx-a11y **recommended** accessibility ruleset.
+
+**Accessibility is on by default.** Pass `astro({ a11y: false })` only for
+genuinely internal tooling where a11y findings are noise rather than defects.
+The a11y rules surface under the **`astro/jsx-a11y/*`** namespace (the plugin
+re-exports jsx-a11y through its own `astro/` prefix) — grepping for a bare
+`jsx-a11y/` will wrongly read as "a11y is off".
+
+`astro()` takes no `tsconfigRootDir`. Type-*aware* rules (e.g.
+`no-floating-promises`) do **not** run inside `<script>` blocks or `.astro`
+files — those virtual files are not part of any tsconfig project, so type-aware
+rules are disabled there. Type errors in `.astro` are `astro check`/`tsc`'s job,
+not ESLint's. In a monorepo, still pass `tsconfigRootDir` to `typescript()` as
+usual.
+
+> **Expected install warning.** `eslint-plugin-jsx-a11y@6` declares an ESLint
+> `^3 – ^9` peer range, so pnpm prints an unmet-peer warning on ESLint 10. It is
+> harmless — the a11y rules run correctly on ESLint 10; the package simply
+> hasn't widened its peer range yet (track upstream at
+> <https://github.com/jsx-eslint/eslint-plugin-jsx-a11y/issues>). To silence it,
+> add to the consuming repo's `package.json`:
+>
+> ```jsonc
+> // package.json
+> "pnpm": {
+>   "peerDependencyRules": {
+>     "allowedVersions": { "eslint-plugin-jsx-a11y>eslint": "10" }
+>   }
+> }
+> ```
+
+#### A deliberate omission
+
+**`astro/no-unsafe-inline-scripts` is not enabled.** Despite its name it bans
+*every* inline `<script>` without a `src` — including Astro's idiomatic
+`<script>import './client.js'</script>` bundling pattern. Strict-CSP,
+external-only scripts is an app-level policy a repo can opt into, not a sensible
+team-wide error. Add it to your own config if your app needs it; don't add it to
+this preset.
 
 ### Adding repo-specific overrides
 
@@ -164,6 +257,7 @@ own config automatically.
 | `recommended(options?)` | `{ globals?: 'node' \| 'browser' \| Record<string, boolean> }` | Global ignores, import sorting (perfectionist), import-x rules, core rules (`no-param-reassign`, etc.), default-export exemptions for config files, Prettier compatibility, environment globals |
 | `typescript(options?)` | `{ tsconfigRootDir?: string }` — required in monorepo per-package configs | TS-ESLint recommended rules, type-aware linting (`projectService`), TS import resolver, `consistent-type-imports`, `no-floating-promises`, `no-explicit-any` (warn), [`polygon/no-discarded-typed-registry-chain`](#no-discarded-typed-registry-chain) |
 | `frontend()` | none | `no-default-export` exemption for `.tsx` files |
+| [`astro(options?)`](#astro-components) — imported from `@polygonlabs/apps-team-lint/astro` | `{ a11y?: boolean }` — accessibility ruleset, default `true` | `eslint-plugin-astro` recommended, `client-side-ts` processor (TypeScript in `<script>`), TypeScript parser + team import rules on the frontmatter, `astro/no-set-html-directive` error, jsx-a11y recommended (on by default) |
 
 ## Custom rules
 
