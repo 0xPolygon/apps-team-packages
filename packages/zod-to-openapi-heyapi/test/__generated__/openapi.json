@@ -791,6 +791,53 @@
       "itemId": {
         "type": "string",
         "description": "Item identifier"
+      },
+      "CreateOrderRequest": {
+        "type": "object",
+        "properties": {
+          "reference": {
+            "type": "string",
+            "minLength": 1
+          },
+          "scheduledFor": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "priority": {
+            "type": "string",
+            "pattern": "^-?\\d+$"
+          }
+        },
+        "required": [
+          "reference",
+          "scheduledFor",
+          "priority"
+        ]
+      },
+      "UpdateOrderRequest": {
+        "type": "object",
+        "properties": {
+          "scheduledFor": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "priority": {
+            "type": "string",
+            "pattern": "^-?\\d+$"
+          }
+        }
+      },
+      "SubmitForReviewRequest": {
+        "type": "object",
+        "properties": {
+          "comment": {
+            "type": "string"
+          },
+          "scheduledFor": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
       }
     },
     "parameters": {
@@ -1537,26 +1584,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "properties": {
-                  "reference": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "scheduledFor": {
-                    "type": "string",
-                    "format": "date-time"
-                  },
-                  "priority": {
-                    "type": "string",
-                    "pattern": "^-?\\d+$"
-                  }
-                },
-                "required": [
-                  "reference",
-                  "scheduledFor",
-                  "priority"
-                ]
+                "$ref": "#/components/schemas/CreateOrderRequest"
               }
             }
           }
@@ -1614,17 +1642,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "properties": {
-                  "scheduledFor": {
-                    "type": "string",
-                    "format": "date-time"
-                  },
-                  "priority": {
-                    "type": "string",
-                    "pattern": "^-?\\d+$"
-                  }
-                }
+                "$ref": "#/components/schemas/UpdateOrderRequest"
               }
             }
           }
@@ -1650,16 +1668,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "properties": {
-                  "comment": {
-                    "type": "string"
-                  },
-                  "scheduledFor": {
-                    "type": "string",
-                    "format": "date-time"
-                  }
-                }
+                "$ref": "#/components/schemas/SubmitForReviewRequest"
               }
             }
           }

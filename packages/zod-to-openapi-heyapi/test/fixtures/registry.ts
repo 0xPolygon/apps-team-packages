@@ -227,12 +227,11 @@ fixtureRegistry.registerPath({
 // ── Input-codec routes ─────────────────────────────────────────────────────────
 //
 // Routes that exercise the input-side codec encoding pipeline. Each
-// route's `request` block uses the input ZodObject *exported directly*
-// from schemas.ts (which already has `.openapi('Name')` chained). The
-// plugin resolves the slot name by looking up the schema instance in
-// the `Map<ZodType, exportName>` it builds from `schemasFrom` at
-// codegen time — so identity matters: the route must hold the same
-// instance the user exports, not a `register()`-wrapped clone.
+// route's `request` block uses the input ZodObject exported from
+// schemas.ts, which has `.openapi('Name')` chained — the plugin reads
+// the slot name from that registration metadata (refId) on the
+// instance the route holds, then audits the name against the
+// `schemasFrom` module's export names at codegen time.
 
 // Codec on path: lookupBlock. Returns ScalarString just to give the
 // route a 2xx body — the focus is the `blockNumber` path param running through

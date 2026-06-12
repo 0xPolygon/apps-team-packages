@@ -56,6 +56,8 @@ import { getRefId } from '@asteasolutions/zod-to-openapi';
 // access as first-class nodes, so we drop down to the raw TS factory.
 import { factory as tsFactory, SyntaxKind } from 'typescript';
 
+import { containsCodec } from './contains-codec.ts';
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 /** Minimal structural type for the OpenAPI registry. */
@@ -224,14 +226,22 @@ export async function registryPlugin({
   });
   const registrySchemaNames = new Set(Object.keys(doc.components?.schemas ?? {}));
 
-  // Codegen-time audit + identity map source. `schemasFrom` is the module
-  // the generated client imports schemas from at runtime; we dynamic-import
-  // it here for two purposes:
-  //   1. Verify every response `$ref` resolves to a Zod-shaped named export
-  //      under the same name (existing audit).
-  //   2. Build a `Map<ZodType-instance, exportName>` so input slots can be
-  //      resolved by identity rather than by chasing the asteasolutions
-  //      `.openapi('Name')` refId through a module-scoped registry.
+  // Input slots resolve to importable names via registration metadata —
+  // the refId that `.openapi('Name')` / `register('Name', schema)` attached
+  // to the exact schema instances the registry holds. No second evaluation
+  // of the schemas module is ever consulted for resolution, so it is
+  // immune to the c12/jiti vs native-loader module split a custom export
+  // condition produces. Throws for unregistered codec-bearing slots.
+  const inputsByOpId = collectInputSchemasFromRegistry({ registry, schemasFrom });
+
+  // Codegen-time audit. `schemasFrom` is the module the generated client
+  // imports schemas from at runtime; dynamic-import it here to verify that
+  // every name the plugin will emit `import { Name } from '<schemasFrom>'`
+  // for — response `$ref` targets and registered input-slot schemas alike —
+  // exists as a Zod-shaped named export. This is a pure string-membership
+  // check: no instance identity is compared anywhere, so a second module
+  // evaluation (different instances, identical export names) passes it
+  // just the same.
   let schemasModule: Record<string, unknown>;
   try {
     schemasModule = (await import(schemasFrom)) as Record<string, unknown>;
@@ -239,28 +249,14 @@ export async function registryPlugin({
     throw new Error(buildSchemasFromImportError(schemasFrom, err));
   }
 
-  // Identity index of named exports that look like Zod schemas. Used by
-  // `collectInputSchemasFromRegistry` to map an input ZodType reference
-  // (held inside `request.params/query/body`) back to a name we can emit
-  // as an import binding. If a route uses an inline anonymous schema,
-  // it won't appear in this map and the plugin silently skips input-
-  // encoding emission for that route — same behaviour as before this
-  // change for unregistered slots.
-  const exportsByIdentity = new Map<unknown, string>();
-  for (const [name, value] of Object.entries(schemasModule)) {
-    if (isLikelyZodType(value)) exportsByIdentity.set(value, name);
-  }
-
-  const inputsByOpId = collectInputSchemasFromRegistry(registry, exportsByIdentity);
-
-  // Response-side audit: every `$ref` in a route response must resolve to
-  // a Zod-shaped named export of `schemasFrom`. Input schemas don't go
-  // through this audit — their names ARE export keys (derived from the
-  // identity map above), so "exported under that name" is structurally
-  // satisfied by construction.
   const responseRefNames = new Set<string>();
   for (const name of collectResponseRefSchemaNames(doc)) {
     if (registrySchemaNames.has(name)) responseRefNames.add(name);
+  }
+
+  const inputSchemaNames = new Set<string>();
+  for (const slots of inputsByOpId.values()) {
+    for (const name of slotSchemaNames(slots)) inputSchemaNames.add(name);
   }
 
   const errors: string[] = [];
@@ -278,6 +274,25 @@ export async function registryPlugin({
       errors.push(
         `'${name}' is exported from '${schemasFrom}' but does not appear to be a Zod schema (got ${describeType(value)}). ` +
           `The plugin emits \`${name}.parseAsync(data)\`, which will fail at consumer runtime.`
+      );
+    }
+  }
+  for (const name of inputSchemaNames) {
+    if (responseRefNames.has(name)) continue; // already audited above
+    if (!(name in schemasModule)) {
+      errors.push(
+        `'${name}' is registered on a request slot but is not a named export of '${schemasFrom}'. ` +
+          `The plugin emits \`import { ${name} } from '${schemasFrom}'\` to encode that slot's values ` +
+          `(z.encode) before serialisation, which will fail at consumer build time. ` +
+          `Export the registered schema from that module under that exact name.`
+      );
+      continue;
+    }
+    const value = schemasModule[name];
+    if (!isLikelyZodType(value)) {
+      errors.push(
+        `'${name}' is exported from '${schemasFrom}' but does not appear to be a Zod schema (got ${describeType(value)}). ` +
+          `The plugin emits \`z.encode(${name}, value)\`, which will fail at consumer runtime.`
       );
     }
   }
@@ -744,11 +759,13 @@ export async function defineRegistryClientConfig(
   ];
 
   // Build the parser hook only when tanstack is wired. Skipped otherwise
-  // so non-tanstack consumers don't pay for the schemasFrom dynamic
-  // import a second time and their `isQuery` resolution stays default.
+  // so non-tanstack consumers' `isQuery` resolution stays default.
   let parser: UserConfig['parser'] = opts.parser;
   if (tanstack) {
-    const codecOpIds = await collectCodecOpIds(opts.registry, opts.schemasFrom);
+    const codecOpIds = collectCodecOpIds({
+      registry: opts.registry,
+      schemasFrom: opts.schemasFrom
+    });
     const userIsQuery = opts.parser?.hooks?.operations?.isQuery;
     parser = {
       ...opts.parser,
@@ -782,22 +799,14 @@ export async function defineRegistryClientConfig(
  * codegen-time work and keeps the two paths independent so refactoring
  * one doesn't have to touch the other.
  */
-async function collectCodecOpIds(
-  registry: RegistryLike,
-  schemasFrom: string
-): Promise<ReadonlySet<string>> {
-  let schemasModule: Record<string, unknown>;
-  try {
-    schemasModule = (await import(schemasFrom)) as Record<string, unknown>;
-  } catch (err) {
-    throw new Error(buildSchemasFromImportError(schemasFrom, err));
-  }
-  const exportsByIdentity = new Map<unknown, string>();
-  for (const [name, value] of Object.entries(schemasModule)) {
-    if (isLikelyZodType(value)) exportsByIdentity.set(value, name);
-  }
-  const inputs = collectInputSchemasFromRegistry(registry, exportsByIdentity);
-  return new Set(inputs.keys());
+function collectCodecOpIds({
+  registry,
+  schemasFrom
+}: {
+  registry: RegistryLike;
+  schemasFrom: string;
+}): ReadonlySet<string> {
+  return new Set(collectInputSchemasFromRegistry({ registry, schemasFrom }).keys());
 }
 
 /** Distinct schema names from a list of status entries, preserving spec order. */
@@ -1173,15 +1182,21 @@ function isSlotRequiredInOpData(
 }
 
 /**
- * Walk `registry.definitions` and, for each route, map every input ZodType
- * reference (held inside `request.{params, query, body, headers}`) back to
- * its export name in `schemasFrom` via identity lookup.
+ * Walk `registry.definitions` and, for each route, resolve every input
+ * ZodType reference (held inside `request.{params, query, body, headers}`)
+ * to its registration name — the refId that `.openapi('Name')` /
+ * `register('Name', schema)` attached to the instance the route holds.
  *
- * Identity matters: `.openapi('Name')` and `register('Name', schema)` both
- * return *new* schema instances (asteasolutions clones via
- * `new this.constructor(this._def)` so chained `.openapi(...)` calls don't
- * accumulate). So the user must put the same instance in `request.params`
- * that they export from `schemasFrom`. The natural pattern is:
+ * The refId is read from the exact instances the registry hands us, so
+ * resolution never consults a second evaluation of the schemas module and
+ * is immune to the c12/jiti vs native-loader module split a custom export
+ * condition (e.g. `@polygonlabs/source` build-free codegen) produces —
+ * the failure mode that silently dropped every codec input transformer
+ * when this lookup was identity-based. The resolved name follows the same
+ * audited contract as response schemas: {@link registryPlugin} verifies it
+ * is a Zod-shaped named export of `schemasFrom` before emitting anything,
+ * so `import { Name } from '<schemasFrom>'` + `z.encode(Name, value)` is
+ * guaranteed to resolve at consumer build time. The natural pattern:
  *
  *     // schemas.ts
  *     export const BlockNumberPathParams = z
@@ -1190,21 +1205,29 @@ function isSlotRequiredInOpData(
  *
  *     // routes/blocks.ts
  *     registry.registerPath({
- *       request: { params: BlockNumberPathParams },  // ← same instance
+ *       request: { params: BlockNumberPathParams },  // ← the registered export
  *       ...
  *     });
  *
- * Schemas not in `exportsByIdentity` (inline `z.object(...)` literals,
- * post-`register()` instances when the export is the pre-`register()`
- * version, etc.) silently skip input-encoding emission for that route —
- * same behaviour as before for unregistered input slots.
+ * Unregistered slots (no refId) split on codec content:
+ *   - Codec-free — anonymous inline schema (`params: z.object({ id:
+ *     z.uuid() })` written directly in the route). Intentional, common,
+ *     silently skipped.
+ *   - Codec-bearing — fails the codegen loudly (see the guard below).
+ *     Skipping it would emit a client that types the slot wire-shaped and
+ *     never runs `z.encode`, sending wire-invalid values (a `Date`
+ *     serialised as a locale string instead of ISO-8601) while compiling
+ *     clean.
  */
-function collectInputSchemasFromRegistry(
-  registry: RegistryLike,
-  exportsByIdentity: ReadonlyMap<unknown, string>
-): Map<string, OpInputSlots> {
+function collectInputSchemasFromRegistry({
+  registry,
+  schemasFrom
+}: {
+  registry: RegistryLike;
+  schemasFrom: string;
+}): Map<string, OpInputSlots> {
   const out = new Map<string, OpInputSlots>();
-  const skipWarnings: string[] = [];
+  const unregisteredCodecSlots: string[] = [];
 
   const lookupSlot = (
     schema: unknown,
@@ -1213,36 +1236,23 @@ function collectInputSchemasFromRegistry(
   ): string | undefined => {
     if (!schema || typeof schema !== 'object') return undefined;
     if (!isLikelyZodType(schema)) return undefined;
-    const name = exportsByIdentity.get(schema);
-    if (name) return name;
-
-    // The schema is a real ZodType, but it's not in the identity map of
-    // `schemasFrom`'s named exports. This has two flavours:
-    //   - Anonymous inline schema (`params: z.object({ id: z.uuid() })`
-    //     written directly in the route). Intentional, common, silent.
-    //   - The schema has a refId (user chained `.openapi('Name')` or
-    //     passed it through `register('Name', ...)`) but the route is
-    //     using a different instance from the one that's exported. This
-    //     is almost always a user error — the post-`.openapi` /
-    //     post-`register` clone diverged from the export. Warn loudly.
-    //
-    // Detect "has a refId" via asteasolutions's public `getRefId`.
-    // Diagnostic-only: if the cross-package metadata registry isn't
-    // shared (broken pnpm dedup), `getRefId` returns undefined and we
-    // silently skip — same outcome as an anonymous inline schema.
-    // The user still notices via the runtime symptom (wrong wire
-    // shape, server rejection) — the warning is the nice-to-have.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const refId = getRefId(schema as any);
-    if (refId) {
-      skipWarnings.push(
-        `[zod-to-openapi-heyapi] operation '${opId}' uses a non-exported schema in request.${slotKind} ` +
-          `that carries refId '${refId}' — input encoding will be skipped for this slot. ` +
-          `This usually means the route is using the post-.openapi('${refId}') / post-register('${refId}', ...) ` +
-          `clone but '${refId}' is exported from your schemasFrom module under a different instance. ` +
-          `Pick one source for the schema (the export) and use it everywhere.`
-      );
+    if (refId) return refId;
+
+    // Unregistered. A codec-bearing slot must not be skipped silently:
+    // the emitted client would type the slot wire-shaped and never run
+    // `z.encode`, sending wire-invalid values (e.g. a Date serialising as
+    // a locale string instead of ISO-8601). Collect and hard-fail below.
+    // Detection is structural (`containsCodec` walks the def tree), so it
+    // needs neither registration metadata nor module identity.
+    if (containsCodec(schema)) {
+      unregisteredCodecSlots.push(`operation '${opId}' request.${slotKind}`);
+      return undefined;
     }
+
+    // Codec-free and unregistered — the anonymous-inline-schema case.
+    // Intentional, common, silent.
     return undefined;
   };
 
@@ -1283,11 +1293,26 @@ function collectInputSchemasFromRegistry(
     if (hasAnyInputSlots(slots)) out.set(opId, slots);
   }
 
-  // Emit warnings via console.warn so they reach the developer's
-  // terminal during `openapi-ts`. One per misaligned slot — this is the
-  // user-error case, not the silent-skip-anonymous-inline case.
-  for (const msg of skipWarnings) {
-    console.warn(msg);
+  // Loud-failure guard: never emit a silently-degraded client. Each slot
+  // listed here contains a codec but carries no registration name — input
+  // encoding would be skipped and the generated client would send
+  // wire-invalid values for those fields while compiling clean.
+  if (unregisteredCodecSlots.length > 0) {
+    throw new Error(
+      `[zod-to-openapi-heyapi] ${unregisteredCodecSlots.length} request slot(s) contain Zod codecs ` +
+        `but are not registered schemas:\n` +
+        unregisteredCodecSlots.map((s) => `  - ${s}`).join('\n') +
+        `\n\nCodec-bearing input schemas must be registered and exported so the generated client ` +
+        `can import them and encode requests (z.encode) before serialisation. Skipping them ` +
+        `silently would emit a client that sends wire-invalid values for codec fields (e.g. a ` +
+        `Date serialised as a locale string instead of ISO-8601), so codegen refuses instead.\n\n` +
+        `Fix: register each listed slot's schema and export it from '${schemasFrom}' under the ` +
+        `registered name —\n\n` +
+        `  export const MySlotSchema = z.object({ ... }).openapi('MySlotSchema');\n\n` +
+        `— then use that exported value in the route's \`request\` block. The route must hold ` +
+        `the registered instance (the value returned by .openapi(...) / register(...)), since ` +
+        `registration metadata travels with the instance.`
+    );
   }
 
   return out;

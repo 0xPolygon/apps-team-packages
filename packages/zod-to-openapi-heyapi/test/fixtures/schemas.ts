@@ -264,18 +264,13 @@ export const ResourceFetched = z.object({
 
 // ── Input schemas with codecs (request side) ──────────────────────────────────
 //
-// No `.openapi('Name')` chain — these are raw exports. The plugin
-// resolves input slot names via identity lookup against the
-// `schemasFrom` module's named exports, so the only thing that matters
-// is that the *same instance* held by the export is what the route
-// uses in `request.{params, query, body}`. The export name itself
-// becomes the import binding emitted in the generated client.
-//
-// `OpenApiGeneratorV3` inlines per-parameter schemas regardless of
-// `.openapi(...)` metadata, so dropping the chain doesn't change the
-// spec for these path/query slots. Body schemas without `.openapi(...)`
-// also inline rather than `$ref` — fine for the plugin (it only needs
-// identity to find the name).
+// Every codec-bearing input schema chains `.openapi('Name')` with the
+// name matching its export binding. The plugin resolves input slot
+// names from that registration metadata (refId) carried by the schema
+// instance the route holds — an unregistered codec-bearing slot fails
+// codegen loudly. The registered name becomes the import binding the
+// generated client emits, audited at codegen time against the
+// `schemasFrom` module's export names.
 //
 // Two codec flavours covered:
 //   - `Int64Codec` on a path param — number-flavoured codec, `String(value)`
@@ -287,37 +282,47 @@ export const ResourceFetched = z.object({
 //     input transformer is specifically designed to make work.
 
 // Codec on a path param.
-export const BlockNumberPathParams = z.object({
-  blockNumber: Int64Codec
-});
+export const BlockNumberPathParams = z
+  .object({
+    blockNumber: Int64Codec
+  })
+  .openapi('BlockNumberPathParams');
 
 // Codec on a query param. Also verifies optionality flows through the
 // runtime → wire encode (an undefined `since` should not enter the URL).
-export const RecentEventsQuery = z.object({
-  since: IsoDateCodec.optional()
-});
+export const RecentEventsQuery = z
+  .object({
+    since: IsoDateCodec.optional()
+  })
+  .openapi('RecentEventsQuery');
 
 // Codec on a body field — exercises the request-body branch of the input
 // transformer. Mixed with non-codec fields to make sure `z.encode` only
 // transforms the codec-bearing parts.
-export const CreateOrderRequest = z.object({
-  reference: z.string().min(1),
-  scheduledFor: IsoDateCodec,
-  priority: Int64Codec
-});
+export const CreateOrderRequest = z
+  .object({
+    reference: z.string().min(1),
+    scheduledFor: IsoDateCodec,
+    priority: Int64Codec
+  })
+  .openapi('CreateOrderRequest');
 
 // Path schema for the multi-slot `updateOrder` route. Pairs with
 // `UpdateOrderRequest` to exercise an op that has BOTH a path slot
 // (the resource id) AND a body slot (the partial update) — the most
 // common real-world shape and the one we previously didn't test.
-export const OrderIdPathParams = z.object({
-  orderId: Int64Codec
-});
+export const OrderIdPathParams = z
+  .object({
+    orderId: Int64Codec
+  })
+  .openapi('OrderIdPathParams');
 
-export const UpdateOrderRequest = z.object({
-  scheduledFor: IsoDateCodec.optional(),
-  priority: Int64Codec.optional()
-});
+export const UpdateOrderRequest = z
+  .object({
+    scheduledFor: IsoDateCodec.optional(),
+    priority: Int64Codec.optional()
+  })
+  .openapi('UpdateOrderRequest');
 
 // Body for the default-optional case: `submitForReview` registers this
 // in `request.body.content.*.schema` WITHOUT `required: true`, so
@@ -325,7 +330,9 @@ export const UpdateOrderRequest = z.object({
 // `${Op}Data.body` is `body?: ...`. We use it to verify that our
 // `${Op}Input.body` and the wrapper's `options?:` correctly mirror
 // hey-api's "default-optional body" emission.
-export const SubmitForReviewRequest = z.object({
-  comment: z.string().optional(),
-  scheduledFor: IsoDateCodec.optional()
-});
+export const SubmitForReviewRequest = z
+  .object({
+    comment: z.string().optional(),
+    scheduledFor: IsoDateCodec.optional()
+  })
+  .openapi('SubmitForReviewRequest');
