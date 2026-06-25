@@ -9,15 +9,15 @@ describe('nonSwitchingWalletConnect', () => {
   it('preserves the WalletConnect descriptor identity', () => {
     const wallet = nonSwitchingWalletConnect({ projectId: 'test-project-id' });
 
-    expect(wallet).to.have.property('id', 'wallet-connect');
-    expect(wallet).to.have.property('name', 'WalletConnect');
-    expect(wallet).to.have.property('logoDark');
-    expect(wallet).to.have.property('logoLight');
+    expect(wallet).property('id', 'wallet-connect');
+    expect(wallet).property('name', 'WalletConnect');
+    expect(wallet).property('logoDark');
+    expect(wallet).property('logoLight');
   });
 
   it('exposes a createConnector factory', () => {
     const wallet = nonSwitchingWalletConnect({ projectId: 'test-project-id' });
 
-    expect(wallet.createConnector).to.be.a('function');
+    expect(wallet.createConnector).a('function');
   });
 });
