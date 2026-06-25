@@ -1,0 +1,54 @@
+{
+  "name": "@polygonlabs/viem-event-watcher",
+  "version": "1.0.0",
+  "description": "Backpressure-aware async-generator wrappers over viem getLogs: backfill, live watch (self-driven poll loop), and a gapless backfill-then-live stream.",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/0xPolygon/apps-team-packages.git",
+    "directory": "packages/viem-event-watcher"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js"
+      }
+    }
+  },
+  "exports": {
+    ".": {
+      "@polygonlabs/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "MIGRATION.md"
+  ],
+  "scripts": {
+    "build": "pnpm run typecheck && tsc -b tsconfig.lib.json",
+    "build:clean": "pnpm run typecheck && rm -rf dist out-tsc *.tsbuildinfo && tsc -b tsconfig.lib.json",
+    "typecheck": "tsc -b",
+    "test": "vitest run",
+    "lint": "eslint .",
+    "clean": "rm -rf node_modules dist out-tsc *.tsbuildinfo",
+    "prepublishOnly": "pnpm run build"
+  },
+  "dependencies": {},
+  "peerDependencies": {
+    "viem": ">=2.21.0"
+  },
+  "devDependencies": {
+    "@polygonlabs/apps-team-lint": "workspace:*",
+    "@tsconfig/node-ts": "^23.0.0",
+    "@tsconfig/node24": "^24.0.0",
+    "@types/node": "^24.0.0",
+    "eslint": "^10.0.0",
+    "typescript": "^5.9.3",
+    "viem": "^2.26.3",
+    "vitest": "^3.2.3"
+  }
+}

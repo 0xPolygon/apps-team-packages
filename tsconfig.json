@@ -3,14 +3,35 @@
   "compileOnSave": false,
   "files": [],
   "references": [
-    { "path": "packages/apps-team-lint" },
-    { "path": "packages/express" },
-    { "path": "packages/logger" },
-    { "path": "packages/openapi-registry" },
-    { "path": "packages/sync-github-releases" },
-    { "path": "packages/verror" },
-    { "path": "packages/wallet-kit" },
-    { "path": "packages/zod-codecs" },
-    { "path": "packages/zod-to-openapi-heyapi" }
+    {
+      "path": "packages/apps-team-lint"
+    },
+    {
+      "path": "packages/express"
+    },
+    {
+      "path": "packages/logger"
+    },
+    {
+      "path": "packages/openapi-registry"
+    },
+    {
+      "path": "packages/sync-github-releases"
+    },
+    {
+      "path": "packages/verror"
+    },
+    {
+      "path": "packages/viem-event-watcher"
+    },
+    {
+      "path": "packages/wallet-kit"
+    },
+    {
+      "path": "packages/zod-codecs"
+    },
+    {
+      "path": "packages/zod-to-openapi-heyapi"
+    }
   ]
 }
