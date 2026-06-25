@@ -24,6 +24,7 @@ import { useSanctionsScreening } from './hooks/use-sanctions-screening.ts';
 import { useSmartWalletDetection } from './hooks/use-smart-wallet-detection.ts';
 import { createScreener } from './screening.ts';
 import { isSequenceV3Connector, supportsWalletTransactionForSend } from './sequence-v3.ts';
+import { nonSwitchingWalletConnect } from './wallet-connect.ts';
 
 export interface WalletConnectEvent {
   address: Hex;
@@ -64,7 +65,22 @@ export const WalletKitProvider = ({
   onScreeningError,
   children
 }: WalletKitProviderProps) => {
-  const sequenceConfig = useMemo(() => createConfig(sequence), [sequence]);
+  // Replace Sequence's built-in WalletConnect connector with one that does not
+  // force a chain switch on connect — see ./wallet-connect.ts for why this hangs
+  // Safe / smart-contract wallets. `walletConnect: false` suppresses the
+  // built-in connector; the replacement is injected via `additionalWallets`.
+  const sequenceConfig = useMemo(() => {
+    const { walletConnect, additionalWallets, ...rest } = sequence;
+    const projectId = walletConnect ? walletConnect.projectId : undefined;
+    return createConfig({
+      ...rest,
+      walletConnect: false,
+      additionalWallets: [
+        ...(additionalWallets ?? []),
+        ...(projectId ? [nonSwitchingWalletConnect({ projectId })] : [])
+      ]
+    });
+  }, [sequence]);
 
   return (
     <SequenceConnect config={sequenceConfig} queryClient={queryClient}>
