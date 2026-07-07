@@ -306,11 +306,16 @@ const router = createRegistryRouter({ registry })
 app.use(router.toExpress());
 ```
 
-Auth runs before request validation — an unauthenticated request returns
-401 without ever parsing the body. Auth handlers `throw NotAuthenticated`
-/ `Forbidden` from `@polygonlabs/verror`; `createErrorHandler` answers
-401 / 403. Plain `Error` thrown from an auth handler is wrapped to
-`NotAuthenticated` so credential failures don't surface as 500s.
+Request validation runs before auth — a malformed request returns 400
+immediately, whether or not it carries credentials, and auth handlers
+only ever run for well-formed requests. That means auth handlers can
+read the validated, codec-decoded `req.params` / `req.query` / `req.body`
+directly (e.g. a wallet-signature scheme reading `req.body.owner`)
+without re-parsing the raw input through a shadow schema. Auth handlers
+`throw NotAuthenticated` / `Forbidden` from `@polygonlabs/verror`;
+`createErrorHandler` answers 401 / 403. Plain `Error` thrown from an
+auth handler is wrapped to `NotAuthenticated` so credential failures
+don't surface as 500s.
 
 Multi-scheme AND is supported (`security: [{ apiKey: [], bearer: [] }]`
 — both must succeed, both principals land on `req.auth`). OR semantics

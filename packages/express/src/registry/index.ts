@@ -3,11 +3,13 @@
  *
  * `createRegistryRouter({ registry })` produces a router whose routes are
  * derived entirely from the operations registered on the OpenAPIRegistry
- * (or `TypedRegistry`). Handlers are bound by `operationId`; for each
+ * (or `TypedRegistry`). Handlers are bound by `operationId`; the registered
+ * Zod schemas validate the request (params, query, body, headers) and
+ * response body — codecs round-trip end-to-end on both sides. For each
  * operation declaring `security: [...]` the configured auth handler runs
- * before request validation; the registered Zod schemas validate the
- * request (params, query, body, headers) and response body — codecs
- * round-trip end-to-end on both sides.
+ * after request validation, so auth handlers (and everything downstream)
+ * only ever see well-formed, codec-decoded requests — a malformed request
+ * gets its 400 without any auth handler running.
  *
  * Three correctness gates, all enforced at compile time:
  *
@@ -220,13 +222,18 @@ export class RegistryRouter<
       const expressPath = openApiToExpressPath(op.path);
       const middlewares: RequestHandler[] = [];
 
+      // Request validation runs before auth: a malformed request 400s
+      // immediately, and auth handlers only fire on well-formed requests —
+      // they can trust the validated, codec-decoded req.params/query/body
+      // instead of re-parsing (shadow-schema) the raw input themselves.
+      middlewares.push(createRequestValidator(op));
+
       const authMiddleware = createAuthMiddleware(op, authHandlers);
       if (authMiddleware) {
         middlewares.push(authMiddleware);
       }
 
       middlewares.push(
-        createRequestValidator(op),
         createResponseValidator(op),
         // Express 5 catches async errors raised by handlers natively, so no
         // try/catch wrapper is needed here. The cast is structural — Handler

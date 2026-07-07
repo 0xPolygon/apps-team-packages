@@ -22,9 +22,11 @@ export type Operation = RouteConfig & { operationId: string };
 export type OperationsManifest = Record<string, Operation>;
 
 /**
- * Auth handler signature. Receives the in-flight request (after Express
- * has parsed body/query/params but before the registry's own validation
- * middleware runs), returns a principal of any shape, or throws an
+ * Auth handler signature. Receives the in-flight request after the
+ * registry's request validation middleware has run, so `req.params`/
+ * `req.query`/`req.body` already hold the validated, codec-decoded
+ * runtime values — auth handlers can read them directly without
+ * re-parsing. Returns a principal of any shape, or throws an
  * `HTTPError` subclass (typically `NotAuthenticated` / `Forbidden` from
  * `@polygonlabs/verror`) which `createErrorHandler` answers as 401/403.
  *
