@@ -7,9 +7,10 @@
  *   - Compile-time exhaustiveness: `.auth(handlers)` covers every registered
  *     scheme (the type tests in `auth.test-d.ts` lock down the `@ts-expect-error`
  *     cases; this file tests the runtime behaviour assuming type-correct calls).
- *   - Runtime ordering: auth runs BEFORE request validation. A request that
- *     would fail body validation but lacks credentials returns 401, not 400 —
- *     the auth handler short-circuits before any body parsing happens.
+ *   - Runtime ordering: request validation runs BEFORE auth. A malformed
+ *     request returns 400 regardless of credentials — auth handlers only
+ *     fire on well-formed requests and see the validated, codec-decoded
+ *     req.body/params/query.
  *   - Principal flow: the auth handler's return value lands on `req.auth[scheme]`
  *     for the route handler to read.
  *   - Failure modes: NotAuthenticated → 401, plain `Error` thrown by an auth
@@ -63,8 +64,8 @@ const buildAuthRegistry = () =>
         200: { description: 'ok', content: { 'application/json': { schema: HelloResponse } } }
       }
     })
-    // Protected route — apiKey required. Body validation behind auth so we
-    // can prove auth runs first.
+    // Protected route — apiKey required. Body validation on an authed route
+    // so we can prove validation runs before auth.
     .registerPath({
       operationId: 'protectedTenant',
       method: 'post',
@@ -154,8 +155,7 @@ const handlers: HandlerMap<Operations, AuthMap> = {
   },
   protectedTenant: (req, res) => {
     // req.auth.apiKey is typed as { tenantId: string } via the auth
-    // handler's return type. The handler also has access to the validated
-    // body — proves request validation ran AFTER auth.
+    // handler's return type; req.body holds the validated body.
     void req.body.note;
     res.json({ tenantId: req.auth.apiKey.tenantId });
   },
@@ -213,11 +213,21 @@ describe('registry-driven router auth', () => {
     expect(r.body).toMatchObject({ error: true });
   });
 
-  it('runs auth BEFORE request validation (bad body returns 401, not 400)', async () => {
-    // The body would fail validation (note must be non-empty), but auth
-    // is missing — so we should see 401, not 400. This proves the
-    // middleware ordering.
-    const r = await supertest(app).post('/protected/tenant').send({ note: '' }).expect(401);
+  it('runs request validation BEFORE auth (bad body returns 400, not 401)', async () => {
+    // The body fails validation (note must be non-empty) AND auth is
+    // missing — validation wins: 400, and the auth handler never runs.
+    // This proves the middleware ordering.
+    const r = await supertest(app).post('/protected/tenant').send({ note: '' }).expect(400);
+    expect(r.body).toMatchObject({ error: true });
+  });
+
+  it('returns 401 when the body is valid but credentials are missing', async () => {
+    // Well-formed request, no credentials — validation passes, then auth
+    // rejects. Ensures the flip to validate-first didn't weaken auth.
+    const r = await supertest(app)
+      .post('/protected/tenant')
+      .send({ note: 'a real note' })
+      .expect(401);
     expect(r.body).toMatchObject({ error: true });
   });
 

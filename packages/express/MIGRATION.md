@@ -1,5 +1,29 @@
 # Migration Guide
 
+## 4.0.x → 4.1.0
+
+### Registry router: request validation now runs before auth handlers
+
+The registry-driven router used to run an operation's auth handlers before
+request validation. The order is now flipped: the registered Zod schemas
+validate `req.params` / `req.query` / `req.body` / `req.headers` first, and
+auth handlers only run once the request is well-formed.
+
+What to check when upgrading:
+
+- **Status-code expectations.** A malformed request to a protected operation
+  now returns `400` (validation error body) instead of `401`/`403`. Update
+  any tests or clients that relied on auth winning.
+- **Delete shadow parsing in auth handlers.** Auth handlers now receive the
+  validated, codec-decoded request sections. If a handler re-parsed
+  `req.body` through its own schema to guard against garbage input, that
+  guard is dead code — read the fields directly.
+
+No import or signature changes — this is purely a middleware-ordering
+behaviour change.
+
+---
+
 ## 1.0.0 → 1.0.1
 
 ### `requestContext` renamed to `setupLogger`
