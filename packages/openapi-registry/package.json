@@ -1,6 +1,6 @@
 {
   "name": "@polygonlabs/openapi-registry",
-  "version": "2.1.2",
+  "version": "2.1.3",
   "description": "Type-accumulating drop-in for @asteasolutions/zod-to-openapi's OpenAPIRegistry. Schemas packages compose with TypedRegistry; downstream consumers (Express, codegen, gateway aggregation) read the accumulated Ops via inferred return types.",
   "license": "Apache-2.0",
   "type": "module",

@@ -1,5 +1,18 @@
 # @polygonlabs/wallet-kit
 
+## 2.0.2
+
+### Patch Changes
+
+- [#73](https://github.com/0xPolygon/apps-team-packages/pull/73) [`006cf08`](https://github.com/0xPolygon/apps-team-packages/commit/006cf081e794bb156cee0f37fabc450c5b03e7c5) Thanks [@MaximusHaximus](https://github.com/MaximusHaximus)! - Ship the LICENSE file inside the published npm package
+
+  The previous release added the Apache-2.0 license at the repo root and
+  declared it in package.json, but npm only auto-includes a LICENSE file
+  in the packed tarball when it lives in the same directory as the
+  package's own package.json. The license metadata was correct but the
+  actual license text was missing from the published package — this adds
+  it.
+
 ## 2.0.1
 
 ### Patch Changes
