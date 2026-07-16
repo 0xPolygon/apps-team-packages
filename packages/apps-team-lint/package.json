@@ -2,6 +2,7 @@
   "name": "@polygonlabs/apps-team-lint",
   "version": "2.2.0",
   "description": "Shared lint configurations for Polygon Typescript (Apps Team)",
+  "license": "Apache-2.0",
   "type": "module",
   "repository": {
     "type": "git",

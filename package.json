@@ -2,6 +2,7 @@
   "name": "apps-team-packages",
   "version": "1.0.0",
   "description": "Polygon Apps Team shared packages monorepo",
+  "license": "Apache-2.0",
   "type": "module",
   "private": true,
   "packageManager": "pnpm@10.30.3",

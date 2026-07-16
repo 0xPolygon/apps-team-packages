@@ -2,6 +2,7 @@
   "name": "@polygonlabs/logger",
   "version": "3.0.0",
   "description": "Pino-based logger with Sentry integration, configured for Datadog ingestion and prettified output capable.",
+  "license": "Apache-2.0",
   "type": "module",
   "repository": {
     "type": "git",
