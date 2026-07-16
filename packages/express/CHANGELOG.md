@@ -1,5 +1,16 @@
 # @polygonlabs/express
 
+## 4.1.1
+
+### Patch Changes
+
+- [#71](https://github.com/0xPolygon/apps-team-packages/pull/71) [`aa81b1a`](https://github.com/0xPolygon/apps-team-packages/commit/aa81b1a73e0b4711d195c12e12120f5f67191305) Thanks [@MaximusHaximus](https://github.com/MaximusHaximus)! - Add Apache-2.0 license: the package now declares `"license": "Apache-2.0"` in its `package.json`, and the repository carries the full Apache License 2.0 text. Previously no license was declared.
+
+- Updated dependencies [[`aa81b1a`](https://github.com/0xPolygon/apps-team-packages/commit/aa81b1a73e0b4711d195c12e12120f5f67191305)]:
+  - @polygonlabs/logger@3.0.1
+  - @polygonlabs/openapi-registry@2.1.2
+  - @polygonlabs/verror@1.1.1
+
 ## 4.1.0
 
 ### Minor Changes
