@@ -1,6 +1,6 @@
 {
   "name": "@polygonlabs/zod-codecs",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "Zod v4 codecs for the wire formats JSON-on-the-wire services keep reinventing — int64 strings, unbounded big integers, decimal strings, and ISO datetimes — that decode into the right runtime type and round-trip back.",
   "license": "Apache-2.0",
   "type": "module",

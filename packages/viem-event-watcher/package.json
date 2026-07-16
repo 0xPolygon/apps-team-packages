@@ -1,6 +1,6 @@
 {
   "name": "@polygonlabs/viem-event-watcher",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Backpressure-aware async-generator wrappers over viem getLogs: backfill, live watch (self-driven poll loop), and a gapless backfill-then-live stream.",
   "license": "Apache-2.0",
   "type": "module",
