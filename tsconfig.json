@@ -16,6 +16,9 @@
       "path": "packages/openapi-registry"
     },
     {
+      "path": "packages/resilient-rpc"
+    },
+    {
       "path": "packages/sync-github-releases"
     },
     {

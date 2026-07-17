@@ -1,0 +1,90 @@
+{
+  "name": "@polygonlabs/resilient-rpc",
+  "version": "0.0.0",
+  "description": "Multi-endpoint JSON-RPC pool with per-endpoint circuit breakers, zero-sleep failover, and a log-driven degrade signal. Library-agnostic core plus thin viem and ethers v6 adapters.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/0xPolygon/apps-team-packages.git",
+    "directory": "packages/resilient-rpc"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js"
+      },
+      "./viem": {
+        "types": "./dist/viem/index.d.ts",
+        "import": "./dist/viem/index.js"
+      },
+      "./ethers": {
+        "types": "./dist/ethers/index.d.ts",
+        "import": "./dist/ethers/index.js"
+      }
+    }
+  },
+  "exports": {
+    ".": {
+      "@polygonlabs/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./viem": {
+      "@polygonlabs/source": "./src/viem/index.ts",
+      "types": "./dist/viem/index.d.ts",
+      "import": "./dist/viem/index.js"
+    },
+    "./ethers": {
+      "@polygonlabs/source": "./src/ethers/index.ts",
+      "types": "./dist/ethers/index.d.ts",
+      "import": "./dist/ethers/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "MIGRATION.md",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "build": "pnpm run typecheck && tsc -b tsconfig.lib.json",
+    "build:clean": "pnpm run typecheck && rm -rf dist out-tsc *.tsbuildinfo && tsc -b tsconfig.lib.json",
+    "typecheck": "tsc -b",
+    "test": "vitest run",
+    "lint": "eslint .",
+    "clean": "rm -rf node_modules dist out-tsc *.tsbuildinfo",
+    "prepublishOnly": "pnpm run build"
+  },
+  "dependencies": {},
+  "peerDependencies": {
+    "@polygonlabs/logger": "^3.0.2",
+    "@polygonlabs/verror": "^1.1.2",
+    "ethers": ">=6.0.0",
+    "viem": ">=2.21.0",
+    "zod": "^4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "ethers": {
+      "optional": true
+    },
+    "viem": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@polygonlabs/apps-team-lint": "workspace:*",
+    "@polygonlabs/logger": "workspace:*",
+    "@polygonlabs/verror": "workspace:*",
+    "@tsconfig/node-ts": "^23.0.0",
+    "@tsconfig/node24": "^24.0.0",
+    "@types/node": "^24.0.0",
+    "eslint": "^10.0.0",
+    "ethers": "^6.16.0",
+    "typescript": "^5.9.3",
+    "viem": "^2.26.3",
+    "vitest": "^3.2.3",
+    "zod": "^4.3.6"
+  }
+}

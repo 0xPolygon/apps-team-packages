@@ -1,0 +1,17 @@
+import { defineConfig } from 'vitest/config';
+
+export default defineConfig({
+  // Vite 7's SSR resolver (the path Vitest uses for Node tests) ignores
+  // top-level `resolve.conditions`; the `@polygonlabs/source` condition
+  // has to go under `ssr.resolve.conditions` for the workspace packages
+  // this package depends on (`@polygonlabs/logger`, `@polygonlabs/verror`)
+  // to resolve to `.ts` source without a built `dist/`.
+  ssr: {
+    resolve: {
+      conditions: ['@polygonlabs/source']
+    }
+  },
+  test: {
+    include: ['test/**/*.test.ts']
+  }
+});

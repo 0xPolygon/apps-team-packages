@@ -239,6 +239,45 @@ importers:
         specifier: ^4.3.6
         version: 4.4.3
 
+  packages/resilient-rpc:
+    devDependencies:
+      '@polygonlabs/apps-team-lint':
+        specifier: workspace:*
+        version: link:../apps-team-lint
+      '@polygonlabs/logger':
+        specifier: workspace:*
+        version: link:../logger
+      '@polygonlabs/verror':
+        specifier: workspace:*
+        version: link:../verror
+      '@tsconfig/node-ts':
+        specifier: ^23.0.0
+        version: 23.6.4
+      '@tsconfig/node24':
+        specifier: ^24.0.0
+        version: 24.0.4
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.3
+      eslint:
+        specifier: ^10.0.0
+        version: 10.7.0(jiti@2.7.0)
+      ethers:
+        specifier: ^6.16.0
+        version: 6.17.0
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      viem:
+        specifier: ^2.26.3
+        version: 2.55.2(typescript@5.9.3)(zod@4.4.3)
+      vitest:
+        specifier: ^3.2.3
+        version: 3.2.7(@types/debug@4.1.13)(@types/node@24.13.3)(@vitest/browser@3.2.7)(jiti@2.7.0)(jsdom@28.1.0(@noble/hashes@1.8.0))(msw@2.15.0(@types/node@24.13.3)(typescript@5.9.3))(yaml@2.9.0)
+      zod:
+        specifier: ^4.3.6
+        version: 4.4.3
+
   packages/sync-github-releases:
     dependencies:
       '@inquirer/prompts':
