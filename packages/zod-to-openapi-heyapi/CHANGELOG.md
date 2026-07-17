@@ -1,5 +1,13 @@
 # @polygonlabs/zod-to-openapi-heyapi
 
+## 2.0.3
+
+### Patch Changes
+
+- [#75](https://github.com/0xPolygon/apps-team-packages/pull/75) [`17845a2`](https://github.com/0xPolygon/apps-team-packages/commit/17845a2c636d7e0094cd6ba59ae478549771d7e5) Thanks [@MaximusHaximus](https://github.com/MaximusHaximus)! - Raise the minimum supported `@hey-api/openapi-ts` to 0.97.3, which resolves a security advisory affecting earlier releases.
+
+  The `@hey-api/openapi-ts` peer dependency floor is now `>=0.97.3` (previously `>=0.95.0`). Update your `@hey-api/openapi-ts` dependency to 0.97.3 or later and regenerate your clients — the bundled runtime templates (`client.gen.ts` and friends) change between these versions.
+
 ## 2.0.2
 
 ### Patch Changes
