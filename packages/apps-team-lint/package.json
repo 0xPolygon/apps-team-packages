@@ -86,7 +86,7 @@
     "@commitlint/types": "^19.0.0",
     "@tsconfig/node-ts": "^23.0.0",
     "@tsconfig/node24": "^24.0.0",
-    "@typescript-eslint/rule-tester": "8.57.2",
+    "@typescript-eslint/rule-tester": "8.64.0",
     "markdownlint": "^0.40.0",
     "typescript": "^5.9.3",
     "vitest": "^3.2.3"
