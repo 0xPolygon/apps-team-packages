@@ -54,7 +54,7 @@
   },
   "peerDependencies": {
     "@asteasolutions/zod-to-openapi": "^8.0.0",
-    "@hey-api/openapi-ts": ">=0.95.0",
+    "@hey-api/openapi-ts": ">=0.97.3",
     "@tanstack/react-query": "^5.0.0",
     "zod": "^4.0.0"
   },
@@ -65,7 +65,7 @@
   },
   "devDependencies": {
     "@asteasolutions/zod-to-openapi": "^8.5.0",
-    "@hey-api/openapi-ts": "^0.95.0",
+    "@hey-api/openapi-ts": "^0.97.3",
     "@playwright/browser-chromium": "1.60.0",
     "@polygonlabs/apps-team-lint": "workspace:*",
     "@polygonlabs/zod-codecs": "workspace:*",

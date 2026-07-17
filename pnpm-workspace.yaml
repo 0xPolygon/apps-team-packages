@@ -11,8 +11,18 @@ minimumReleaseAgeExclude:
   - '@0xtrails/*'
 # katex 0.16.34 (transitive dep of markdownlint-cli2) has a broken ESM build
 # where __VERSION__ is not replaced at build time, crashing on Node 24.
+#
+# markdown-it, js-yaml@4, and uuid@10 are forced past versions with open
+# security advisories that their parents (markdownlint-cli2, @hey-api/
+# json-schema-ref-parser, @0xsequence/connect) still pin below the patched
+# release. Scoped selectors (js-yaml@4, uuid@10) keep the fix inside the
+# affected major so parents expecting other majors (changesets' js-yaml@3)
+# are untouched. Drop each entry once its parent moves its own range.
 overrides:
   katex: ^0.16.38
+  markdown-it: '>=14.2.0'
+  'js-yaml@4': '>=4.2.0'
+  'uuid@10': '^11.1.1'
 onlyBuiltDependencies:
   # Runs a postinstall hook that downloads the Chromium binary into
   # ~/.cache/ms-playwright. This is how zod-to-openapi-heyapi's browser-mode
