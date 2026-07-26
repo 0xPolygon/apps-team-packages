@@ -169,6 +169,25 @@ interface PnpmListEntry {
 }
 
 /**
+ * Run `pnpm m ls --depth=-1 --json` against a clone, retrying once with the
+ * package-manager version check waived. Throws if both attempts fail.
+ */
+const listPackagesJson = (repoRoot: string): string => {
+  const args = ['-C', repoRoot, 'm', 'ls', '--depth=-1', '--json'];
+  try {
+    return capture('pnpm', args);
+  } catch {
+    // Every clone pins whatever `packageManager` version its own repo chose, and
+    // that routinely differs from the pnpm running this tool — in which case pnpm
+    // refuses to run at all rather than enumerating. `--pm-on-fail=ignore` waives
+    // that check. It is tried as a fallback rather than passed up front because
+    // the flag postdates pnpm 10: passing it unconditionally would turn a working
+    // enumeration into an unknown-option failure for anyone on an older pnpm.
+    return capture('pnpm', ['--pm-on-fail=ignore', ...args]);
+  }
+};
+
+/**
  * Use `pnpm m ls --depth=-1 --json` to enumerate every package in the local
  * clone and build a `name → CHANGELOG.md` path map. Works for pnpm workspaces
  * (returns the root + every workspace package) and for plain single-package
@@ -181,9 +200,18 @@ const buildPackageChangelogMap = (repoRoot: string): Map<string, string> => {
 
   let json: string;
   try {
-    json = capture('pnpm', ['-C', repoRoot, 'm', 'ls', '--depth=-1', '--json']);
+    json = listPackagesJson(repoRoot);
   } catch {
-    // pnpm couldn't enumerate (no package.json, lockfile mismatch, etc.).
+    // A repo with no root package.json has genuinely nothing to enumerate, and
+    // that case stays quiet. Anything else means pnpm itself failed, which is
+    // otherwise indistinguishable from "found no packages": every release reports
+    // [skip: no changelog match] and the summary still says errors=0, so a run
+    // that discovered nothing reads exactly like a run with nothing to do. Say so.
+    if (existsSync(join(repoRoot, 'package.json'))) {
+      console.error(
+        `  [warn] pnpm failed to enumerate packages in ${repoRoot} (see its error above) — every release in this repo will report [skip: no changelog match]`
+      );
+    }
     // Fall through with an empty map; per-release verdicts will report
     // [skip: no changelog match] for each tag.
     return map;
