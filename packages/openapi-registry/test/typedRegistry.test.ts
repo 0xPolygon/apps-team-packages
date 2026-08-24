@@ -206,6 +206,88 @@ describe('TypedRegistry', () => {
     });
   });
 
+  describe('standardErrorResponses option', () => {
+    /** Returns the registered route with the given operationId, or throws. */
+    function routeOf(r: TypedRegistry, operationId: string): RouteWithOpId {
+      const def = r.definitions.find(
+        (d): d is { type: 'route'; route: RouteWithOpId } =>
+          (d as { type?: unknown; route?: { operationId?: string } }).type === 'route' &&
+          (d as { route: { operationId?: string } }).route.operationId === operationId
+      );
+      if (!def) throw new Error(`route ${operationId} not registered`);
+      return def.route;
+    }
+
+    // Plain object (no `as const`): an explicit const assertion makes
+    // `security` a readonly tuple, which RouteConfig's mutable
+    // `SecurityRequirementObject[]` rejects. Inline literals at
+    // registerPath call sites don't hit this — the `<const O>` type
+    // parameter's inference is tempered by the RouteWithOpId constraint.
+    const validatedSecuredRoute = {
+      operationId: 'getGuarded',
+      method: 'get' as const,
+      path: '/guarded',
+      request: { query: z.object({ q: z.string() }) },
+      security: [{ ApiKeyAuth: [] }],
+      responses: okResponse
+    };
+
+    it('omitted → injects 500/400/401 (original default behaviour)', () => {
+      const r = new TypedRegistry().registerPath(validatedSecuredRoute);
+      const responses = routeOf(r, 'getGuarded').responses;
+      expect(Object.keys(responses).sort()).toEqual(['200', '400', '401', '500']);
+    });
+
+    it('false → injects nothing, even for validated + secured routes', () => {
+      const r = new TypedRegistry({ standardErrorResponses: false }).registerPath(
+        validatedSecuredRoute
+      );
+      const responses = routeOf(r, 'getGuarded').responses;
+      expect(Object.keys(responses)).toEqual(['200']);
+    });
+
+    it('per-slot override swaps that schema and keeps defaults for the rest', () => {
+      const GoStyleError = z.object({ error: z.string() });
+      const r = new TypedRegistry({
+        standardErrorResponses: { serverError: GoStyleError }
+      }).registerPath(validatedSecuredRoute);
+      const responses = routeOf(r, 'getGuarded').responses as Record<
+        string,
+        { content: { 'application/json': { schema: unknown } } }
+      >;
+      expect(responses[500]?.content['application/json'].schema).toBe(GoStyleError);
+      // 400 keeps the default ValidationErrorResponseSchema — overriding
+      // one slot must not disturb its siblings.
+      expect(responses[400]?.content['application/json'].schema).not.toBe(GoStyleError);
+      expect(responses[400]).toBeDefined();
+      expect(responses[401]).toBeDefined();
+    });
+
+    it('user-declared response slots still win over configured overrides', () => {
+      const GoStyleError = z.object({ error: z.string() });
+      const RouteOwn500 = z.object({ mine: z.literal(true) });
+      const r = new TypedRegistry({
+        standardErrorResponses: { serverError: GoStyleError }
+      }).registerPath({
+        operationId: 'getOwn500',
+        method: 'get',
+        path: '/own',
+        responses: {
+          ...okResponse,
+          500: {
+            description: 'route-declared 500',
+            content: { 'application/json': { schema: RouteOwn500 } }
+          }
+        }
+      });
+      const responses = routeOf(r, 'getOwn500').responses as Record<
+        string,
+        { content: { 'application/json': { schema: unknown } } }
+      >;
+      expect(responses[500]?.content['application/json'].schema).toBe(RouteOwn500);
+    });
+  });
+
   describe('end-to-end builder', () => {
     it('the recommended builder pattern produces the expected definitions', () => {
       const addCore = <Ops extends Record<string, RouteWithOpId>>(reg: TypedRegistry<Ops>) =>

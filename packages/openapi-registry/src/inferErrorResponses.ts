@@ -40,8 +40,49 @@
  */
 
 import type { ResponseConfig } from '@asteasolutions/zod-to-openapi';
+import type { z } from 'zod';
 
 import { ErrorResponseSchema, ValidationErrorResponseSchema } from './error-schemas.ts';
+
+/**
+ * Configuration for the standard-error injection, accepted by
+ * `new TypedRegistry({ standardErrorResponses })` and by
+ * `inferStandardErrorResponses` directly.
+ *
+ * The DEFAULT schemas document `@polygonlabs/express`'s error middleware
+ * (`createErrorHandler` / `createRequestValidator`) — that coupling is
+ * correct for our Express services but wrong for any other producer: a
+ * spec authored with this registry for a non-Express service would
+ * otherwise advertise 500/400/401 shapes its server never emits, and the
+ * injected `ErrorResponse` component name can collide with the service's
+ * own same-named schema of a different shape (surfacing as a mangled
+ * `allOf` in the generated document).
+ *
+ *   - `false` — inject nothing. Every route documents exactly the
+ *     responses it declares.
+ *   - `{ serverError?, validationError?, notAuthenticated? }` — override
+ *     the schema for individual slots; omitted slots keep the
+ *     `@polygonlabs/express` defaults. The injection RULES (when a 400 /
+ *     401 / 500 is added) are unchanged — only the shapes are
+ *     configurable, because the rules describe which failures a fronting
+ *     framework emits, not what they look like.
+ */
+export type StandardErrorOptions =
+  | false
+  | {
+      /** Shape of the unconditional 500. Default: `ErrorResponseSchema`. */
+      serverError?: z.ZodType;
+      /**
+       * Shape of the 400 injected for routes declaring request
+       * validation. Default: `ValidationErrorResponseSchema`.
+       */
+      validationError?: z.ZodType;
+      /**
+       * Shape of the 401 injected for routes declaring `security`.
+       * Default: `ErrorResponseSchema`.
+       */
+      notAuthenticated?: z.ZodType;
+    };
 
 /**
  * Minimal structural slice of `RouteConfig` that the inference reads.
@@ -63,14 +104,27 @@ type RouteShapeForInference = {
  * Returns the standard error responses inferred from the route's
  * declared shape. Caller merges this with the user-authored responses
  * (user wins) before forwarding to `inner.registerPath`.
+ *
+ * `options` selects the injected shapes (or disables injection) — see
+ * {@link StandardErrorOptions}. Omitted (or `{}`) keeps the
+ * `@polygonlabs/express` defaults, preserving the original behaviour.
  */
 export function inferStandardErrorResponses(
-  route: RouteShapeForInference
+  route: RouteShapeForInference,
+  options: StandardErrorOptions = {}
 ): Record<number, ResponseConfig> {
+  if (options === false) {
+    return {};
+  }
+
+  const serverError = options.serverError ?? ErrorResponseSchema;
+  const validationError = options.validationError ?? ValidationErrorResponseSchema;
+  const notAuthenticated = options.notAuthenticated ?? ErrorResponseSchema;
+
   const responses: Record<number, ResponseConfig> = {
     500: {
       description: 'Internal server error.',
-      content: { 'application/json': { schema: ErrorResponseSchema } }
+      content: { 'application/json': { schema: serverError } }
     }
   };
 
@@ -79,14 +133,14 @@ export function inferStandardErrorResponses(
   if (hasRequestValidation) {
     responses[400] = {
       description: 'Request failed schema validation.',
-      content: { 'application/json': { schema: ValidationErrorResponseSchema } }
+      content: { 'application/json': { schema: validationError } }
     };
   }
 
   if (route.security && route.security.length > 0) {
     responses[401] = {
       description: 'Missing or invalid credentials.',
-      content: { 'application/json': { schema: ErrorResponseSchema } }
+      content: { 'application/json': { schema: notAuthenticated } }
     };
   }
 
@@ -106,37 +160,66 @@ export function inferStandardErrorResponses(
  * narrows on a distinct required-key shape, so only routes that actually
  * declare that key match.
  */
-export type InferredStandardErrorResponses<R> = {
-  500: {
-    description: string;
-    content: { 'application/json': { schema: typeof ErrorResponseSchema } };
-  };
-} & (R extends { request: { params: unknown } }
-  ? ValidationResponseEntry
-  : R extends { request: { query: unknown } }
-    ? ValidationResponseEntry
-    : R extends { request: { body: unknown } }
-      ? ValidationResponseEntry
-      : R extends { request: { headers: unknown } }
-        ? ValidationResponseEntry
+export type InferredStandardErrorResponses<
+  R,
+  E extends StandardErrorOptions = DefaultErrors
+> = E extends false
+  ? // eslint-disable-next-line @typescript-eslint/no-empty-object-type -- injection disabled: identity element for the responses merge
+    {}
+  : {
+      500: {
+        description: string;
+        content: { 'application/json': { schema: ResolvedServerError<E> } };
+      };
+    } & (R extends { request: { params: unknown } }
+      ? ValidationResponseEntry<E>
+      : R extends { request: { query: unknown } }
+        ? ValidationResponseEntry<E>
+        : R extends { request: { body: unknown } }
+          ? ValidationResponseEntry<E>
+          : R extends { request: { headers: unknown } }
+            ? ValidationResponseEntry<E>
+            : // eslint-disable-next-line @typescript-eslint/no-empty-object-type -- identity element for an intersection
+              {}) &
+      (R extends { security: readonly [unknown, ...unknown[]] }
+        ? NotAuthenticatedResponseEntry<E>
         : // eslint-disable-next-line @typescript-eslint/no-empty-object-type -- identity element for an intersection
-          {}) &
-  (R extends { security: readonly [unknown, ...unknown[]] }
-    ? NotAuthenticatedResponseEntry
-    : // eslint-disable-next-line @typescript-eslint/no-empty-object-type -- identity element for an intersection
-      {});
+          {});
 
-type ValidationResponseEntry = {
+/**
+ * The "all defaults" options value — `{}` at both type and runtime level.
+ * Named so the class's third type parameter reads as intent rather than
+ * a bare `{}`.
+ */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type -- `{}` IS the value: every slot omitted, every default applied
+export type DefaultErrors = {};
+
+/** Schema type for the injected 500 under options `E`. */
+type ResolvedServerError<E> = E extends { serverError: infer S extends z.ZodType }
+  ? S
+  : typeof ErrorResponseSchema;
+
+/** Schema type for the injected 400 under options `E`. */
+type ResolvedValidationError<E> = E extends { validationError: infer S extends z.ZodType }
+  ? S
+  : typeof ValidationErrorResponseSchema;
+
+/** Schema type for the injected 401 under options `E`. */
+type ResolvedNotAuthenticated<E> = E extends { notAuthenticated: infer S extends z.ZodType }
+  ? S
+  : typeof ErrorResponseSchema;
+
+type ValidationResponseEntry<E> = {
   400: {
     description: string;
-    content: { 'application/json': { schema: typeof ValidationErrorResponseSchema } };
+    content: { 'application/json': { schema: ResolvedValidationError<E> } };
   };
 };
 
-type NotAuthenticatedResponseEntry = {
+type NotAuthenticatedResponseEntry<E> = {
   401: {
     description: string;
-    content: { 'application/json': { schema: typeof ErrorResponseSchema } };
+    content: { 'application/json': { schema: ResolvedNotAuthenticated<E> } };
   };
 };
 
@@ -148,9 +231,9 @@ type NotAuthenticatedResponseEntry = {
  * side before the intersection, so the user's response types are the
  * ones that surface.
  */
-export type MergedRoute<R extends { responses: Record<string | number, unknown> }> = Omit<
-  R,
-  'responses'
-> & {
-  responses: Omit<InferredStandardErrorResponses<R>, keyof R['responses']> & R['responses'];
+export type MergedRoute<
+  R extends { responses: Record<string | number, unknown> },
+  E extends StandardErrorOptions = DefaultErrors
+> = Omit<R, 'responses'> & {
+  responses: Omit<InferredStandardErrorResponses<R, E>, keyof R['responses']> & R['responses'];
 };

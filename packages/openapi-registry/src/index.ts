@@ -42,7 +42,7 @@ import type { z } from 'zod';
 
 import { OpenAPIRegistry as OpenAPIRegistryClass } from '@asteasolutions/zod-to-openapi';
 
-import type { MergedRoute } from './inferErrorResponses.ts';
+import type { DefaultErrors, MergedRoute, StandardErrorOptions } from './inferErrorResponses.ts';
 
 import { inferStandardErrorResponses } from './inferErrorResponses.ts';
 
@@ -93,10 +93,20 @@ export type SecuritySchemeObject = {
 /* eslint-disable @typescript-eslint/no-empty-object-type -- the default `{}` is the "no entries yet" identity element for both intersection-based accumulators. `Record<string, never>` would be wrong (forbids any value); `object` doesn't carry the index signature shape we need. */
 export class TypedRegistry<
   Ops extends Record<string, RouteWithOpId> = {},
-  Schemes extends Record<string, true> = {}
+  Schemes extends Record<string, true> = {},
+  E extends StandardErrorOptions = DefaultErrors
 > {
   /* eslint-enable @typescript-eslint/no-empty-object-type */
   private inner: OpenAPIRegistry;
+
+  /**
+   * Standard-error injection config, captured at construction. The `E`
+   * type parameter mirrors it at the type level so `MergedRoute<O, E>`
+   * reports the CONFIGURED schema types in the `Ops` accumulator rather
+   * than always claiming the `@polygonlabs/express` defaults — the
+   * accumulator must not lie about the spec the runtime registry holds.
+   */
+  private readonly standardErrorResponses: StandardErrorOptions;
 
   /**
    * Type-level accessor for the accumulated operations manifest. Read via
@@ -116,8 +126,20 @@ export class TypedRegistry<
    */
   declare readonly schemes: Schemes;
 
-  constructor() {
+  /**
+   * @param options.standardErrorResponses Controls the framework-emitted
+   * error responses auto-injected into every `registerPath` call. The
+   * DEFAULT shapes document `@polygonlabs/express`'s error middleware —
+   * correct for our Express services, wrong for any other producer,
+   * whose spec would otherwise advertise 500/400/401 shapes its server
+   * never emits (and whose own `ErrorResponse` component can collide
+   * with the injected one). Pass `false` to disable injection entirely,
+   * or override individual slots — see {@link StandardErrorOptions}.
+   * Omit for the original default behaviour.
+   */
+  constructor(options?: { standardErrorResponses?: E }) {
     this.inner = new OpenAPIRegistryClass();
+    this.standardErrorResponses = options?.standardErrorResponses ?? {};
   }
 
   /**
@@ -144,18 +166,19 @@ export class TypedRegistry<
    */
   registerPath<const O extends RouteWithOpId>(
     route: O
-  ): TypedRegistry<Ops & { [K in O['operationId']]: MergedRoute<O> }, Schemes> {
+  ): TypedRegistry<Ops & { [K in O['operationId']]: MergedRoute<O, E> }, Schemes, E> {
     const merged = {
       ...route,
       responses: {
-        ...inferStandardErrorResponses(route),
+        ...inferStandardErrorResponses(route, this.standardErrorResponses),
         ...route.responses
       }
     } as O;
     this.inner.registerPath(merged);
     return this as unknown as TypedRegistry<
-      Ops & { [K in O['operationId']]: MergedRoute<O> },
-      Schemes
+      Ops & { [K in O['operationId']]: MergedRoute<O, E> },
+      Schemes,
+      E
     >;
   }
 
@@ -178,9 +201,9 @@ export class TypedRegistry<
   registerSecurityScheme<const N extends string>(
     name: N,
     scheme: SecuritySchemeObject
-  ): TypedRegistry<Ops, Schemes & { [K in N]: true }> {
+  ): TypedRegistry<Ops, Schemes & { [K in N]: true }, E> {
     this.inner.registerComponent('securitySchemes', name, scheme);
-    return this as unknown as TypedRegistry<Ops, Schemes & { [K in N]: true }>;
+    return this as unknown as TypedRegistry<Ops, Schemes & { [K in N]: true }, E>;
   }
 
   /**
@@ -316,5 +339,10 @@ export type SchemesOf<
 // emits TS2742 in consumers whose inferred `buildRegistry` (or chain
 // helpers like `addBlockRoutes`) return type references `MergedRoute` —
 // the type would only be reachable via the package's internal subpath.
-export type { InferredStandardErrorResponses, MergedRoute } from './inferErrorResponses.ts';
+export type {
+  DefaultErrors,
+  InferredStandardErrorResponses,
+  MergedRoute,
+  StandardErrorOptions
+} from './inferErrorResponses.ts';
 export { inferStandardErrorResponses } from './inferErrorResponses.ts';
