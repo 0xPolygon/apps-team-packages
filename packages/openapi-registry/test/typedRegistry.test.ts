@@ -288,6 +288,74 @@ describe('TypedRegistry', () => {
     });
   });
 
+  describe('coercing-schema audit', () => {
+    const ok = { responses: okResponse } as const;
+
+    it('throws on z.coerce in a query property, naming route and property', () => {
+      expect(() =>
+        new TypedRegistry().registerPath({
+          operationId: 'getCoerced',
+          method: 'get',
+          path: '/coerced',
+          request: { query: z.object({ networkId: z.coerce.number().int() }) },
+          ...ok
+        })
+      ).toThrow(/getCoerced.*request\.query\.networkId.*z\.coerce/s);
+    });
+
+    it('throws even when the coercing schema is wrapped in optional/default', () => {
+      expect(() =>
+        new TypedRegistry().registerPath({
+          operationId: 'getWrappedCoerce',
+          method: 'get',
+          path: '/wrapped',
+          request: { params: z.object({ page: z.coerce.number().optional().default(1) }) },
+          ...ok
+        })
+      ).toThrow(/getWrappedCoerce.*request\.params\.page/s);
+    });
+
+    it('accepts plain logical types and codecs (pipes are not coercion)', () => {
+      const Int64ishCodec = z.codec(z.string().regex(/^\d+$/), z.bigint(), {
+        decode: (s) => BigInt(s),
+        encode: (b) => b.toString()
+      });
+      expect(() =>
+        new TypedRegistry().registerPath({
+          operationId: 'getClean',
+          method: 'get',
+          path: '/clean',
+          request: {
+            query: z.object({
+              networkId: z.number().int(),
+              amount: Int64ishCodec,
+              from: z.string().optional()
+            })
+          },
+          ...ok
+        })
+      ).not.toThrow();
+    });
+
+    it('does not inspect body schemas (JSON bodies are typed on the wire)', () => {
+      expect(() =>
+        new TypedRegistry().registerPath({
+          operationId: 'postBody',
+          method: 'post',
+          path: '/body',
+          request: {
+            body: {
+              content: {
+                'application/json': { schema: z.object({ n: z.coerce.number() }) }
+              }
+            }
+          },
+          ...ok
+        })
+      ).not.toThrow();
+    });
+  });
+
   describe('end-to-end builder', () => {
     it('the recommended builder pattern produces the expected definitions', () => {
       const addCore = <Ops extends Record<string, RouteWithOpId>>(reg: TypedRegistry<Ops>) =>

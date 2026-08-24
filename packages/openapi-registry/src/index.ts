@@ -44,6 +44,7 @@ import { OpenAPIRegistry as OpenAPIRegistryClass } from '@asteasolutions/zod-to-
 
 import type { DefaultErrors, MergedRoute, StandardErrorOptions } from './inferErrorResponses.ts';
 
+import { assertNoCoercingParamSchemas } from './coercionAudit.ts';
 import { inferStandardErrorResponses } from './inferErrorResponses.ts';
 
 /** A registered route — RouteConfig with required operationId. */
@@ -167,6 +168,11 @@ export class TypedRegistry<
   registerPath<const O extends RouteWithOpId>(
     route: O
   ): TypedRegistry<Ops & { [K in O['operationId']]: MergedRoute<O, E> }, Schemes, E> {
+    // Generate-time contract audit: coercing schemas (`z.coerce.*`) in
+    // parameter positions silently document required params as
+    // optional-and-nullable — see coercionAudit.ts for the failure mode
+    // and the sanctioned replacements. Throws before registration.
+    assertNoCoercingParamSchemas(route);
     const merged = {
       ...route,
       responses: {
@@ -346,3 +352,4 @@ export type {
   StandardErrorOptions
 } from './inferErrorResponses.ts';
 export { inferStandardErrorResponses } from './inferErrorResponses.ts';
+export { assertNoCoercingParamSchemas } from './coercionAudit.ts';
