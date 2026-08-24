@@ -51,6 +51,36 @@ export const BigIntegerCodec = z.codec(z.string().regex(digitString), z.bigint()
 });
 
 /**
+ * Wire: signed-integer string. Runtime: `number`, constrained to the safe
+ * integer range (`Number.MIN_SAFE_INTEGER` … `Number.MAX_SAFE_INTEGER`).
+ *
+ * Use this where the wire is a string by TRANSPORT necessity rather than
+ * precision need — query and path parameters (chain ids, page numbers,
+ * limits, counts) always arrive as strings, and the runtime wants a plain
+ * `number`. Never reach for `z.coerce.number()` in a registry contract for
+ * this: in zod v4 a coercing schema's input type is `unknown`, so the
+ * generated OpenAPI silently documents the parameter as optional and
+ * nullable regardless of intent. This codec declares both sides honestly.
+ *
+ * Decoding rejects values outside the safe range (`Number("…")` rounds
+ * first, then the output schema's safe-integer bound fails the parse) —
+ * use {@link Int64Codec} or {@link BigIntegerCodec} for values that can
+ * legitimately exceed `2^53 - 1`.
+ *
+ * For range-constrained parameters, roll a local codec with a constrained
+ * output schema:
+ *
+ *     z.codec(z.string().regex(/^\d+$/), z.number().int().min(1).max(100), {
+ *       decode: (s) => Number(s),
+ *       encode: (n) => n.toString()
+ *     });
+ */
+export const SafeIntegerCodec = z.codec(z.string().regex(digitString), z.int(), {
+  decode: (s) => Number(s),
+  encode: (n) => n.toString()
+});
+
+/**
  * Wire: decimal-number string. Runtime: the same string, validated.
  *
  * JSON's `number` is IEEE-754 double; many financial and on-chain quantities
