@@ -45,8 +45,8 @@
  * constraints.
  */
 
-import type { $, IR, UserConfig } from '@hey-api/openapi-ts';
-import type { CallExpression, Expression } from 'typescript';
+import type { $, IR, MaybeTsDsl, UserConfig } from '@hey-api/openapi-ts';
+import type { CallExpression, Expression, Statement } from 'typescript';
 
 import { getRefId } from '@asteasolutions/zod-to-openapi';
 // Used to hand-construct a TypePredicateNode for the wrapper-emitted
@@ -1462,8 +1462,10 @@ function emitParseTransformer({
   //     its own rejection: `throw new ResponseValidationError(err, data)`.
   //     The `as ZodError` cast mirrors the wrapper's error-transformer
   //     catch — `parseAsync` rejects with ZodError by contract.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let transformerStatements: any;
+  // Typed as the DSL's own `.do(...)` parameter shape (`DoExpr` upstream,
+  // which is not exported — `MaybeTsDsl<Expression | Statement>` is its
+  // exact definition).
+  let transformerStatements: MaybeTsDsl<Expression | Statement>;
   const parseCallExpr = transformerBody.attr('parseAsync').call('data').await();
   if (role === 'response') {
     const responseValidationSymbol = plugin.querySymbol({
