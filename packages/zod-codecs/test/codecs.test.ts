@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import { BigIntegerCodec, DecimalStringCodec, Int64Codec, IsoDateCodec } from '../src/index.ts';
+import {
+  BigIntegerCodec,
+  DecimalStringCodec,
+  Int64Codec,
+  IsoDateCodec,
+  SafeIntegerCodec
+} from '../src/index.ts';
 
 describe('Int64Codec', () => {
   it('decodes an in-range digit string into a bigint', async () => {
@@ -57,6 +63,34 @@ describe('BigIntegerCodec', () => {
     await expect(BigIntegerCodec.parseAsync('abc')).rejects.toThrow();
     await expect(BigIntegerCodec.parseAsync('1.5')).rejects.toThrow();
     await expect(BigIntegerCodec.parseAsync('')).rejects.toThrow();
+  });
+});
+
+describe('SafeIntegerCodec', () => {
+  it('decodes a digit string into a number', async () => {
+    const value = await SafeIntegerCodec.parseAsync('137');
+    expect(value).toEqual(137);
+    expect(typeof value).toEqual('number');
+  });
+
+  it('round-trips through encode', async () => {
+    const value = await SafeIntegerCodec.parseAsync('-42');
+    const back = await z.encode(SafeIntegerCodec, value);
+    expect(back).toEqual('-42');
+  });
+
+  it('rejects values above the safe-integer range (Number() rounds, bound catches)', async () => {
+    // 2^64 + 5: Number('18446744073709551621') silently rounds to
+    // 18446744073709552000, which the safe-integer output bound rejects —
+    // the loud failure that distinguishes this codec from a bare
+    // z.coerce.number(), which would return the rounded value.
+    await expect(SafeIntegerCodec.parseAsync('18446744073709551621')).rejects.toThrow();
+  });
+
+  it('rejects non-digit strings', async () => {
+    await expect(SafeIntegerCodec.parseAsync('1.5')).rejects.toThrow();
+    await expect(SafeIntegerCodec.parseAsync('1e10')).rejects.toThrow();
+    await expect(SafeIntegerCodec.parseAsync('')).rejects.toThrow();
   });
 });
 

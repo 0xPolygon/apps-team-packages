@@ -85,11 +85,20 @@ export interface TransportError extends Error {
  * generation.
  *
  * The class is *always* constructed the same way:
- * `new ResponseValidationError(zodError, wireBody)`. `cause` is the
- * `ZodError` from `parseAsync` — cross-client consumers reach
- * `.format()` / `.flatten()` / `.issues` directly; `body` is the
- * original wire body that failed parse. Both fields are one hop from
- * the wrapper-error — symmetric with `TransportError.cause`.
+ * `new ResponseValidationError(zodError, body)`, from either of two
+ * sites: the per-op response transformer, when a SUCCESS (2xx) body
+ * fails `parseAsync` against the registered response schema; or the
+ * SDK wrapper, when an error-status body fails `parseAsync` against
+ * every registered error schema. `cause` is the `ZodError` —
+ * cross-client consumers reach `.format()` / `.flatten()` / `.issues`
+ * directly; `body` is the body that failed parse. Both fields are one
+ * hop from the wrapper-error — symmetric with `TransportError.cause`.
+ *
+ * `body` is the POST-`JSON.parse` value (hey-api's fetch client parses
+ * before any plugin code runs), so it is faithful evidence for schema
+ * drift (wrong types, missing fields, renamed keys) but not a raw-text
+ * capture: a JSON number too large for IEEE-754 has already lost
+ * precision by the time it lands here. Diagnosis, not recovery.
  */
 export interface ResponseValidationError extends Error {
   readonly cause: ZodError;

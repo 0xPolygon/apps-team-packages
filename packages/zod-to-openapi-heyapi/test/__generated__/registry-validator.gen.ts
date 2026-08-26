@@ -14,368 +14,6 @@ export type GetScalarStringResponses = {
 
 export type GetScalarStringResponse = GetScalarStringResponses[keyof GetScalarStringResponses];
 
-export const getScalarStringTransformer = async (data: unknown): Promise<z.output<typeof ScalarString>> => await ScalarString.parseAsync(data);
-
-export type WrapPassThrough<TData, ThrowOnError extends boolean, TResponseStyle extends "fields" | "data" = 'fields'> = Promise<ThrowOnError extends true ? TResponseStyle extends "data" ? TData extends Record<string, unknown> ? TData[keyof TData] : TData : {
-    data: TData extends Record<string, unknown> ? TData[keyof TData] : TData;
-    request: Request;
-    response: Response;
-} : TResponseStyle extends "data" ? (TData extends Record<string, unknown> ? TData[keyof TData] : TData) | undefined : ({
-    data: TData extends Record<string, unknown> ? TData[keyof TData] : TData;
-    error: undefined;
-} | {
-    data: undefined;
-    error: unknown;
-}) & {
-    request: Request;
-    response: Response;
-}>;
-
-export const getScalarString = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetScalarStringData, ThrowOnError>): WrapPassThrough<GetScalarStringResponses, ThrowOnError, TResponseStyle> => await getScalarString2(options) as unknown as Awaited<WrapPassThrough<GetScalarStringResponses, ThrowOnError, TResponseStyle>>;
-
-export type GetScalarNumberResponses = {
-    200: z.output<typeof ScalarNumber>;
-};
-
-export type GetScalarNumberResponse = GetScalarNumberResponses[keyof GetScalarNumberResponses];
-
-export const getScalarNumberTransformer = async (data: unknown): Promise<z.output<typeof ScalarNumber>> => await ScalarNumber.parseAsync(data);
-
-export const getScalarNumber = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetScalarNumberData, ThrowOnError>): WrapPassThrough<GetScalarNumberResponses, ThrowOnError, TResponseStyle> => await getScalarNumber2(options) as unknown as Awaited<WrapPassThrough<GetScalarNumberResponses, ThrowOnError, TResponseStyle>>;
-
-export type GetScalarBooleanResponses = {
-    200: z.output<typeof ScalarBoolean>;
-};
-
-export type GetScalarBooleanResponse = GetScalarBooleanResponses[keyof GetScalarBooleanResponses];
-
-export const getScalarBooleanTransformer = async (data: unknown): Promise<z.output<typeof ScalarBoolean>> => await ScalarBoolean.parseAsync(data);
-
-export const getScalarBoolean = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetScalarBooleanData, ThrowOnError>): WrapPassThrough<GetScalarBooleanResponses, ThrowOnError, TResponseStyle> => await getScalarBoolean2(options) as unknown as Awaited<WrapPassThrough<GetScalarBooleanResponses, ThrowOnError, TResponseStyle>>;
-
-export type GetScalarBigIntResponses = {
-    200: z.output<typeof ScalarBigInt>;
-};
-
-export type GetScalarBigIntResponse = GetScalarBigIntResponses[keyof GetScalarBigIntResponses];
-
-export const getScalarBigIntTransformer = async (data: unknown): Promise<z.output<typeof ScalarBigInt>> => await ScalarBigInt.parseAsync(data);
-
-export const getScalarBigInt = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetScalarBigIntData, ThrowOnError>): WrapPassThrough<GetScalarBigIntResponses, ThrowOnError, TResponseStyle> => await getScalarBigInt2(options) as unknown as Awaited<WrapPassThrough<GetScalarBigIntResponses, ThrowOnError, TResponseStyle>>;
-
-export type GetOptionalFieldResponses = {
-    200: z.output<typeof OptionalField>;
-};
-
-export type GetOptionalFieldResponse = GetOptionalFieldResponses[keyof GetOptionalFieldResponses];
-
-export const getOptionalFieldTransformer = async (data: unknown): Promise<z.output<typeof OptionalField>> => await OptionalField.parseAsync(data);
-
-export const getOptionalField = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetOptionalFieldData, ThrowOnError>): WrapPassThrough<GetOptionalFieldResponses, ThrowOnError, TResponseStyle> => await getOptionalField2(options) as unknown as Awaited<WrapPassThrough<GetOptionalFieldResponses, ThrowOnError, TResponseStyle>>;
-
-export type GetNullableFieldResponses = {
-    200: z.output<typeof NullableField>;
-};
-
-export type GetNullableFieldResponse = GetNullableFieldResponses[keyof GetNullableFieldResponses];
-
-export const getNullableFieldTransformer = async (data: unknown): Promise<z.output<typeof NullableField>> => await NullableField.parseAsync(data);
-
-export const getNullableField = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetNullableFieldData, ThrowOnError>): WrapPassThrough<GetNullableFieldResponses, ThrowOnError, TResponseStyle> => await getNullableField2(options) as unknown as Awaited<WrapPassThrough<GetNullableFieldResponses, ThrowOnError, TResponseStyle>>;
-
-export type GetOptionalNullableFieldResponses = {
-    200: z.output<typeof OptionalNullableField>;
-};
-
-export type GetOptionalNullableFieldResponse = GetOptionalNullableFieldResponses[keyof GetOptionalNullableFieldResponses];
-
-export const getOptionalNullableFieldTransformer = async (data: unknown): Promise<z.output<typeof OptionalNullableField>> => await OptionalNullableField.parseAsync(data);
-
-export const getOptionalNullableField = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetOptionalNullableFieldData, ThrowOnError>): WrapPassThrough<GetOptionalNullableFieldResponses, ThrowOnError, TResponseStyle> => await getOptionalNullableField2(options) as unknown as Awaited<WrapPassThrough<GetOptionalNullableFieldResponses, ThrowOnError, TResponseStyle>>;
-
-export type GetEnumFieldResponses = {
-    200: z.output<typeof EnumField>;
-};
-
-export type GetEnumFieldResponse = GetEnumFieldResponses[keyof GetEnumFieldResponses];
-
-export const getEnumFieldTransformer = async (data: unknown): Promise<z.output<typeof EnumField>> => await EnumField.parseAsync(data);
-
-export const getEnumField = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetEnumFieldData, ThrowOnError>): WrapPassThrough<GetEnumFieldResponses, ThrowOnError, TResponseStyle> => await getEnumField2(options) as unknown as Awaited<WrapPassThrough<GetEnumFieldResponses, ThrowOnError, TResponseStyle>>;
-
-export type GetLiteralFieldResponses = {
-    200: z.output<typeof LiteralField>;
-};
-
-export type GetLiteralFieldResponse = GetLiteralFieldResponses[keyof GetLiteralFieldResponses];
-
-export const getLiteralFieldTransformer = async (data: unknown): Promise<z.output<typeof LiteralField>> => await LiteralField.parseAsync(data);
-
-export const getLiteralField = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetLiteralFieldData, ThrowOnError>): WrapPassThrough<GetLiteralFieldResponses, ThrowOnError, TResponseStyle> => await getLiteralField2(options) as unknown as Awaited<WrapPassThrough<GetLiteralFieldResponses, ThrowOnError, TResponseStyle>>;
-
-export type GetUnionOfLiteralsResponses = {
-    200: z.output<typeof UnionOfLiterals>;
-};
-
-export type GetUnionOfLiteralsResponse = GetUnionOfLiteralsResponses[keyof GetUnionOfLiteralsResponses];
-
-export const getUnionOfLiteralsTransformer = async (data: unknown): Promise<z.output<typeof UnionOfLiterals>> => await UnionOfLiterals.parseAsync(data);
-
-export const getUnionOfLiterals = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetUnionOfLiteralsData, ThrowOnError>): WrapPassThrough<GetUnionOfLiteralsResponses, ThrowOnError, TResponseStyle> => await getUnionOfLiterals2(options) as unknown as Awaited<WrapPassThrough<GetUnionOfLiteralsResponses, ThrowOnError, TResponseStyle>>;
-
-export type GetArrayOfScalarsResponses = {
-    200: z.output<typeof ArrayOfScalars>;
-};
-
-export type GetArrayOfScalarsResponse = GetArrayOfScalarsResponses[keyof GetArrayOfScalarsResponses];
-
-export const getArrayOfScalarsTransformer = async (data: unknown): Promise<z.output<typeof ArrayOfScalars>> => await ArrayOfScalars.parseAsync(data);
-
-export const getArrayOfScalars = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetArrayOfScalarsData, ThrowOnError>): WrapPassThrough<GetArrayOfScalarsResponses, ThrowOnError, TResponseStyle> => await getArrayOfScalars2(options) as unknown as Awaited<WrapPassThrough<GetArrayOfScalarsResponses, ThrowOnError, TResponseStyle>>;
-
-export type GetArrayOfCodecsResponses = {
-    200: z.output<typeof ArrayOfCodecs>;
-};
-
-export type GetArrayOfCodecsResponse = GetArrayOfCodecsResponses[keyof GetArrayOfCodecsResponses];
-
-export const getArrayOfCodecsTransformer = async (data: unknown): Promise<z.output<typeof ArrayOfCodecs>> => await ArrayOfCodecs.parseAsync(data);
-
-export const getArrayOfCodecs = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetArrayOfCodecsData, ThrowOnError>): WrapPassThrough<GetArrayOfCodecsResponses, ThrowOnError, TResponseStyle> => await getArrayOfCodecs2(options) as unknown as Awaited<WrapPassThrough<GetArrayOfCodecsResponses, ThrowOnError, TResponseStyle>>;
-
-export type GetRecordFieldResponses = {
-    200: z.output<typeof RecordField>;
-};
-
-export type GetRecordFieldResponse = GetRecordFieldResponses[keyof GetRecordFieldResponses];
-
-export const getRecordFieldTransformer = async (data: unknown): Promise<z.output<typeof RecordField>> => await RecordField.parseAsync(data);
-
-export const getRecordField = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetRecordFieldData, ThrowOnError>): WrapPassThrough<GetRecordFieldResponses, ThrowOnError, TResponseStyle> => await getRecordField2(options) as unknown as Awaited<WrapPassThrough<GetRecordFieldResponses, ThrowOnError, TResponseStyle>>;
-
-export type GetNestedResponses = {
-    200: z.output<typeof Nested>;
-};
-
-export type GetNestedResponse = GetNestedResponses[keyof GetNestedResponses];
-
-export const getNestedTransformer = async (data: unknown): Promise<z.output<typeof Nested>> => await Nested.parseAsync(data);
-
-export const getNested = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetNestedData, ThrowOnError>): WrapPassThrough<GetNestedResponses, ThrowOnError, TResponseStyle> => await getNested2(options) as unknown as Awaited<WrapPassThrough<GetNestedResponses, ThrowOnError, TResponseStyle>>;
-
-export type GetUnionFieldResponses = {
-    200: z.output<typeof UnionField>;
-};
-
-export type GetUnionFieldResponse = GetUnionFieldResponses[keyof GetUnionFieldResponses];
-
-export const getUnionFieldTransformer = async (data: unknown): Promise<z.output<typeof UnionField>> => await UnionField.parseAsync(data);
-
-export const getUnionField = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetUnionFieldData, ThrowOnError>): WrapPassThrough<GetUnionFieldResponses, ThrowOnError, TResponseStyle> => await getUnionField2(options) as unknown as Awaited<WrapPassThrough<GetUnionFieldResponses, ThrowOnError, TResponseStyle>>;
-
-export type GetCodecObjectResponses = {
-    200: z.output<typeof CodecObject>;
-};
-
-export type GetCodecObjectResponse = GetCodecObjectResponses[keyof GetCodecObjectResponses];
-
-export const getCodecObjectTransformer = async (data: unknown): Promise<z.output<typeof CodecObject>> => await CodecObject.parseAsync(data);
-
-export const getCodecObject = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetCodecObjectData, ThrowOnError>): WrapPassThrough<GetCodecObjectResponses, ThrowOnError, TResponseStyle> => await getCodecObject2(options) as unknown as Awaited<WrapPassThrough<GetCodecObjectResponses, ThrowOnError, TResponseStyle>>;
-
-export type GetComposedResponses = {
-    200: z.output<typeof Composed>;
-};
-
-export type GetComposedResponse = GetComposedResponses[keyof GetComposedResponses];
-
-export const getComposedTransformer = async (data: unknown): Promise<z.output<typeof Composed>> => await Composed.parseAsync(data);
-
-export const getComposed = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetComposedData, ThrowOnError>): WrapPassThrough<GetComposedResponses, ThrowOnError, TResponseStyle> => await getComposed2(options) as unknown as Awaited<WrapPassThrough<GetComposedResponses, ThrowOnError, TResponseStyle>>;
-
-export type GetPaginatedComposedResponses = {
-    200: z.output<typeof PaginatedComposed>;
-};
-
-export type GetPaginatedComposedResponse = GetPaginatedComposedResponses[keyof GetPaginatedComposedResponses];
-
-export const getPaginatedComposedTransformer = async (data: unknown): Promise<z.output<typeof PaginatedComposed>> => await PaginatedComposed.parseAsync(data);
-
-export const getPaginatedComposed = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetPaginatedComposedData, ThrowOnError>): WrapPassThrough<GetPaginatedComposedResponses, ThrowOnError, TResponseStyle> => await getPaginatedComposed2(options) as unknown as Awaited<WrapPassThrough<GetPaginatedComposedResponses, ThrowOnError, TResponseStyle>>;
-
-export type GetStringWithMinMaxResponses = {
-    200: z.output<typeof StringWithMinMax>;
-};
-
-export type GetStringWithMinMaxResponse = GetStringWithMinMaxResponses[keyof GetStringWithMinMaxResponses];
-
-export const getStringWithMinMaxTransformer = async (data: unknown): Promise<z.output<typeof StringWithMinMax>> => await StringWithMinMax.parseAsync(data);
-
-export const getStringWithMinMax = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetStringWithMinMaxData, ThrowOnError>): WrapPassThrough<GetStringWithMinMaxResponses, ThrowOnError, TResponseStyle> => await getStringWithMinMax2(options) as unknown as Awaited<WrapPassThrough<GetStringWithMinMaxResponses, ThrowOnError, TResponseStyle>>;
-
-export type GetNumberWithRangeResponses = {
-    200: z.output<typeof NumberWithRange>;
-};
-
-export type GetNumberWithRangeResponse = GetNumberWithRangeResponses[keyof GetNumberWithRangeResponses];
-
-export const getNumberWithRangeTransformer = async (data: unknown): Promise<z.output<typeof NumberWithRange>> => await NumberWithRange.parseAsync(data);
-
-export const getNumberWithRange = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetNumberWithRangeData, ThrowOnError>): WrapPassThrough<GetNumberWithRangeResponses, ThrowOnError, TResponseStyle> => await getNumberWithRange2(options) as unknown as Awaited<WrapPassThrough<GetNumberWithRangeResponses, ThrowOnError, TResponseStyle>>;
-
-export type GetArrayWithLengthResponses = {
-    200: z.output<typeof ArrayWithLength>;
-};
-
-export type GetArrayWithLengthResponse = GetArrayWithLengthResponses[keyof GetArrayWithLengthResponses];
-
-export const getArrayWithLengthTransformer = async (data: unknown): Promise<z.output<typeof ArrayWithLength>> => await ArrayWithLength.parseAsync(data);
-
-export const getArrayWithLength = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetArrayWithLengthData, ThrowOnError>): WrapPassThrough<GetArrayWithLengthResponses, ThrowOnError, TResponseStyle> => await getArrayWithLength2(options) as unknown as Awaited<WrapPassThrough<GetArrayWithLengthResponses, ThrowOnError, TResponseStyle>>;
-
-export type GetStringWithFormatResponses = {
-    200: z.output<typeof StringWithFormat>;
-};
-
-export type GetStringWithFormatResponse = GetStringWithFormatResponses[keyof GetStringWithFormatResponses];
-
-export const getStringWithFormatTransformer = async (data: unknown): Promise<z.output<typeof StringWithFormat>> => await StringWithFormat.parseAsync(data);
-
-export const getStringWithFormat = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetStringWithFormatData, ThrowOnError>): WrapPassThrough<GetStringWithFormatResponses, ThrowOnError, TResponseStyle> => await getStringWithFormat2(options) as unknown as Awaited<WrapPassThrough<GetStringWithFormatResponses, ThrowOnError, TResponseStyle>>;
-
-export type GetRefinedFieldResponses = {
-    200: z.output<typeof RefinedField>;
-};
-
-export type GetRefinedFieldResponse = GetRefinedFieldResponses[keyof GetRefinedFieldResponses];
-
-export const getRefinedFieldTransformer = async (data: unknown): Promise<z.output<typeof RefinedField>> => await RefinedField.parseAsync(data);
-
-export const getRefinedField = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetRefinedFieldData, ThrowOnError>): WrapPassThrough<GetRefinedFieldResponses, ThrowOnError, TResponseStyle> => await getRefinedField2(options) as unknown as Awaited<WrapPassThrough<GetRefinedFieldResponses, ThrowOnError, TResponseStyle>>;
-
-export type GetConstrainedCodecResponses = {
-    200: z.output<typeof ConstrainedCodec>;
-};
-
-export type GetConstrainedCodecResponse = GetConstrainedCodecResponses[keyof GetConstrainedCodecResponses];
-
-export const getConstrainedCodecTransformer = async (data: unknown): Promise<z.output<typeof ConstrainedCodec>> => await ConstrainedCodec.parseAsync(data);
-
-export const getConstrainedCodec = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetConstrainedCodecData, ThrowOnError>): WrapPassThrough<GetConstrainedCodecResponses, ThrowOnError, TResponseStyle> => await getConstrainedCodec2(options) as unknown as Awaited<WrapPassThrough<GetConstrainedCodecResponses, ThrowOnError, TResponseStyle>>;
-
-export type GetTupleFieldResponses = {
-    200: z.output<typeof TupleField>;
-};
-
-export type GetTupleFieldResponse = GetTupleFieldResponses[keyof GetTupleFieldResponses];
-
-export const getTupleFieldTransformer = async (data: unknown): Promise<z.output<typeof TupleField>> => await TupleField.parseAsync(data);
-
-export const getTupleField = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetTupleFieldData, ThrowOnError>): WrapPassThrough<GetTupleFieldResponses, ThrowOnError, TResponseStyle> => await getTupleField2(options) as unknown as Awaited<WrapPassThrough<GetTupleFieldResponses, ThrowOnError, TResponseStyle>>;
-
-export type GetIntersectionFieldResponses = {
-    200: z.output<typeof IntersectionField>;
-};
-
-export type GetIntersectionFieldResponse = GetIntersectionFieldResponses[keyof GetIntersectionFieldResponses];
-
-export const getIntersectionFieldTransformer = async (data: unknown): Promise<z.output<typeof IntersectionField>> => await IntersectionField.parseAsync(data);
-
-export const getIntersectionField = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetIntersectionFieldData, ThrowOnError>): WrapPassThrough<GetIntersectionFieldResponses, ThrowOnError, TResponseStyle> => await getIntersectionField2(options) as unknown as Awaited<WrapPassThrough<GetIntersectionFieldResponses, ThrowOnError, TResponseStyle>>;
-
-export type GetDiscriminatedUnionResponses = {
-    200: z.output<typeof DiscriminatedUnion>;
-};
-
-export type GetDiscriminatedUnionResponse = GetDiscriminatedUnionResponses[keyof GetDiscriminatedUnionResponses];
-
-export const getDiscriminatedUnionTransformer = async (data: unknown): Promise<z.output<typeof DiscriminatedUnion>> => await DiscriminatedUnion.parseAsync(data);
-
-export const getDiscriminatedUnion = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetDiscriminatedUnionData, ThrowOnError>): WrapPassThrough<GetDiscriminatedUnionResponses, ThrowOnError, TResponseStyle> => await getDiscriminatedUnion2(options) as unknown as Awaited<WrapPassThrough<GetDiscriminatedUnionResponses, ThrowOnError, TResponseStyle>>;
-
-export type GetDateFieldResponses = {
-    200: z.output<typeof DateField>;
-};
-
-export type GetDateFieldResponse = GetDateFieldResponses[keyof GetDateFieldResponses];
-
-export const getDateFieldTransformer = async (data: unknown): Promise<z.output<typeof DateField>> => await DateField.parseAsync(data);
-
-export const getDateField = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetDateFieldData, ThrowOnError>): WrapPassThrough<GetDateFieldResponses, ThrowOnError, TResponseStyle> => await getDateField2(options) as unknown as Awaited<WrapPassThrough<GetDateFieldResponses, ThrowOnError, TResponseStyle>>;
-
-export type GetSetFieldResponses = {
-    200: z.output<typeof SetField>;
-};
-
-export type GetSetFieldResponse = GetSetFieldResponses[keyof GetSetFieldResponses];
-
-export const getSetFieldTransformer = async (data: unknown): Promise<z.output<typeof SetField>> => await SetField.parseAsync(data);
-
-export const getSetField = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetSetFieldData, ThrowOnError>): WrapPassThrough<GetSetFieldResponses, ThrowOnError, TResponseStyle> => await getSetField2(options) as unknown as Awaited<WrapPassThrough<GetSetFieldResponses, ThrowOnError, TResponseStyle>>;
-
-export type GetMapFieldResponses = {
-    200: z.output<typeof MapField>;
-};
-
-export type GetMapFieldResponse = GetMapFieldResponses[keyof GetMapFieldResponses];
-
-export const getMapFieldTransformer = async (data: unknown): Promise<z.output<typeof MapField>> => await MapField.parseAsync(data);
-
-export const getMapField = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetMapFieldData, ThrowOnError>): WrapPassThrough<GetMapFieldResponses, ThrowOnError, TResponseStyle> => await getMapField2(options) as unknown as Awaited<WrapPassThrough<GetMapFieldResponses, ThrowOnError, TResponseStyle>>;
-
-export type GetDefaultFieldResponses = {
-    200: z.output<typeof DefaultField>;
-};
-
-export type GetDefaultFieldResponse = GetDefaultFieldResponses[keyof GetDefaultFieldResponses];
-
-export const getDefaultFieldTransformer = async (data: unknown): Promise<z.output<typeof DefaultField>> => await DefaultField.parseAsync(data);
-
-export const getDefaultField = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetDefaultFieldData, ThrowOnError>): WrapPassThrough<GetDefaultFieldResponses, ThrowOnError, TResponseStyle> => await getDefaultField2(options) as unknown as Awaited<WrapPassThrough<GetDefaultFieldResponses, ThrowOnError, TResponseStyle>>;
-
-export type GetReadonlyArrayFieldResponses = {
-    200: z.output<typeof ReadonlyArrayField>;
-};
-
-export type GetReadonlyArrayFieldResponse = GetReadonlyArrayFieldResponses[keyof GetReadonlyArrayFieldResponses];
-
-export const getReadonlyArrayFieldTransformer = async (data: unknown): Promise<z.output<typeof ReadonlyArrayField>> => await ReadonlyArrayField.parseAsync(data);
-
-export const getReadonlyArrayField = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetReadonlyArrayFieldData, ThrowOnError>): WrapPassThrough<GetReadonlyArrayFieldResponses, ThrowOnError, TResponseStyle> => await getReadonlyArrayField2(options) as unknown as Awaited<WrapPassThrough<GetReadonlyArrayFieldResponses, ThrowOnError, TResponseStyle>>;
-
-export type GetBrandedFieldResponses = {
-    200: z.output<typeof BrandedField>;
-};
-
-export type GetBrandedFieldResponse = GetBrandedFieldResponses[keyof GetBrandedFieldResponses];
-
-export const getBrandedFieldTransformer = async (data: unknown): Promise<z.output<typeof BrandedField>> => await BrandedField.parseAsync(data);
-
-export const getBrandedField = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetBrandedFieldData, ThrowOnError>): WrapPassThrough<GetBrandedFieldResponses, ThrowOnError, TResponseStyle> => await getBrandedField2(options) as unknown as Awaited<WrapPassThrough<GetBrandedFieldResponses, ThrowOnError, TResponseStyle>>;
-
-export type CreateOrFetchResourceResponses = {
-    200: z.output<typeof ResourceFetched>;
-    201: z.output<typeof ResourceCreated>;
-};
-
-export type CreateOrFetchResourceResponse = CreateOrFetchResourceResponses[keyof CreateOrFetchResourceResponses];
-
-export type CreateOrFetchResourceErrors = {
-    400: z.output<typeof BadRequestError>;
-    404: z.output<typeof NotFoundError>;
-    500: z.output<typeof ServerError>;
-};
-
-export type CreateOrFetchResourceError = CreateOrFetchResourceErrors[keyof CreateOrFetchResourceErrors];
-
-export const createOrFetchResourceTransformer = async (data: unknown): Promise<z.output<typeof ResourceFetched> | z.output<typeof ResourceCreated>> => await z.union([ResourceFetched, ResourceCreated]).parseAsync(data);
-
-export const createOrFetchResourceErrorTransformer = async (data: unknown): Promise<z.output<typeof BadRequestError> | z.output<typeof NotFoundError> | z.output<typeof ServerError>> => await z.union([
-    BadRequestError,
-    NotFoundError,
-    ServerError
-]).parseAsync(data);
-
 /**
  * @internal — emitted by `@polygonlabs/zod-to-openapi-heyapi`. Do not
  * instantiate from consumer code; the wrapper constructs these in
@@ -433,12 +71,615 @@ export type WrapErrors<TData, TError, ThrowOnError extends boolean, TResponseSty
     response: Response;
 }>;
 
+export const getScalarStringTransformer = async (data: unknown): Promise<z.output<typeof ScalarString>> => {
+    try {
+        return await ScalarString.parseAsync(data);
+    }
+    catch (err) {
+        throw new ResponseValidationError(err as ZodError, data);
+    }
+};
+
+export type WrapPassThrough<TData, ThrowOnError extends boolean, TResponseStyle extends "fields" | "data" = 'fields'> = Promise<ThrowOnError extends true ? TResponseStyle extends "data" ? TData extends Record<string, unknown> ? TData[keyof TData] : TData : {
+    data: TData extends Record<string, unknown> ? TData[keyof TData] : TData;
+    request: Request;
+    response: Response;
+} : TResponseStyle extends "data" ? (TData extends Record<string, unknown> ? TData[keyof TData] : TData) | undefined : ({
+    data: TData extends Record<string, unknown> ? TData[keyof TData] : TData;
+    error: undefined;
+} | {
+    data: undefined;
+    error: unknown;
+}) & {
+    request: Request;
+    response: Response;
+}>;
+
+export const getScalarString = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetScalarStringData, ThrowOnError>): WrapPassThrough<GetScalarStringResponses, ThrowOnError, TResponseStyle> => await getScalarString2(options) as unknown as Awaited<WrapPassThrough<GetScalarStringResponses, ThrowOnError, TResponseStyle>>;
+
+export type GetScalarNumberResponses = {
+    200: z.output<typeof ScalarNumber>;
+};
+
+export type GetScalarNumberResponse = GetScalarNumberResponses[keyof GetScalarNumberResponses];
+
+export const getScalarNumberTransformer = async (data: unknown): Promise<z.output<typeof ScalarNumber>> => {
+    try {
+        return await ScalarNumber.parseAsync(data);
+    }
+    catch (err) {
+        throw new ResponseValidationError(err as ZodError, data);
+    }
+};
+
+export const getScalarNumber = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetScalarNumberData, ThrowOnError>): WrapPassThrough<GetScalarNumberResponses, ThrowOnError, TResponseStyle> => await getScalarNumber2(options) as unknown as Awaited<WrapPassThrough<GetScalarNumberResponses, ThrowOnError, TResponseStyle>>;
+
+export type GetScalarBooleanResponses = {
+    200: z.output<typeof ScalarBoolean>;
+};
+
+export type GetScalarBooleanResponse = GetScalarBooleanResponses[keyof GetScalarBooleanResponses];
+
+export const getScalarBooleanTransformer = async (data: unknown): Promise<z.output<typeof ScalarBoolean>> => {
+    try {
+        return await ScalarBoolean.parseAsync(data);
+    }
+    catch (err) {
+        throw new ResponseValidationError(err as ZodError, data);
+    }
+};
+
+export const getScalarBoolean = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetScalarBooleanData, ThrowOnError>): WrapPassThrough<GetScalarBooleanResponses, ThrowOnError, TResponseStyle> => await getScalarBoolean2(options) as unknown as Awaited<WrapPassThrough<GetScalarBooleanResponses, ThrowOnError, TResponseStyle>>;
+
+export type GetScalarBigIntResponses = {
+    200: z.output<typeof ScalarBigInt>;
+};
+
+export type GetScalarBigIntResponse = GetScalarBigIntResponses[keyof GetScalarBigIntResponses];
+
+export const getScalarBigIntTransformer = async (data: unknown): Promise<z.output<typeof ScalarBigInt>> => {
+    try {
+        return await ScalarBigInt.parseAsync(data);
+    }
+    catch (err) {
+        throw new ResponseValidationError(err as ZodError, data);
+    }
+};
+
+export const getScalarBigInt = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetScalarBigIntData, ThrowOnError>): WrapPassThrough<GetScalarBigIntResponses, ThrowOnError, TResponseStyle> => await getScalarBigInt2(options) as unknown as Awaited<WrapPassThrough<GetScalarBigIntResponses, ThrowOnError, TResponseStyle>>;
+
+export type GetOptionalFieldResponses = {
+    200: z.output<typeof OptionalField>;
+};
+
+export type GetOptionalFieldResponse = GetOptionalFieldResponses[keyof GetOptionalFieldResponses];
+
+export const getOptionalFieldTransformer = async (data: unknown): Promise<z.output<typeof OptionalField>> => {
+    try {
+        return await OptionalField.parseAsync(data);
+    }
+    catch (err) {
+        throw new ResponseValidationError(err as ZodError, data);
+    }
+};
+
+export const getOptionalField = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetOptionalFieldData, ThrowOnError>): WrapPassThrough<GetOptionalFieldResponses, ThrowOnError, TResponseStyle> => await getOptionalField2(options) as unknown as Awaited<WrapPassThrough<GetOptionalFieldResponses, ThrowOnError, TResponseStyle>>;
+
+export type GetNullableFieldResponses = {
+    200: z.output<typeof NullableField>;
+};
+
+export type GetNullableFieldResponse = GetNullableFieldResponses[keyof GetNullableFieldResponses];
+
+export const getNullableFieldTransformer = async (data: unknown): Promise<z.output<typeof NullableField>> => {
+    try {
+        return await NullableField.parseAsync(data);
+    }
+    catch (err) {
+        throw new ResponseValidationError(err as ZodError, data);
+    }
+};
+
+export const getNullableField = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetNullableFieldData, ThrowOnError>): WrapPassThrough<GetNullableFieldResponses, ThrowOnError, TResponseStyle> => await getNullableField2(options) as unknown as Awaited<WrapPassThrough<GetNullableFieldResponses, ThrowOnError, TResponseStyle>>;
+
+export type GetOptionalNullableFieldResponses = {
+    200: z.output<typeof OptionalNullableField>;
+};
+
+export type GetOptionalNullableFieldResponse = GetOptionalNullableFieldResponses[keyof GetOptionalNullableFieldResponses];
+
+export const getOptionalNullableFieldTransformer = async (data: unknown): Promise<z.output<typeof OptionalNullableField>> => {
+    try {
+        return await OptionalNullableField.parseAsync(data);
+    }
+    catch (err) {
+        throw new ResponseValidationError(err as ZodError, data);
+    }
+};
+
+export const getOptionalNullableField = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetOptionalNullableFieldData, ThrowOnError>): WrapPassThrough<GetOptionalNullableFieldResponses, ThrowOnError, TResponseStyle> => await getOptionalNullableField2(options) as unknown as Awaited<WrapPassThrough<GetOptionalNullableFieldResponses, ThrowOnError, TResponseStyle>>;
+
+export type GetEnumFieldResponses = {
+    200: z.output<typeof EnumField>;
+};
+
+export type GetEnumFieldResponse = GetEnumFieldResponses[keyof GetEnumFieldResponses];
+
+export const getEnumFieldTransformer = async (data: unknown): Promise<z.output<typeof EnumField>> => {
+    try {
+        return await EnumField.parseAsync(data);
+    }
+    catch (err) {
+        throw new ResponseValidationError(err as ZodError, data);
+    }
+};
+
+export const getEnumField = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetEnumFieldData, ThrowOnError>): WrapPassThrough<GetEnumFieldResponses, ThrowOnError, TResponseStyle> => await getEnumField2(options) as unknown as Awaited<WrapPassThrough<GetEnumFieldResponses, ThrowOnError, TResponseStyle>>;
+
+export type GetLiteralFieldResponses = {
+    200: z.output<typeof LiteralField>;
+};
+
+export type GetLiteralFieldResponse = GetLiteralFieldResponses[keyof GetLiteralFieldResponses];
+
+export const getLiteralFieldTransformer = async (data: unknown): Promise<z.output<typeof LiteralField>> => {
+    try {
+        return await LiteralField.parseAsync(data);
+    }
+    catch (err) {
+        throw new ResponseValidationError(err as ZodError, data);
+    }
+};
+
+export const getLiteralField = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetLiteralFieldData, ThrowOnError>): WrapPassThrough<GetLiteralFieldResponses, ThrowOnError, TResponseStyle> => await getLiteralField2(options) as unknown as Awaited<WrapPassThrough<GetLiteralFieldResponses, ThrowOnError, TResponseStyle>>;
+
+export type GetUnionOfLiteralsResponses = {
+    200: z.output<typeof UnionOfLiterals>;
+};
+
+export type GetUnionOfLiteralsResponse = GetUnionOfLiteralsResponses[keyof GetUnionOfLiteralsResponses];
+
+export const getUnionOfLiteralsTransformer = async (data: unknown): Promise<z.output<typeof UnionOfLiterals>> => {
+    try {
+        return await UnionOfLiterals.parseAsync(data);
+    }
+    catch (err) {
+        throw new ResponseValidationError(err as ZodError, data);
+    }
+};
+
+export const getUnionOfLiterals = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetUnionOfLiteralsData, ThrowOnError>): WrapPassThrough<GetUnionOfLiteralsResponses, ThrowOnError, TResponseStyle> => await getUnionOfLiterals2(options) as unknown as Awaited<WrapPassThrough<GetUnionOfLiteralsResponses, ThrowOnError, TResponseStyle>>;
+
+export type GetArrayOfScalarsResponses = {
+    200: z.output<typeof ArrayOfScalars>;
+};
+
+export type GetArrayOfScalarsResponse = GetArrayOfScalarsResponses[keyof GetArrayOfScalarsResponses];
+
+export const getArrayOfScalarsTransformer = async (data: unknown): Promise<z.output<typeof ArrayOfScalars>> => {
+    try {
+        return await ArrayOfScalars.parseAsync(data);
+    }
+    catch (err) {
+        throw new ResponseValidationError(err as ZodError, data);
+    }
+};
+
+export const getArrayOfScalars = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetArrayOfScalarsData, ThrowOnError>): WrapPassThrough<GetArrayOfScalarsResponses, ThrowOnError, TResponseStyle> => await getArrayOfScalars2(options) as unknown as Awaited<WrapPassThrough<GetArrayOfScalarsResponses, ThrowOnError, TResponseStyle>>;
+
+export type GetArrayOfCodecsResponses = {
+    200: z.output<typeof ArrayOfCodecs>;
+};
+
+export type GetArrayOfCodecsResponse = GetArrayOfCodecsResponses[keyof GetArrayOfCodecsResponses];
+
+export const getArrayOfCodecsTransformer = async (data: unknown): Promise<z.output<typeof ArrayOfCodecs>> => {
+    try {
+        return await ArrayOfCodecs.parseAsync(data);
+    }
+    catch (err) {
+        throw new ResponseValidationError(err as ZodError, data);
+    }
+};
+
+export const getArrayOfCodecs = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetArrayOfCodecsData, ThrowOnError>): WrapPassThrough<GetArrayOfCodecsResponses, ThrowOnError, TResponseStyle> => await getArrayOfCodecs2(options) as unknown as Awaited<WrapPassThrough<GetArrayOfCodecsResponses, ThrowOnError, TResponseStyle>>;
+
+export type GetRecordFieldResponses = {
+    200: z.output<typeof RecordField>;
+};
+
+export type GetRecordFieldResponse = GetRecordFieldResponses[keyof GetRecordFieldResponses];
+
+export const getRecordFieldTransformer = async (data: unknown): Promise<z.output<typeof RecordField>> => {
+    try {
+        return await RecordField.parseAsync(data);
+    }
+    catch (err) {
+        throw new ResponseValidationError(err as ZodError, data);
+    }
+};
+
+export const getRecordField = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetRecordFieldData, ThrowOnError>): WrapPassThrough<GetRecordFieldResponses, ThrowOnError, TResponseStyle> => await getRecordField2(options) as unknown as Awaited<WrapPassThrough<GetRecordFieldResponses, ThrowOnError, TResponseStyle>>;
+
+export type GetNestedResponses = {
+    200: z.output<typeof Nested>;
+};
+
+export type GetNestedResponse = GetNestedResponses[keyof GetNestedResponses];
+
+export const getNestedTransformer = async (data: unknown): Promise<z.output<typeof Nested>> => {
+    try {
+        return await Nested.parseAsync(data);
+    }
+    catch (err) {
+        throw new ResponseValidationError(err as ZodError, data);
+    }
+};
+
+export const getNested = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetNestedData, ThrowOnError>): WrapPassThrough<GetNestedResponses, ThrowOnError, TResponseStyle> => await getNested2(options) as unknown as Awaited<WrapPassThrough<GetNestedResponses, ThrowOnError, TResponseStyle>>;
+
+export type GetUnionFieldResponses = {
+    200: z.output<typeof UnionField>;
+};
+
+export type GetUnionFieldResponse = GetUnionFieldResponses[keyof GetUnionFieldResponses];
+
+export const getUnionFieldTransformer = async (data: unknown): Promise<z.output<typeof UnionField>> => {
+    try {
+        return await UnionField.parseAsync(data);
+    }
+    catch (err) {
+        throw new ResponseValidationError(err as ZodError, data);
+    }
+};
+
+export const getUnionField = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetUnionFieldData, ThrowOnError>): WrapPassThrough<GetUnionFieldResponses, ThrowOnError, TResponseStyle> => await getUnionField2(options) as unknown as Awaited<WrapPassThrough<GetUnionFieldResponses, ThrowOnError, TResponseStyle>>;
+
+export type GetCodecObjectResponses = {
+    200: z.output<typeof CodecObject>;
+};
+
+export type GetCodecObjectResponse = GetCodecObjectResponses[keyof GetCodecObjectResponses];
+
+export const getCodecObjectTransformer = async (data: unknown): Promise<z.output<typeof CodecObject>> => {
+    try {
+        return await CodecObject.parseAsync(data);
+    }
+    catch (err) {
+        throw new ResponseValidationError(err as ZodError, data);
+    }
+};
+
+export const getCodecObject = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetCodecObjectData, ThrowOnError>): WrapPassThrough<GetCodecObjectResponses, ThrowOnError, TResponseStyle> => await getCodecObject2(options) as unknown as Awaited<WrapPassThrough<GetCodecObjectResponses, ThrowOnError, TResponseStyle>>;
+
+export type GetComposedResponses = {
+    200: z.output<typeof Composed>;
+};
+
+export type GetComposedResponse = GetComposedResponses[keyof GetComposedResponses];
+
+export const getComposedTransformer = async (data: unknown): Promise<z.output<typeof Composed>> => {
+    try {
+        return await Composed.parseAsync(data);
+    }
+    catch (err) {
+        throw new ResponseValidationError(err as ZodError, data);
+    }
+};
+
+export const getComposed = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetComposedData, ThrowOnError>): WrapPassThrough<GetComposedResponses, ThrowOnError, TResponseStyle> => await getComposed2(options) as unknown as Awaited<WrapPassThrough<GetComposedResponses, ThrowOnError, TResponseStyle>>;
+
+export type GetPaginatedComposedResponses = {
+    200: z.output<typeof PaginatedComposed>;
+};
+
+export type GetPaginatedComposedResponse = GetPaginatedComposedResponses[keyof GetPaginatedComposedResponses];
+
+export const getPaginatedComposedTransformer = async (data: unknown): Promise<z.output<typeof PaginatedComposed>> => {
+    try {
+        return await PaginatedComposed.parseAsync(data);
+    }
+    catch (err) {
+        throw new ResponseValidationError(err as ZodError, data);
+    }
+};
+
+export const getPaginatedComposed = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetPaginatedComposedData, ThrowOnError>): WrapPassThrough<GetPaginatedComposedResponses, ThrowOnError, TResponseStyle> => await getPaginatedComposed2(options) as unknown as Awaited<WrapPassThrough<GetPaginatedComposedResponses, ThrowOnError, TResponseStyle>>;
+
+export type GetStringWithMinMaxResponses = {
+    200: z.output<typeof StringWithMinMax>;
+};
+
+export type GetStringWithMinMaxResponse = GetStringWithMinMaxResponses[keyof GetStringWithMinMaxResponses];
+
+export const getStringWithMinMaxTransformer = async (data: unknown): Promise<z.output<typeof StringWithMinMax>> => {
+    try {
+        return await StringWithMinMax.parseAsync(data);
+    }
+    catch (err) {
+        throw new ResponseValidationError(err as ZodError, data);
+    }
+};
+
+export const getStringWithMinMax = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetStringWithMinMaxData, ThrowOnError>): WrapPassThrough<GetStringWithMinMaxResponses, ThrowOnError, TResponseStyle> => await getStringWithMinMax2(options) as unknown as Awaited<WrapPassThrough<GetStringWithMinMaxResponses, ThrowOnError, TResponseStyle>>;
+
+export type GetNumberWithRangeResponses = {
+    200: z.output<typeof NumberWithRange>;
+};
+
+export type GetNumberWithRangeResponse = GetNumberWithRangeResponses[keyof GetNumberWithRangeResponses];
+
+export const getNumberWithRangeTransformer = async (data: unknown): Promise<z.output<typeof NumberWithRange>> => {
+    try {
+        return await NumberWithRange.parseAsync(data);
+    }
+    catch (err) {
+        throw new ResponseValidationError(err as ZodError, data);
+    }
+};
+
+export const getNumberWithRange = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetNumberWithRangeData, ThrowOnError>): WrapPassThrough<GetNumberWithRangeResponses, ThrowOnError, TResponseStyle> => await getNumberWithRange2(options) as unknown as Awaited<WrapPassThrough<GetNumberWithRangeResponses, ThrowOnError, TResponseStyle>>;
+
+export type GetArrayWithLengthResponses = {
+    200: z.output<typeof ArrayWithLength>;
+};
+
+export type GetArrayWithLengthResponse = GetArrayWithLengthResponses[keyof GetArrayWithLengthResponses];
+
+export const getArrayWithLengthTransformer = async (data: unknown): Promise<z.output<typeof ArrayWithLength>> => {
+    try {
+        return await ArrayWithLength.parseAsync(data);
+    }
+    catch (err) {
+        throw new ResponseValidationError(err as ZodError, data);
+    }
+};
+
+export const getArrayWithLength = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetArrayWithLengthData, ThrowOnError>): WrapPassThrough<GetArrayWithLengthResponses, ThrowOnError, TResponseStyle> => await getArrayWithLength2(options) as unknown as Awaited<WrapPassThrough<GetArrayWithLengthResponses, ThrowOnError, TResponseStyle>>;
+
+export type GetStringWithFormatResponses = {
+    200: z.output<typeof StringWithFormat>;
+};
+
+export type GetStringWithFormatResponse = GetStringWithFormatResponses[keyof GetStringWithFormatResponses];
+
+export const getStringWithFormatTransformer = async (data: unknown): Promise<z.output<typeof StringWithFormat>> => {
+    try {
+        return await StringWithFormat.parseAsync(data);
+    }
+    catch (err) {
+        throw new ResponseValidationError(err as ZodError, data);
+    }
+};
+
+export const getStringWithFormat = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetStringWithFormatData, ThrowOnError>): WrapPassThrough<GetStringWithFormatResponses, ThrowOnError, TResponseStyle> => await getStringWithFormat2(options) as unknown as Awaited<WrapPassThrough<GetStringWithFormatResponses, ThrowOnError, TResponseStyle>>;
+
+export type GetRefinedFieldResponses = {
+    200: z.output<typeof RefinedField>;
+};
+
+export type GetRefinedFieldResponse = GetRefinedFieldResponses[keyof GetRefinedFieldResponses];
+
+export const getRefinedFieldTransformer = async (data: unknown): Promise<z.output<typeof RefinedField>> => {
+    try {
+        return await RefinedField.parseAsync(data);
+    }
+    catch (err) {
+        throw new ResponseValidationError(err as ZodError, data);
+    }
+};
+
+export const getRefinedField = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetRefinedFieldData, ThrowOnError>): WrapPassThrough<GetRefinedFieldResponses, ThrowOnError, TResponseStyle> => await getRefinedField2(options) as unknown as Awaited<WrapPassThrough<GetRefinedFieldResponses, ThrowOnError, TResponseStyle>>;
+
+export type GetConstrainedCodecResponses = {
+    200: z.output<typeof ConstrainedCodec>;
+};
+
+export type GetConstrainedCodecResponse = GetConstrainedCodecResponses[keyof GetConstrainedCodecResponses];
+
+export const getConstrainedCodecTransformer = async (data: unknown): Promise<z.output<typeof ConstrainedCodec>> => {
+    try {
+        return await ConstrainedCodec.parseAsync(data);
+    }
+    catch (err) {
+        throw new ResponseValidationError(err as ZodError, data);
+    }
+};
+
+export const getConstrainedCodec = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetConstrainedCodecData, ThrowOnError>): WrapPassThrough<GetConstrainedCodecResponses, ThrowOnError, TResponseStyle> => await getConstrainedCodec2(options) as unknown as Awaited<WrapPassThrough<GetConstrainedCodecResponses, ThrowOnError, TResponseStyle>>;
+
+export type GetTupleFieldResponses = {
+    200: z.output<typeof TupleField>;
+};
+
+export type GetTupleFieldResponse = GetTupleFieldResponses[keyof GetTupleFieldResponses];
+
+export const getTupleFieldTransformer = async (data: unknown): Promise<z.output<typeof TupleField>> => {
+    try {
+        return await TupleField.parseAsync(data);
+    }
+    catch (err) {
+        throw new ResponseValidationError(err as ZodError, data);
+    }
+};
+
+export const getTupleField = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetTupleFieldData, ThrowOnError>): WrapPassThrough<GetTupleFieldResponses, ThrowOnError, TResponseStyle> => await getTupleField2(options) as unknown as Awaited<WrapPassThrough<GetTupleFieldResponses, ThrowOnError, TResponseStyle>>;
+
+export type GetIntersectionFieldResponses = {
+    200: z.output<typeof IntersectionField>;
+};
+
+export type GetIntersectionFieldResponse = GetIntersectionFieldResponses[keyof GetIntersectionFieldResponses];
+
+export const getIntersectionFieldTransformer = async (data: unknown): Promise<z.output<typeof IntersectionField>> => {
+    try {
+        return await IntersectionField.parseAsync(data);
+    }
+    catch (err) {
+        throw new ResponseValidationError(err as ZodError, data);
+    }
+};
+
+export const getIntersectionField = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetIntersectionFieldData, ThrowOnError>): WrapPassThrough<GetIntersectionFieldResponses, ThrowOnError, TResponseStyle> => await getIntersectionField2(options) as unknown as Awaited<WrapPassThrough<GetIntersectionFieldResponses, ThrowOnError, TResponseStyle>>;
+
+export type GetDiscriminatedUnionResponses = {
+    200: z.output<typeof DiscriminatedUnion>;
+};
+
+export type GetDiscriminatedUnionResponse = GetDiscriminatedUnionResponses[keyof GetDiscriminatedUnionResponses];
+
+export const getDiscriminatedUnionTransformer = async (data: unknown): Promise<z.output<typeof DiscriminatedUnion>> => {
+    try {
+        return await DiscriminatedUnion.parseAsync(data);
+    }
+    catch (err) {
+        throw new ResponseValidationError(err as ZodError, data);
+    }
+};
+
+export const getDiscriminatedUnion = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetDiscriminatedUnionData, ThrowOnError>): WrapPassThrough<GetDiscriminatedUnionResponses, ThrowOnError, TResponseStyle> => await getDiscriminatedUnion2(options) as unknown as Awaited<WrapPassThrough<GetDiscriminatedUnionResponses, ThrowOnError, TResponseStyle>>;
+
+export type GetDateFieldResponses = {
+    200: z.output<typeof DateField>;
+};
+
+export type GetDateFieldResponse = GetDateFieldResponses[keyof GetDateFieldResponses];
+
+export const getDateFieldTransformer = async (data: unknown): Promise<z.output<typeof DateField>> => {
+    try {
+        return await DateField.parseAsync(data);
+    }
+    catch (err) {
+        throw new ResponseValidationError(err as ZodError, data);
+    }
+};
+
+export const getDateField = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetDateFieldData, ThrowOnError>): WrapPassThrough<GetDateFieldResponses, ThrowOnError, TResponseStyle> => await getDateField2(options) as unknown as Awaited<WrapPassThrough<GetDateFieldResponses, ThrowOnError, TResponseStyle>>;
+
+export type GetSetFieldResponses = {
+    200: z.output<typeof SetField>;
+};
+
+export type GetSetFieldResponse = GetSetFieldResponses[keyof GetSetFieldResponses];
+
+export const getSetFieldTransformer = async (data: unknown): Promise<z.output<typeof SetField>> => {
+    try {
+        return await SetField.parseAsync(data);
+    }
+    catch (err) {
+        throw new ResponseValidationError(err as ZodError, data);
+    }
+};
+
+export const getSetField = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetSetFieldData, ThrowOnError>): WrapPassThrough<GetSetFieldResponses, ThrowOnError, TResponseStyle> => await getSetField2(options) as unknown as Awaited<WrapPassThrough<GetSetFieldResponses, ThrowOnError, TResponseStyle>>;
+
+export type GetMapFieldResponses = {
+    200: z.output<typeof MapField>;
+};
+
+export type GetMapFieldResponse = GetMapFieldResponses[keyof GetMapFieldResponses];
+
+export const getMapFieldTransformer = async (data: unknown): Promise<z.output<typeof MapField>> => {
+    try {
+        return await MapField.parseAsync(data);
+    }
+    catch (err) {
+        throw new ResponseValidationError(err as ZodError, data);
+    }
+};
+
+export const getMapField = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetMapFieldData, ThrowOnError>): WrapPassThrough<GetMapFieldResponses, ThrowOnError, TResponseStyle> => await getMapField2(options) as unknown as Awaited<WrapPassThrough<GetMapFieldResponses, ThrowOnError, TResponseStyle>>;
+
+export type GetDefaultFieldResponses = {
+    200: z.output<typeof DefaultField>;
+};
+
+export type GetDefaultFieldResponse = GetDefaultFieldResponses[keyof GetDefaultFieldResponses];
+
+export const getDefaultFieldTransformer = async (data: unknown): Promise<z.output<typeof DefaultField>> => {
+    try {
+        return await DefaultField.parseAsync(data);
+    }
+    catch (err) {
+        throw new ResponseValidationError(err as ZodError, data);
+    }
+};
+
+export const getDefaultField = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetDefaultFieldData, ThrowOnError>): WrapPassThrough<GetDefaultFieldResponses, ThrowOnError, TResponseStyle> => await getDefaultField2(options) as unknown as Awaited<WrapPassThrough<GetDefaultFieldResponses, ThrowOnError, TResponseStyle>>;
+
+export type GetReadonlyArrayFieldResponses = {
+    200: z.output<typeof ReadonlyArrayField>;
+};
+
+export type GetReadonlyArrayFieldResponse = GetReadonlyArrayFieldResponses[keyof GetReadonlyArrayFieldResponses];
+
+export const getReadonlyArrayFieldTransformer = async (data: unknown): Promise<z.output<typeof ReadonlyArrayField>> => {
+    try {
+        return await ReadonlyArrayField.parseAsync(data);
+    }
+    catch (err) {
+        throw new ResponseValidationError(err as ZodError, data);
+    }
+};
+
+export const getReadonlyArrayField = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetReadonlyArrayFieldData, ThrowOnError>): WrapPassThrough<GetReadonlyArrayFieldResponses, ThrowOnError, TResponseStyle> => await getReadonlyArrayField2(options) as unknown as Awaited<WrapPassThrough<GetReadonlyArrayFieldResponses, ThrowOnError, TResponseStyle>>;
+
+export type GetBrandedFieldResponses = {
+    200: z.output<typeof BrandedField>;
+};
+
+export type GetBrandedFieldResponse = GetBrandedFieldResponses[keyof GetBrandedFieldResponses];
+
+export const getBrandedFieldTransformer = async (data: unknown): Promise<z.output<typeof BrandedField>> => {
+    try {
+        return await BrandedField.parseAsync(data);
+    }
+    catch (err) {
+        throw new ResponseValidationError(err as ZodError, data);
+    }
+};
+
+export const getBrandedField = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<GetBrandedFieldData, ThrowOnError>): WrapPassThrough<GetBrandedFieldResponses, ThrowOnError, TResponseStyle> => await getBrandedField2(options) as unknown as Awaited<WrapPassThrough<GetBrandedFieldResponses, ThrowOnError, TResponseStyle>>;
+
+export type CreateOrFetchResourceResponses = {
+    200: z.output<typeof ResourceFetched>;
+    201: z.output<typeof ResourceCreated>;
+};
+
+export type CreateOrFetchResourceResponse = CreateOrFetchResourceResponses[keyof CreateOrFetchResourceResponses];
+
+export type CreateOrFetchResourceErrors = {
+    400: z.output<typeof BadRequestError>;
+    404: z.output<typeof NotFoundError>;
+    500: z.output<typeof ServerError>;
+};
+
+export type CreateOrFetchResourceError = CreateOrFetchResourceErrors[keyof CreateOrFetchResourceErrors];
+
+export const createOrFetchResourceTransformer = async (data: unknown): Promise<z.output<typeof ResourceFetched> | z.output<typeof ResourceCreated>> => {
+    try {
+        return await z.union([ResourceFetched, ResourceCreated]).parseAsync(data);
+    }
+    catch (err) {
+        throw new ResponseValidationError(err as ZodError, data);
+    }
+};
+
+export const createOrFetchResourceErrorTransformer = async (data: unknown): Promise<z.output<typeof BadRequestError> | z.output<typeof NotFoundError> | z.output<typeof ServerError>> => await z.union([
+    BadRequestError,
+    NotFoundError,
+    ServerError
+]).parseAsync(data);
+
 export const createOrFetchResource = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options?: Options<CreateOrFetchResourceData, ThrowOnError>): WrapErrors<CreateOrFetchResourceResponses, CreateOrFetchResourceErrors, ThrowOnError, TResponseStyle> => {
     let result;
     try {
         result = await createOrFetchResource2(options);
     }
     catch (err) {
+        if (typeof err === "object" && err !== null && (err as Record<symbol, unknown>)[Symbol.for("@polygonlabs/zod-to-openapi-heyapi/is-response-validation-error")] === true) {
+            throw err;
+        }
         if (err instanceof Error) {
             throw new TransportError(err as Error);
         }
@@ -454,7 +695,7 @@ export const createOrFetchResource = async <ThrowOnError extends boolean = false
     const errorBearing = result as {
         error?: unknown;
     };
-    if (typeof result === "object" && result !== null && "request" in result && "response" in result && (typeof errorBearing.error === "object" && errorBearing.error !== null)) {
+    if (typeof result === "object" && result !== null && "request" in result && "response" in result && (typeof errorBearing.error === "object" && errorBearing.error !== null) && !(typeof errorBearing.error === "object" && errorBearing.error !== null && (errorBearing.error as Record<symbol, unknown>)[Symbol.for("@polygonlabs/zod-to-openapi-heyapi/is-response-validation-error")] === true)) {
         if (errorBearing.error instanceof Error) {
             errorBearing.error = new TransportError(errorBearing.error as Error);
         }
@@ -485,6 +726,9 @@ export const getErrorsOnly = async <ThrowOnError extends boolean = false, TRespo
         result = await getErrorsOnly2(options);
     }
     catch (err) {
+        if (typeof err === "object" && err !== null && (err as Record<symbol, unknown>)[Symbol.for("@polygonlabs/zod-to-openapi-heyapi/is-response-validation-error")] === true) {
+            throw err;
+        }
         if (err instanceof Error) {
             throw new TransportError(err as Error);
         }
@@ -500,7 +744,7 @@ export const getErrorsOnly = async <ThrowOnError extends boolean = false, TRespo
     const errorBearing = result as {
         error?: unknown;
     };
-    if (typeof result === "object" && result !== null && "request" in result && "response" in result && (typeof errorBearing.error === "object" && errorBearing.error !== null)) {
+    if (typeof result === "object" && result !== null && "request" in result && "response" in result && (typeof errorBearing.error === "object" && errorBearing.error !== null) && !(typeof errorBearing.error === "object" && errorBearing.error !== null && (errorBearing.error as Record<symbol, unknown>)[Symbol.for("@polygonlabs/zod-to-openapi-heyapi/is-response-validation-error")] === true)) {
         if (errorBearing.error instanceof Error) {
             errorBearing.error = new TransportError(errorBearing.error as Error);
         }
@@ -522,7 +766,14 @@ export type GetItemWithRegisteredParamResponses = {
 
 export type GetItemWithRegisteredParamResponse = GetItemWithRegisteredParamResponses[keyof GetItemWithRegisteredParamResponses];
 
-export const getItemWithRegisteredParamTransformer = async (data: unknown): Promise<z.output<typeof ScalarString>> => await ScalarString.parseAsync(data);
+export const getItemWithRegisteredParamTransformer = async (data: unknown): Promise<z.output<typeof ScalarString>> => {
+    try {
+        return await ScalarString.parseAsync(data);
+    }
+    catch (err) {
+        throw new ResponseValidationError(err as ZodError, data);
+    }
+};
 
 export const getItemWithRegisteredParam = async <ThrowOnError extends boolean = false, TResponseStyle extends 'fields' | 'data' = 'fields'>(options: Options<GetItemWithRegisteredParamData, ThrowOnError>): WrapPassThrough<GetItemWithRegisteredParamResponses, ThrowOnError, TResponseStyle> => await getItemWithRegisteredParam2(options) as unknown as Awaited<WrapPassThrough<GetItemWithRegisteredParamResponses, ThrowOnError, TResponseStyle>>;
 
@@ -532,7 +783,14 @@ export type LookupBlockResponses = {
 
 export type LookupBlockResponse = LookupBlockResponses[keyof LookupBlockResponses];
 
-export const lookupBlockTransformer = async (data: unknown): Promise<z.output<typeof ScalarString>> => await ScalarString.parseAsync(data);
+export const lookupBlockTransformer = async (data: unknown): Promise<z.output<typeof ScalarString>> => {
+    try {
+        return await ScalarString.parseAsync(data);
+    }
+    catch (err) {
+        throw new ResponseValidationError(err as ZodError, data);
+    }
+};
 
 export type LookupBlockInput = Omit<LookupBlockData, 'path'> & {
     path: z.output<typeof BlockNumberPathParams>;
@@ -588,7 +846,14 @@ export type ListRecentEventsResponses = {
 
 export type ListRecentEventsResponse = ListRecentEventsResponses[keyof ListRecentEventsResponses];
 
-export const listRecentEventsTransformer = async (data: unknown): Promise<z.output<typeof ScalarString>> => await ScalarString.parseAsync(data);
+export const listRecentEventsTransformer = async (data: unknown): Promise<z.output<typeof ScalarString>> => {
+    try {
+        return await ScalarString.parseAsync(data);
+    }
+    catch (err) {
+        throw new ResponseValidationError(err as ZodError, data);
+    }
+};
 
 export type ListRecentEventsInput = Omit<ListRecentEventsData, 'query'> & {
     query?: z.output<typeof RecentEventsQuery>;
@@ -626,7 +891,14 @@ export type CreateOrderErrors = {
 
 export type CreateOrderError = CreateOrderErrors[keyof CreateOrderErrors];
 
-export const createOrderTransformer = async (data: unknown): Promise<z.output<typeof ScalarString>> => await ScalarString.parseAsync(data);
+export const createOrderTransformer = async (data: unknown): Promise<z.output<typeof ScalarString>> => {
+    try {
+        return await ScalarString.parseAsync(data);
+    }
+    catch (err) {
+        throw new ResponseValidationError(err as ZodError, data);
+    }
+};
 
 export const createOrderErrorTransformer = async (data: unknown): Promise<z.output<typeof BadRequestError> | z.output<typeof ServerError>> => await z.union([BadRequestError, ServerError]).parseAsync(data);
 
@@ -643,6 +915,9 @@ export const createOrder = async <ThrowOnError extends boolean = false, TRespons
         result = await createOrder2({ ...options, ...transformed } as Options<CreateOrderData, ThrowOnError>);
     }
     catch (err) {
+        if (typeof err === "object" && err !== null && (err as Record<symbol, unknown>)[Symbol.for("@polygonlabs/zod-to-openapi-heyapi/is-response-validation-error")] === true) {
+            throw err;
+        }
         if (err instanceof Error) {
             throw new TransportError(err as Error);
         }
@@ -658,7 +933,7 @@ export const createOrder = async <ThrowOnError extends boolean = false, TRespons
     const errorBearing = result as {
         error?: unknown;
     };
-    if (typeof result === "object" && result !== null && "request" in result && "response" in result && (typeof errorBearing.error === "object" && errorBearing.error !== null)) {
+    if (typeof result === "object" && result !== null && "request" in result && "response" in result && (typeof errorBearing.error === "object" && errorBearing.error !== null) && !(typeof errorBearing.error === "object" && errorBearing.error !== null && (errorBearing.error as Record<symbol, unknown>)[Symbol.for("@polygonlabs/zod-to-openapi-heyapi/is-response-validation-error")] === true)) {
         if (errorBearing.error instanceof Error) {
             errorBearing.error = new TransportError(errorBearing.error as Error);
         }
@@ -692,7 +967,14 @@ export type UpdateOrderResponses = {
 
 export type UpdateOrderResponse = UpdateOrderResponses[keyof UpdateOrderResponses];
 
-export const updateOrderTransformer = async (data: unknown): Promise<z.output<typeof ScalarString>> => await ScalarString.parseAsync(data);
+export const updateOrderTransformer = async (data: unknown): Promise<z.output<typeof ScalarString>> => {
+    try {
+        return await ScalarString.parseAsync(data);
+    }
+    catch (err) {
+        throw new ResponseValidationError(err as ZodError, data);
+    }
+};
 
 export type UpdateOrderInput = Omit<UpdateOrderData, 'path' | 'body'> & {
     path: z.output<typeof OrderIdPathParams>;
@@ -728,7 +1010,14 @@ export type SubmitForReviewResponses = {
 
 export type SubmitForReviewResponse = SubmitForReviewResponses[keyof SubmitForReviewResponses];
 
-export const submitForReviewTransformer = async (data: unknown): Promise<z.output<typeof ScalarString>> => await ScalarString.parseAsync(data);
+export const submitForReviewTransformer = async (data: unknown): Promise<z.output<typeof ScalarString>> => {
+    try {
+        return await ScalarString.parseAsync(data);
+    }
+    catch (err) {
+        throw new ResponseValidationError(err as ZodError, data);
+    }
+};
 
 export type SubmitForReviewInput = Omit<SubmitForReviewData, 'body'> & {
     body?: z.output<typeof SubmitForReviewRequest>;

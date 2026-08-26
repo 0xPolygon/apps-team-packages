@@ -517,3 +517,65 @@ void discardedReturns;
     r.ops.customFiveHundred.responses[500].content['application/json'].schema;
   void wrongSchema;
 }
+
+// === standardErrorResponses option: type-level mirror ========================
+
+// `false` disables injection in the accumulator too: no 500/400/401 keys,
+// even for a route declaring request validation AND security.
+{
+  const r = new TypedRegistry({ standardErrorResponses: false }).registerPath({
+    operationId: 'noInjection',
+    method: 'get',
+    path: '/no-injection',
+    request: { query: z.object({ q: z.string() }) },
+    security: [{ ApiKeyAuth: [] }],
+    responses: {
+      200: { description: 'ok', content: { 'application/json': { schema: z.object({}) } } }
+    }
+  });
+
+  // The declared 200 survives untouched.
+  const ok: { description: string } = r.ops.noInjection.responses[200];
+  void ok;
+
+  // @ts-expect-error 500 is not injected when standardErrorResponses is false
+  const fiveHundred = r.ops.noInjection.responses[500];
+  void fiveHundred;
+
+  // @ts-expect-error 400 is not injected either, despite request validation
+  const fourHundred = r.ops.noInjection.responses[400];
+  void fourHundred;
+}
+
+// A per-slot override surfaces the CONFIGURED schema type in the
+// accumulator — the type level must not keep claiming the express default.
+{
+  const GoStyleError = z.object({ kaboom: z.literal('yes') });
+  const r = new TypedRegistry({
+    standardErrorResponses: { serverError: GoStyleError }
+  }).registerPath({
+    operationId: 'goErr',
+    method: 'get',
+    path: '/go-err',
+    request: { query: z.object({ q: z.string() }) },
+    responses: {
+      200: { description: 'ok', content: { 'application/json': { schema: z.object({}) } } }
+    }
+  });
+
+  // 500 carries the override's type.
+  const overridden: typeof GoStyleError =
+    r.ops.goErr.responses[500].content['application/json'].schema;
+  void overridden;
+
+  // @ts-expect-error the express-default ErrorResponseSchema is no longer the 500 shape
+  const wrong: typeof ErrorResponseSchema =
+    r.ops.goErr.responses[500].content['application/json'].schema;
+  void wrong;
+
+  // Sibling slots keep their defaults: the injected 400 is still
+  // ValidationErrorResponseSchema.
+  const stillDefault400: typeof ValidationErrorResponseSchema =
+    r.ops.goErr.responses[400].content['application/json'].schema;
+  void stillDefault400;
+}

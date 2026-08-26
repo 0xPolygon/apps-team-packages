@@ -37,6 +37,7 @@ import {
   client,
   createOrFetchResource,
   getErrorsOnly,
+  getScalarBigInt,
   isTransportError,
   isResponseValidationError,
   isWrapperError
@@ -165,6 +166,75 @@ describe('ResponseValidationError — schema mismatch on the error body', () => 
           throw new Error(`expected ResponseValidationError, got ${describeError(surfaced)}`);
         }
         expect(surfaced.body).toEqual(badBody);
+      });
+    }
+  );
+});
+
+// ── 2b. ResponseValidationError (SUCCESS body failed response validation) ────
+
+describe('ResponseValidationError — schema mismatch on a 2xx body', () => {
+  // Regression pin: a 2xx body that fails the registered RESPONSE
+  // schema used to surface as a TransportError — the response
+  // transformer (run by client-fetch inside the awaited SDK call)
+  // rejected with a bare ZodError, and the wrapper's generic
+  // `instanceof Error` catch re-wrapped it as a transport failure.
+  // A schema-violating success body is the single most important
+  // thing this client detects (it's how a producer's contract drift —
+  // e.g. a documented-string field shipping as a bare number — stays
+  // undeliverable instead of silently corrupting), so it must be
+  // reported as what it is: a ResponseValidationError carrying the
+  // parse issues and the offending (post-JSON.parse) body.
+
+  const badSuccessBody = { id: 42 }; // ResourceFetched wants id: string + data: string
+
+  describe.each([{ throwOnError: false }, { throwOnError: true }])(
+    'throwOnError: $throwOnError',
+    ({ throwOnError }) => {
+      it('wraps the invalid 200 body as ResponseValidationError, not TransportError', async () => {
+        server.use(
+          http.post(`${BASE_URL}/fixtures/createOrFetch`, () =>
+            HttpResponse.json(badSuccessBody, { status: 200 })
+          )
+        );
+
+        const surfaced = await captureSurfacedError(() => createOrFetchResource({ throwOnError }));
+
+        if (!isResponseValidationError(surfaced)) {
+          throw new Error(`expected ResponseValidationError, got ${describeError(surfaced)}`);
+        }
+        // The exact regression: this used to narrow as TransportError.
+        expect(isTransportError(surfaced)).toBe(false);
+        expect(isWrapperError(surfaced)).toBe(true);
+        // parseAsync ran against the response schema union and the
+        // issues describe the success-schema mismatch.
+        expect(Array.isArray(surfaced.cause.issues)).toBe(true);
+        expect(surfaced.cause.issues.length).toBeGreaterThan(0);
+        // The body that failed validation rides on `.body` — same
+        // one-hop contract as the error-status flavour.
+        expect(surfaced.body).toEqual(badSuccessBody);
+      });
+
+      it('also fires on pass-through ops (no error schemas, no input slots)', async () => {
+        // `getScalarBigInt` emits the minimal pass-through wrapper —
+        // no try/catch of its own — so the classification must come
+        // from the response transformer itself throwing the
+        // ResponseValidationError. This pins the fix at its source
+        // rather than relying on the full wrapper's pass-through
+        // branches.
+        server.use(
+          http.get(`${BASE_URL}/fixtures/getScalarBigInt`, () =>
+            HttpResponse.json({ value: 42 }, { status: 200 })
+          )
+        );
+
+        const surfaced = await captureSurfacedError(() => getScalarBigInt({ throwOnError }));
+
+        if (!isResponseValidationError(surfaced)) {
+          throw new Error(`expected ResponseValidationError, got ${describeError(surfaced)}`);
+        }
+        expect(isTransportError(surfaced)).toBe(false);
+        expect(surfaced.body).toEqual({ value: 42 });
       });
     }
   );

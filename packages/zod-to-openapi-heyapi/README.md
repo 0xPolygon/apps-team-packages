@@ -206,40 +206,46 @@ make sure the schemas package's runtime entrypoint resolves before invoking
 custom export condition like `@polygonlabs/source` to read source `.ts`
 directly.
 
-### When schemas live inside the client codegen package — use a `#imports` alias
+### When schemas live inside the client codegen package — self-link the package name
 
 Sometimes a project doesn't justify a separate schemas package: the schemas,
 the registry, and the client codegen all live together. Relative paths
 won't work — they mean different things to the plugin's audit (resolved
 from the plugin's install location) and the generated client (resolved from
-the output dir). Use a [`package.json#imports`][node-imports] alias:
+the output dir). Give the package a real `name` + `exports` entry and
+self-link it, then use the package's own name as `schemasFrom`:
 
 ```jsonc
 // package.json
 {
-  "imports": {
-    "#schemas": "./src/schemas/index.ts"
+  "name": "@my-org/api-client",
+  "exports": { ".": "./src/schemas/index.ts" },
+  "devDependencies": {
+    "@my-org/api-client": "link:."
   }
 }
 ```
 
 ```ts
 // openapi-ts.config.ts
-schemasFrom: '#schemas'
+schemasFrom: '@my-org/api-client'
 ```
 
-The alias resolves identically from any module within the package, so both
-the audit (running from your `openapi-ts.config.ts`) and the generated
-transformer (sitting under `./src/generated/`) reach the same file.
+The `link:.` entry materialises the package under its own
+`node_modules/@my-org/api-client`, so the name resolves from **every**
+import location: the plugin's codegen-time audit (which `import()`s
+`schemasFrom` from the plugin's own install location, not from your
+config file), the generated transformer under `./src/generated/`, and
+your own source.
 
-> **`#imports` aliases only work inside the package that declares them.**
-> They do **not** cross package boundaries. If your schemas live in a
-> sibling package or another workspace package, use the package name as
-> shown above; a `#schemas` alias in the consumer's package.json will not be
-> visible to the plugin or to a generated client that resolves the import
-> from outside.
-
-[node-imports]: https://nodejs.org/api/packages.html#subpath-imports
+> **`package.json#imports` aliases (`'#schemas'`) do NOT work here** —
+> an earlier revision of this README recommended one. Node resolves `#`
+> aliases against the package containing the *importing module*, and the
+> plugin's dynamic import runs from
+> `node_modules/@polygonlabs/zod-to-openapi-heyapi/`, where your alias
+> doesn't exist. The audit fails with
+> `Package import specifier "#schemas" is not defined`. Use the
+> self-linked package name above instead.
 
 ### What's not supported
 
@@ -258,7 +264,7 @@ transformer (sitting under `./src/generated/`) reach the same file.
 | Schemas published to npm (root export) | `'@my-org/api-schemas'` |
 | Schemas published as a subpath export | `'@my-org/api-schemas/zod'` |
 | Schemas in the same monorepo (workspace package) | `'@my-org/api-schemas'` |
-| Schemas in the same package as the codegen | `'#schemas'` (via `package.json#imports`) |
+| Schemas in the same package as the codegen | The package's own name (self-linked via `"link:."`) |
 
 ### Schemas must be named exports, and the export name must match the registry name
 

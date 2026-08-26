@@ -45,8 +45,8 @@
  * constraints.
  */
 
-import type { $, IR, UserConfig } from '@hey-api/openapi-ts';
-import type { CallExpression, Expression } from 'typescript';
+import type { $, IR, MaybeTsDsl, UserConfig } from '@hey-api/openapi-ts';
+import type { CallExpression, Expression, Statement } from 'typescript';
 
 import { getRefId } from '@asteasolutions/zod-to-openapi';
 // Used to hand-construct a TypePredicateNode for the wrapper-emitted
@@ -156,13 +156,17 @@ export interface RegistryPluginOptions {
    * Either way, the schemas package is a real runtime dependency.
    *
    * Must be a specifier that resolves the same from any caller's perspective:
-   * a package specifier (`@org/pkg`, `@org/pkg/zod`), a package.json
-   * `imports` alias (`#schemas`), or a `file://` URL. The plugin
-   * dynamic-imports this specifier at codegen time to run the audit, so a
-   * relative path like `'../schemas'` won't work — its meaning depends on
-   * who's importing it, and the plugin's perspective differs from the
-   * generated client's. Set up an `imports` alias in your package.json
-   * (`"#schemas": "./src/schemas/index.ts"`) and use that for both purposes.
+   * a package specifier (`@org/pkg`, `@org/pkg/zod`) or a `file://` URL. The
+   * plugin dynamic-imports this specifier at codegen time to run the audit,
+   * so a relative path like `'../schemas'` won't work — its meaning depends
+   * on who's importing it, and the plugin's perspective differs from the
+   * generated client's. A package.json `imports` alias (`'#schemas'`) does
+   * NOT work either: Node resolves `#` aliases against the package containing
+   * the importing module, and the plugin imports from its own install
+   * location, where the consumer's alias doesn't exist. When schemas live in
+   * the same package as the codegen, give the package a `name` + `exports`
+   * entry, self-link it (`"<name>": "link:."` in devDependencies), and pass
+   * the package's own name — see the README's resolution table.
    */
   schemasFrom: string;
   /**
@@ -487,6 +491,21 @@ export async function registryPlugin({
         //     decode honest for ops that declare per-status error
         //     schemas of different shapes.
         const distinctSuccessSchemas = uniqueSchemaNames(buckets.success);
+        const distinctErrorSchemas = uniqueSchemaNames(buckets.error);
+
+        // Wrapper error classes (TransportError, ResponseValidationError)
+        // are needed by any op that emits a transformer of either role:
+        // the response transformer throws ResponseValidationError itself
+        // when a 2xx body fails `parseAsync` (so the failure doesn't get
+        // misclassified as a TransportError by the wrapper's generic
+        // `instanceof Error` catch), and the error transformer's failures
+        // are wrapped by the SDK wrapper. Emit the classes BEFORE the
+        // transformers so `emitParseTransformer` can resolve the class
+        // symbol. Ops with no schemas at all skip the scaffolding.
+        if (distinctSuccessSchemas.length > 0 || distinctErrorSchemas.length > 0) {
+          ensureWrapperErrorClasses();
+        }
+
         if (distinctSuccessSchemas.length > 0) {
           emitParseTransformer({
             dsl,
@@ -500,7 +519,6 @@ export async function registryPlugin({
           });
         }
 
-        const distinctErrorSchemas = uniqueSchemaNames(buckets.error);
         const errorTransformerSymbol =
           distinctErrorSchemas.length > 0
             ? emitParseTransformer({
@@ -523,13 +541,7 @@ export async function registryPlugin({
         // these wrappers are the only public SDK surface. Consumers see
         // one canonical name per op and can't accidentally import a
         // wire-shaped variant.
-        // Wrapper-emitted error classes (TransportError, ResponseValidationError) are
-        // only needed by ops that have an error transformer — i.e. the
-        // wrapper actually decodes errors. Skip the file-level scaffolding
-        // for ops that don't.
-        if (errorTransformerSymbol) {
-          ensureWrapperErrorClasses();
-        } else if (!hasInputSlots) {
+        if (!errorTransformerSymbol && !hasInputSlots) {
           // Pass-through op (no error decoding, no input encoding).
           // It still needs `WrapPassThrough` for its return-type
           // annotation; emit the alias lazily on first pass-through.
@@ -891,10 +903,12 @@ function buildSchemasFromImportError(schemasFrom: string, err: unknown): string 
 
   let hint =
     `\`schemasFrom\` must be a specifier that resolves from the plugin's perspective at codegen time — ` +
-    `a package specifier (\`@org/pkg\`, \`@org/pkg/zod\`), a package.json imports alias (\`#schemas\`) ` +
-    `for schemas living inside this same package, or a \`file://\` URL. ` +
+    `a package specifier (\`@org/pkg\`, \`@org/pkg/zod\`) or a \`file://\` URL. ` +
     `Relative paths like \`'../schemas'\` don't work because they mean different things to the plugin ` +
-    `and the generated client.`;
+    `and the generated client. package.json \`imports\` aliases (\`#schemas\`) don't work either — ` +
+    `they resolve against the package containing the importing module, and the plugin imports from ` +
+    `its own install location. For schemas living inside the codegen package itself, self-link the ` +
+    `package (\`"<name>": "link:."\`) and pass its own name.`;
 
   if (isModuleNotFound) {
     hint +=
@@ -1431,6 +1445,74 @@ function emitParseTransformer({
       : // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (dsl.type.or as (...args: any[]) => unknown)(...outputs);
 
+  // Body statement(s), by role:
+  //
+  //   - 'error': bare `return await Schema.parseAsync(data)`. The SDK
+  //     wrapper invokes this transformer itself inside a try/catch and
+  //     wraps a rejection as `ResponseValidationError(zodError, body)` —
+  //     the wire body is in the wrapper's scope there.
+  //   - 'response': hey-api's fetch client invokes this transformer
+  //     internally on every 2xx body, so a bare `parseAsync` rejection
+  //     surfaces to the wrapper as a generic thrown `Error` — which the
+  //     wrapper's transport branch used to misclassify as a
+  //     TransportError (a schema-violating SUCCESS body is the single
+  //     most important thing this client detects, and it was reported
+  //     as a network failure). This is also the only scope where the
+  //     parsed 2xx body is still reachable, so the transformer wraps
+  //     its own rejection: `throw new ResponseValidationError(err, data)`.
+  //     The `as ZodError` cast mirrors the wrapper's error-transformer
+  //     catch — `parseAsync` rejects with ZodError by contract.
+  // Typed as the DSL's own `.do(...)` parameter shape (`DoExpr` upstream,
+  // which is not exported — `MaybeTsDsl<Expression | Statement>` is its
+  // exact definition).
+  let transformerStatements: MaybeTsDsl<Expression | Statement>;
+  const parseCallExpr = transformerBody.attr('parseAsync').call('data').await();
+  if (role === 'response') {
+    const responseValidationSymbol = plugin.querySymbol({
+      category: 'class',
+      resource: 'wrapper-error',
+      name: 'ResponseValidationError'
+    });
+    const zodErrorTypeSymbol = plugin.querySymbol({
+      category: 'type',
+      tool: 'zod',
+      name: 'ZodError'
+    });
+    if (!responseValidationSymbol || !zodErrorTypeSymbol) {
+      throw new Error(
+        `[zod-to-openapi-heyapi] wrapper-error classes missing while emitting ` +
+          `'${transformerName}' — ensureWrapperErrorClasses() should have run ` +
+          `before emitParseTransformer for role 'response'. Plugin bug.`
+      );
+    }
+    transformerStatements =
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (dsl as any)
+        .try(parseCallExpr.return())
+        .catchArg('err')
+        .catch(
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (dsl as any).throw(
+            dsl
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              .new(responseValidationSymbol as any)
+              .args(
+                dsl.as(
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  dsl('err') as any,
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  dsl.type(zodErrorTypeSymbol as any)
+                ),
+                dsl.id('data')
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              ) as any,
+            false
+          )
+        );
+  } else {
+    transformerStatements = parseCallExpr.return();
+  }
+
   plugin.node(
     dsl
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1446,7 +1528,7 @@ function emitParseTransformer({
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             dsl.type('Promise').generic(unionType as any) as any
           )
-          .do(transformerBody.attr('parseAsync').call('data').await().return())
+          .do(transformerStatements)
       )
   );
 
@@ -1984,6 +2066,25 @@ function emitSdkWrapper({
         .catchArg('err')
         .catch(
           dsl
+            // Wrapper-emitted error → re-throw untouched. The response
+            // transformer (run by client-fetch inside the awaited SDK
+            // call) throws ResponseValidationError itself when a 2xx
+            // body fails validation; without this pass-through the
+            // `instanceof Error` branch below would re-wrap it as a
+            // TransportError, misreporting a schema violation as a
+            // network failure. Marker check, not `instanceof` — same
+            // cross-realm reasoning as the emitted guards.
+            .if(
+              markerCheckExpr(
+                () => tsFactory.createIdentifier('err'),
+                RESPONSE_VALIDATION_ERROR_SYMBOL_KEY
+              )
+            )
+            .do(
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              (dsl as any).throw('err', false)
+            ),
+          dsl
             // err instanceof Error → wrap as TransportError and
             // re-throw, no parseAsync (request never reached the API;
             // nothing to validate).
@@ -2100,56 +2201,79 @@ function emitSdkWrapper({
       // `null` is excluded explicitly because `typeof null === 'object'`.
       dsl
         .if(
+          // The whole mutation block is additionally gated on the error
+          // NOT already being a wrapper-emitted ResponseValidationError:
+          // under throwOnError: false, client-fetch catches the response
+          // transformer's throw and hands it back as `result.error`, and
+          // re-wrapping it as a TransportError (it IS an `instanceof
+          // Error`) would misreport a 2xx schema violation as a network
+          // failure. Pass it through untouched instead.
           tsFactory.createBinaryExpression(
             tsFactory.createBinaryExpression(
               tsFactory.createBinaryExpression(
                 tsFactory.createBinaryExpression(
                   tsFactory.createBinaryExpression(
-                    tsFactory.createTypeOfExpression(tsFactory.createIdentifier('result')),
-                    tsFactory.createToken(SyntaxKind.EqualsEqualsEqualsToken),
-                    tsFactory.createStringLiteral('object')
+                    tsFactory.createBinaryExpression(
+                      tsFactory.createTypeOfExpression(tsFactory.createIdentifier('result')),
+                      tsFactory.createToken(SyntaxKind.EqualsEqualsEqualsToken),
+                      tsFactory.createStringLiteral('object')
+                    ),
+                    tsFactory.createToken(SyntaxKind.AmpersandAmpersandToken),
+                    tsFactory.createBinaryExpression(
+                      tsFactory.createIdentifier('result'),
+                      tsFactory.createToken(SyntaxKind.ExclamationEqualsEqualsToken),
+                      tsFactory.createNull()
+                    )
                   ),
                   tsFactory.createToken(SyntaxKind.AmpersandAmpersandToken),
                   tsFactory.createBinaryExpression(
-                    tsFactory.createIdentifier('result'),
-                    tsFactory.createToken(SyntaxKind.ExclamationEqualsEqualsToken),
-                    tsFactory.createNull()
+                    tsFactory.createStringLiteral('request'),
+                    tsFactory.createToken(SyntaxKind.InKeyword),
+                    tsFactory.createIdentifier('result')
                   )
                 ),
                 tsFactory.createToken(SyntaxKind.AmpersandAmpersandToken),
                 tsFactory.createBinaryExpression(
-                  tsFactory.createStringLiteral('request'),
+                  tsFactory.createStringLiteral('response'),
                   tsFactory.createToken(SyntaxKind.InKeyword),
                   tsFactory.createIdentifier('result')
                 )
               ),
               tsFactory.createToken(SyntaxKind.AmpersandAmpersandToken),
               tsFactory.createBinaryExpression(
-                tsFactory.createStringLiteral('response'),
-                tsFactory.createToken(SyntaxKind.InKeyword),
-                tsFactory.createIdentifier('result')
-              )
-            ),
-            tsFactory.createToken(SyntaxKind.AmpersandAmpersandToken),
-            tsFactory.createBinaryExpression(
-              tsFactory.createBinaryExpression(
-                tsFactory.createTypeOfExpression(
+                tsFactory.createBinaryExpression(
+                  tsFactory.createTypeOfExpression(
+                    tsFactory.createPropertyAccessExpression(
+                      tsFactory.createIdentifier('errorBearing'),
+                      'error'
+                    )
+                  ),
+                  tsFactory.createToken(SyntaxKind.EqualsEqualsEqualsToken),
+                  tsFactory.createStringLiteral('object')
+                ),
+                tsFactory.createToken(SyntaxKind.AmpersandAmpersandToken),
+                tsFactory.createBinaryExpression(
                   tsFactory.createPropertyAccessExpression(
                     tsFactory.createIdentifier('errorBearing'),
                     'error'
-                  )
-                ),
-                tsFactory.createToken(SyntaxKind.EqualsEqualsEqualsToken),
-                tsFactory.createStringLiteral('object')
-              ),
-              tsFactory.createToken(SyntaxKind.AmpersandAmpersandToken),
-              tsFactory.createBinaryExpression(
-                tsFactory.createPropertyAccessExpression(
-                  tsFactory.createIdentifier('errorBearing'),
-                  'error'
-                ),
-                tsFactory.createToken(SyntaxKind.ExclamationEqualsEqualsToken),
-                tsFactory.createNull()
+                  ),
+                  tsFactory.createToken(SyntaxKind.ExclamationEqualsEqualsToken),
+                  tsFactory.createNull()
+                )
+              )
+            ),
+            tsFactory.createToken(SyntaxKind.AmpersandAmpersandToken),
+            tsFactory.createPrefixUnaryExpression(
+              SyntaxKind.ExclamationToken,
+              tsFactory.createParenthesizedExpression(
+                markerCheckExpr(
+                  () =>
+                    tsFactory.createPropertyAccessExpression(
+                      tsFactory.createIdentifier('errorBearing'),
+                      'error'
+                    ),
+                  RESPONSE_VALIDATION_ERROR_SYMBOL_KEY
+                )
               )
             )
           )
@@ -2899,6 +3023,57 @@ function instanceofErrorExpr(subject: Expression): Expression {
     subject,
     tsFactory.createToken(SyntaxKind.InstanceOfKeyword),
     tsFactory.createIdentifier('Error')
+  );
+}
+
+/**
+ * `typeof <subject> === 'object' && <subject> !== null &&
+ * (<subject> as Record<symbol, unknown>)[Symbol.for(markerKey)] === true`
+ *
+ * The same cross-realm marker check the emitted type-predicate guards
+ * perform, as an inline expression against an arbitrary subject. Used by
+ * the SDK wrapper to recognise wrapper-emitted errors (e.g. the
+ * ResponseValidationError a response transformer throws on a 2xx body
+ * that fails validation) so they pass through instead of being re-wrapped
+ * as TransportError. Marker over `instanceof` for the same reasons the
+ * guards use it: cross-realm stability and no dependence on class-symbol
+ * finalName resolution.
+ *
+ * `subject` is a factory so each of the three positions gets a fresh
+ * node — re-using one TS AST node in several positions has produced
+ * double-rendered output in other DSL paths.
+ */
+function markerCheckExpr(subject: () => Expression, markerKey: string): Expression {
+  const typeofObject = tsFactory.createBinaryExpression(
+    tsFactory.createTypeOfExpression(subject()),
+    tsFactory.createToken(SyntaxKind.EqualsEqualsEqualsToken),
+    tsFactory.createStringLiteral('object')
+  );
+  const notNull = tsFactory.createBinaryExpression(
+    subject(),
+    tsFactory.createToken(SyntaxKind.ExclamationEqualsEqualsToken),
+    tsFactory.createNull()
+  );
+  const recordType = tsFactory.createTypeReferenceNode('Record', [
+    tsFactory.createKeywordTypeNode(SyntaxKind.SymbolKeyword),
+    tsFactory.createKeywordTypeNode(SyntaxKind.UnknownKeyword)
+  ]);
+  const markerEqualsTrue = tsFactory.createBinaryExpression(
+    tsFactory.createElementAccessExpression(
+      tsFactory.createParenthesizedExpression(tsFactory.createAsExpression(subject(), recordType)),
+      symbolForExpr(markerKey)
+    ),
+    tsFactory.createToken(SyntaxKind.EqualsEqualsEqualsToken),
+    tsFactory.createTrue()
+  );
+  return tsFactory.createBinaryExpression(
+    tsFactory.createBinaryExpression(
+      typeofObject,
+      tsFactory.createToken(SyntaxKind.AmpersandAmpersandToken),
+      notNull
+    ),
+    tsFactory.createToken(SyntaxKind.AmpersandAmpersandToken),
+    markerEqualsTrue
   );
 }
 
