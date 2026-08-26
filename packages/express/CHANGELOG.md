@@ -1,5 +1,12 @@
 # @polygonlabs/express
 
+## 5.0.0
+
+### Patch Changes
+
+- Updated dependencies [[`9edc162`](https://github.com/0xPolygon/apps-team-packages/commit/9edc1626f4d053e6d7b1e14dae2d691e768b16a0), [`0fcf6b3`](https://github.com/0xPolygon/apps-team-packages/commit/0fcf6b3d820a83a6bd7aa3781e3ac99d1de0c0b4)]:
+  - @polygonlabs/openapi-registry@3.0.0
+
 ## 4.1.2
 
 ### Patch Changes
