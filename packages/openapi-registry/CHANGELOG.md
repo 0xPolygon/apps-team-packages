@@ -1,5 +1,38 @@
 # @polygonlabs/openapi-registry
 
+## 3.0.0
+
+### Major Changes
+
+- [#81](https://github.com/0xPolygon/apps-team-packages/pull/81) [`9edc162`](https://github.com/0xPolygon/apps-team-packages/commit/9edc1626f4d053e6d7b1e14dae2d691e768b16a0) Thanks [@MaximusHaximus](https://github.com/MaximusHaximus)! - `registerPath` now rejects coercing schemas (`z.coerce.*`) in parameter positions
+
+  ## Breaking change
+
+  `TypedRegistry.registerPath` throws at generate time when `request.params`, `request.query`, or `request.headers` contains a coercing schema (`z.coerce.number()`, `z.coerce.date()`, …), including when wrapped in `.optional()` / `.default()` / `.nullable()`.
+
+  Why: in zod v4 a coercing schema's input type is `unknown`, so the generated OpenAPI marks the parameter `required: false, nullable: true` regardless of the author's intent — a required parameter silently documents as optional-and-nullable, and every codegen consumer inherits the misdocumented contract. The audit turns that silent corruption into a loud error on the engineer's machine, in the same spirit as the sealed shared-registry conflict check.
+
+  ## Migration
+  - Parameter converted by the server binding: declare the logical type plainly — `z.coerce.number().int()` → `z.number().int()`.
+  - Wire string with a different runtime type: use a codec that declares both sides — e.g. `Int64Codec` / `IsoDateCodec` from `@polygonlabs/zod-codecs`. Codecs (`z.codec(...)`) are unaffected by the audit.
+  - Request bodies are not audited — JSON bodies carry typed values on the wire.
+
+  The check is also exported directly as `assertNoCoercingParamSchemas` for use outside `TypedRegistry`.
+
+### Minor Changes
+
+- [#81](https://github.com/0xPolygon/apps-team-packages/pull/81) [`0fcf6b3`](https://github.com/0xPolygon/apps-team-packages/commit/0fcf6b3d820a83a6bd7aa3781e3ac99d1de0c0b4) Thanks [@MaximusHaximus](https://github.com/MaximusHaximus)! - Make the auto-injected standard error responses configurable per registry
+
+  `new TypedRegistry({ standardErrorResponses })` now controls the framework-emitted error responses injected into every `registerPath` call:
+
+  - `false` — inject nothing; every route documents exactly the responses it declares.
+  - `{ serverError?, validationError?, notAuthenticated? }` — override the schema for individual slots; omitted slots keep their defaults.
+  - Omitted — unchanged default behaviour.
+
+  The default shapes document `@polygonlabs/express`'s error middleware, which is correct for services using it but wrong for any other producer: a spec authored with this registry for a non-Express backend would otherwise advertise 500/400/401 shapes its server never emits, and the injected `ErrorResponse` component name can collide with the service's own same-named schema of a different shape. The injection _rules_ (when a 400/401/500 is added) are unchanged — only the shapes are configurable.
+
+  The option is mirrored at the type level: the `Ops` accumulator reports the configured schema types (or omits the slots entirely under `false`), so `OperationsOf` consumers and codegen'd clients see the shapes the runtime registry actually holds. `inferStandardErrorResponses` accepts the same options as an optional second argument; existing single-argument calls are unaffected.
+
 ## 2.1.3
 
 ### Patch Changes
