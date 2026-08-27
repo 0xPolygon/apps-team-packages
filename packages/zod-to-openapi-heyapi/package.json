@@ -1,6 +1,6 @@
 {
   "name": "@polygonlabs/zod-to-openapi-heyapi",
-  "version": "2.0.4",
+  "version": "2.1.0",
   "description": "hey-api/openapi-ts plugin that sources Zod schemas (with codecs) from a zod-to-openapi OpenAPIRegistry instead of regenerating them from the spec — so generated clients use your actual Zod runtime types.",
   "license": "Apache-2.0",
   "type": "module",
