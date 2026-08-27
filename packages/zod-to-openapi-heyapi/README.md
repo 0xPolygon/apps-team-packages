@@ -206,51 +206,47 @@ make sure the schemas package's runtime entrypoint resolves before invoking
 custom export condition like `@polygonlabs/source` to read source `.ts`
 directly.
 
-### When schemas live inside the client codegen package — self-link the package name
+### When schemas live inside the client codegen package — use a `#` imports alias
 
 Sometimes a project doesn't justify a separate schemas package: the schemas,
-the registry, and the client codegen all live together. Relative paths
-won't work — they mean different things to the plugin's audit (resolved
-from the plugin's install location) and the generated client (resolved from
-the output dir). Give the package a real `name` + `exports` entry and
-self-link it, then use the package's own name as `schemasFrom`:
+the registry, and the client codegen all live together. Declare a
+[`package.json#imports`][node-imports] alias for the schema barrel and use it
+as `schemasFrom`:
 
 ```jsonc
 // package.json
 {
-  "name": "@my-org/api-client",
-  "exports": { ".": "./src/schemas/index.ts" },
-  "devDependencies": {
-    "@my-org/api-client": "link:."
+  "imports": {
+    "#schemas": "./src/schemas/index.ts"
   }
 }
 ```
 
 ```ts
 // openapi-ts.config.ts
-schemasFrom: '@my-org/api-client'
+schemasFrom: '#schemas'
 ```
 
-The `link:.` entry materialises the package under its own
-`node_modules/@my-org/api-client`, so the name resolves from **every**
-import location: the plugin's codegen-time audit (which `import()`s
-`schemasFrom` from the plugin's own install location, not from your
-config file), the generated transformer under `./src/generated/`, and
-your own source.
+No package `name`, no `exports` map, no self-dependency — the alias is the
+whole setup. It resolves identically everywhere it's used: in your own
+source, in the generated transformer (which lives inside your package), and
+in the plugin's codegen-time audit — which anchors its resolution at the
+codegen **output directory**, so the audit resolves `schemasFrom` exactly as
+the generated client will at runtime.
 
-> **`package.json#imports` aliases (`'#schemas'`) do NOT work here** —
-> an earlier revision of this README recommended one. Node resolves `#`
-> aliases against the package containing the *importing module*, and the
-> plugin's dynamic import runs from
-> `node_modules/@polygonlabs/zod-to-openapi-heyapi/`, where your alias
-> doesn't exist. The audit fails with
-> `Package import specifier "#schemas" is not defined`. Use the
-> self-linked package name above instead.
+> `#` aliases only work inside the package that declares them. If your
+> schemas live in a sibling or published package, use the package name as
+> shown above — a `#schemas` alias in the consumer's package.json is not
+> visible from another package.
+
+[node-imports]: https://nodejs.org/api/packages.html#subpath-imports
 
 ### What's not supported
 
-- **Relative paths** (`'../schemas'`) — different meaning to the plugin and
-  the generated client.
+- **Relative paths** (`'../schemas'`) — the generated client emits the
+  specifier verbatim from the output directory, so it must be
+  location-independent; the plugin rejects relatives with a pointer to the
+  `#` alias pattern.
 - **Default or namespace imports** — the plugin always emits
   `import { Name }`.
 - **Renames** — the export's binding name must equal the registry name; see
@@ -264,7 +260,7 @@ your own source.
 | Schemas published to npm (root export) | `'@my-org/api-schemas'` |
 | Schemas published as a subpath export | `'@my-org/api-schemas/zod'` |
 | Schemas in the same monorepo (workspace package) | `'@my-org/api-schemas'` |
-| Schemas in the same package as the codegen | The package's own name (self-linked via `"link:."`) |
+| Schemas in the same package as the codegen | `'#schemas'` (via `package.json#imports`) |
 
 ### Schemas must be named exports, and the export name must match the registry name
 
