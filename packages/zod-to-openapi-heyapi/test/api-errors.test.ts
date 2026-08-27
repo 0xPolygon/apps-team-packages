@@ -91,7 +91,13 @@ describe('TransportError — request never reached the API', () => {
         }
         // After narrowing: cause is an Error (no cast needed).
         expect(surfaced.cause).toBeInstanceOf(Error);
-        expect(surfaced.message).toBe('Request failed before producing an HTTP response');
+        // `.shortMessage` is the as-constructed message (VError's
+        // accumulation-free form); `.message` additionally appends the
+        // cause's own message, so it isn't a fixed string to pin here.
+        expect(surfaced.shortMessage).toBe('Request failed before producing an HTTP response');
+        expect(surfaced.message).toBe(
+          `Request failed before producing an HTTP response: ${surfaced.cause.message}`
+        );
         // The marker key matches the canonical Symbol.for(...) — same
         // anchor used by the type guard. Worth pinning so a rename
         // would surface here instead of as a silent class-identity
