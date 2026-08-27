@@ -57,6 +57,7 @@ import { getRefId } from '@asteasolutions/zod-to-openapi';
 import { factory as tsFactory, SyntaxKind } from 'typescript';
 
 import { containsCodec } from './contains-codec.ts';
+import { importFromConsumer } from './import-from-consumer.ts';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -155,20 +156,35 @@ export interface RegistryPluginOptions {
    * consumers the package must be installed in `node_modules` at boot.
    * Either way, the schemas package is a real runtime dependency.
    *
-   * Must be a specifier that resolves the same from any caller's perspective:
-   * a package specifier (`@org/pkg`, `@org/pkg/zod`) or a `file://` URL. The
-   * plugin dynamic-imports this specifier at codegen time to run the audit,
-   * so a relative path like `'../schemas'` won't work — its meaning depends
-   * on who's importing it, and the plugin's perspective differs from the
-   * generated client's. A package.json `imports` alias (`'#schemas'`) does
-   * NOT work either: Node resolves `#` aliases against the package containing
-   * the importing module, and the plugin imports from its own install
-   * location, where the consumer's alias doesn't exist. When schemas live in
-   * the same package as the codegen, give the package a `name` + `exports`
-   * entry, self-link it (`"<name>": "link:."` in devDependencies), and pass
-   * the package's own name — see the README's resolution table.
+   * Every specifier form resolves from the CONSUMER package's perspective —
+   * anchored at the codegen output directory — exactly as the generated
+   * client's own emitted import will resolve it:
+   *
+   *   - `'#schemas'` — a package.json `imports` alias. The canonical choice
+   *     when schemas live in the same package as the codegen: the package
+   *     addresses its own barrel with no `name`/`exports` ceremony.
+   *   - `'@org/pkg'` / `'@org/pkg/zod'` — a package specifier, for schemas
+   *     in a separate (workspace or published) package.
+   *   (Relative paths are rejected: the emitted import must resolve
+   *   identically from anywhere in the consumer package.)
+   *
+   * (Before v2.1.0 the audit import resolved from the plugin's own install
+   * location, so `#` aliases failed for every real consumer; fixed by
+   * anchoring resolution at the output directory.)
    */
   schemasFrom: string;
+  /**
+   * The codegen output directory — where the generated client will be
+   * written, and therefore where its emitted
+   * `import { Name } from '<schemasFrom>'` statements will resolve from.
+   * The audit anchors its own resolution here so audit-time and
+   * consumer-runtime resolution are identical by construction.
+   * {@link defineRegistryClientConfig} passes its `output` through
+   * automatically; direct callers may omit it to default to
+   * `process.cwd()` (correct when codegen runs from the consumer
+   * package directory).
+   */
+  outputDir?: string;
   /**
    * The OpenApiGeneratorV3 class from @asteasolutions/zod-to-openapi.
    * Passed explicitly to avoid import resolution issues in the codegen environment.
@@ -218,6 +234,7 @@ export interface RegistryPluginOptions {
 export async function registryPlugin({
   registry,
   schemasFrom,
+  outputDir,
   generatorClass,
   $: dsl,
   tanstackReactQuery = false
@@ -246,9 +263,15 @@ export async function registryPlugin({
   // check: no instance identity is compared anywhere, so a second module
   // evaluation (different instances, identical export names) passes it
   // just the same.
+  // Resolved from the CONSUMER package's scope — the same referrer the
+  // generated client's emitted import will have — so `#` aliases, exports
+  // maps, and the process's `--conditions` all behave identically at audit
+  // time and at consumer runtime. A bare `await import(schemasFrom)` here
+  // would resolve from THIS package's install location instead, where the
+  // consumer's `#` aliases don't exist (see import-from-consumer.ts).
   let schemasModule: Record<string, unknown>;
   try {
-    schemasModule = (await import(schemasFrom)) as Record<string, unknown>;
+    schemasModule = await importFromConsumer(schemasFrom, outputDir ?? process.cwd());
   } catch (err) {
     throw new Error(buildSchemasFromImportError(schemasFrom, err));
   }
@@ -710,9 +733,18 @@ export async function defineRegistryClientConfig(
 
   const tanstack = opts.tanstackReactQuery ?? false;
 
+  // `UserConfig['output']` is a union (string | object | array of either);
+  // extract the directory path from whichever shape the consumer used. The
+  // canonical factory usage passes a plain string.
+  const firstOutput = Array.isArray(opts.output) ? opts.output[0] : opts.output;
+  const outputPath =
+    typeof firstOutput === 'string'
+      ? firstOutput
+      : ((firstOutput as { path?: string } | undefined)?.path ?? process.cwd());
   const pluginConfig = await registryPlugin({
     registry: opts.registry,
     schemasFrom: opts.schemasFrom,
+    outputDir: outputPath,
     generatorClass: OpenApiGeneratorV3 as unknown as GeneratorClass,
     $: dsl,
     tanstackReactQuery: tanstack
@@ -902,13 +934,13 @@ function buildSchemasFromImportError(schemasFrom: string, err: unknown): string 
     (err as { code?: unknown }).code === 'ERR_MODULE_NOT_FOUND';
 
   let hint =
-    `\`schemasFrom\` must be a specifier that resolves from the plugin's perspective at codegen time — ` +
-    `a package specifier (\`@org/pkg\`, \`@org/pkg/zod\`) or a \`file://\` URL. ` +
-    `Relative paths like \`'../schemas'\` don't work because they mean different things to the plugin ` +
-    `and the generated client. package.json \`imports\` aliases (\`#schemas\`) don't work either — ` +
-    `they resolve against the package containing the importing module, and the plugin imports from ` +
-    `its own install location. For schemas living inside the codegen package itself, self-link the ` +
-    `package (\`"<name>": "link:."\`) and pass its own name.`;
+    `\`schemasFrom\` resolves from the CONSUMER package's perspective — the codegen working ` +
+    `directory, or the \`schemasAnchor\` option if set. Supported forms: a package.json ` +
+    `\`imports\` alias (\`'#schemas'\` — canonical when schemas live in the same package as ` +
+    `the codegen), a package specifier (\`@org/pkg\`, \`@org/pkg/zod\`), or a relative path ` +
+    `Supported: a package.json \`imports\` alias (\`'#schemas'\`) or a package specifier. ` +
+    `If an \`'#alias'\` failed to resolve, check that the consumer package.json declares it ` +
+    `under \`imports\`, and that the codegen output directory sits inside that package.`;
 
   if (isModuleNotFound) {
     hint +=
@@ -918,7 +950,7 @@ function buildSchemasFromImportError(schemasFrom: string, err: unknown): string 
       `that hasn't been built yet. If you're using a custom export condition for build-free ` +
       `dev (e.g. \`@polygonlabs/source\`), either run \`node --conditions=<your-condition>\` ` +
       `before \`openapi-ts\`, or build the schemas package first.\n` +
-      `  • You passed a relative path. Use a package specifier or a \`#imports\` alias instead.`;
+      `  • The output directory doesn't sit inside the consumer package, so its \`imports\`/dependencies aren't in scope.`;
   }
 
   return `[zod-to-openapi-heyapi] Could not import schemasFrom='${schemasFrom}'. Cause: ${detail}\n\n${hint}`;
