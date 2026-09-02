@@ -1,5 +1,54 @@
 # Migration Guide
 
+## 2.1.0 → 3.0.0 (wrapper-error classes extend VError — breaking)
+
+`TransportError` and `ResponseValidationError` — the classes the generated
+client throws/returns for transport failures and schema-mismatched
+responses — now extend `@polygonlabs/verror`'s `VError` instead of the
+bare `Error` global.
+
+### Why
+
+The two classes were already hand-rolled to mirror `VError`'s
+cross-realm `Symbol.for(...)` marker pattern, without depending on it.
+That zero-dep instinct cost more than it saved: `@polygonlabs/verror`
+is itself zero-dependency, ~800 lines, and the team's own cross-boundary
+error type. Extending it for real means `VError.info(err)`,
+`serializeError(err)`, `VError.findCauseByType(err, ...)`, and
+`VError.fullStack(err)` all work on generated-client errors — instead
+of a second error vocabulary at exactly the boundary where that
+capability matters most.
+
+### Required: install `@polygonlabs/verror`
+
+`@polygonlabs/verror` is now a required runtime peer dependency of the
+generated client, alongside `zod`:
+
+```sh
+pnpm add @polygonlabs/verror
+```
+
+Regenerate the client (`pnpm run codegen` or your project's equivalent)
+after installing — the generated file now imports
+`import { VError } from '@polygonlabs/verror'`.
+
+### Behaviour changes
+
+- **`.message` now includes the cause's message.** VError accumulates
+  the cause chain into `.message` (e.g. `"Request failed before
+  producing an HTTP response: <cause message>"`). The as-constructed
+  message alone — the old `.message` value — is still available as
+  `.shortMessage`. Code asserting an exact `.message` string should
+  switch to `.shortMessage`.
+- **`ResponseValidationError.body` is now a getter**, not a stored
+  field. The value is carried on VError's own `info` bag (`super(...,
+  { info: { body } })`), so `VError.info(err).body` and
+  `serializeError(err)` see it too. `error.body` still reads the same
+  way — no consumer code needs to change here.
+- **`isTransportError`, `isResponseValidationError`, `isWrapperError`,
+  and the `Symbol.for(...)` marker keys are unchanged.** Narrowing code
+  written against those guards keeps working with no changes.
+
 ## 1.3.0 → 2.0.0 (registration-based input-slot naming — breaking)
 
 2.0.0 changes how the plugin resolves a route's

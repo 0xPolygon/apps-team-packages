@@ -2561,6 +2561,27 @@ function emitWrapperErrorClasses({ dsl, plugin }: { dsl: Dsl; plugin: PluginLike
     meta: { category: 'type', tool: 'zod', name: 'ZodError' }
   });
 
+  // VError value import — both wrapper classes extend it instead of the
+  // bare `Error` global. `@polygonlabs/verror` is zero-dependency and
+  // already the team's cross-boundary error type; extending it gives
+  // consumers `VError.info(err)`, `serializeError`, `findCauseByType`,
+  // and `fullStack` for free on generated-client errors, rather than a
+  // parallel error vocabulary that mirrors verror's marker pattern
+  // without any of its capability. Required runtime peer, alongside zod.
+  plugin.symbol('VError', {
+    external: '@polygonlabs/verror',
+    importKind: 'named',
+    meta: { category: 'class', tool: 'verror', name: 'VError' }
+  });
+  const verrorSymbol = plugin.querySymbol({
+    category: 'class',
+    tool: 'verror',
+    name: 'VError'
+  });
+  if (!verrorSymbol) {
+    throw new Error(`[zod-to-openapi-heyapi] failed to register VError import — plugin bug`);
+  }
+
   const transportSymbol = plugin.symbol('TransportError', {
     meta: { category: 'class', resource: 'wrapper-error', name: 'TransportError' }
   });
@@ -2576,7 +2597,7 @@ function emitWrapperErrorClasses({ dsl, plugin }: { dsl: Dsl; plugin: PluginLike
     throw new Error(`[zod-to-openapi-heyapi] failed to register ZodError import — plugin bug`);
   }
 
-  // export class TransportError extends Error {
+  // export class TransportError extends VError {
   //   readonly [Symbol.for('@polygonlabs/zod-to-openapi-heyapi/is-transport-error')] = true;
   //   readonly cause: Error;
   //   constructor(cause: Error) {
@@ -2605,6 +2626,7 @@ function emitWrapperErrorClasses({ dsl, plugin }: { dsl: Dsl; plugin: PluginLike
   emitWrapperErrorClass({
     dsl,
     plugin,
+    verrorSymbol,
     classSymbol: transportSymbol,
     className: 'TransportError',
     markerKey: TRANSPORT_ERROR_SYMBOL_KEY,
@@ -2620,6 +2642,7 @@ function emitWrapperErrorClasses({ dsl, plugin }: { dsl: Dsl; plugin: PluginLike
   emitWrapperErrorClass({
     dsl,
     plugin,
+    verrorSymbol,
     classSymbol: responseValidationSymbol,
     className: 'ResponseValidationError',
     markerKey: RESPONSE_VALIDATION_ERROR_SYMBOL_KEY,
@@ -2635,7 +2658,9 @@ function emitWrapperErrorClasses({ dsl, plugin }: { dsl: Dsl; plugin: PluginLike
       'instantiate from consumer code; the wrapper constructs these when',
       '`parseAsync` rejects an HTTP error body that did not match any',
       'registered error schema. `cause` carries the `ZodError` issues;',
-      '`body` is the original wire body for debugging schema drift.',
+      "`body` is carried on VError's `info.body` and exposed here via a",
+      '`body` getter — reading `error.body` still works, but `VError.info(error).body`',
+      'and `serializeError(error)` see it too.',
       'Narrow via the emitted `isResponseValidationError` type-predicate guard.'
     ]
   });
@@ -3121,10 +3146,16 @@ function symbolForExpr(key: string): CallExpression {
 /**
  * Shared emit for a wrapper-error class. Each class:
  *
- *   - extends `Error`
+ *   - extends `VError` (`@polygonlabs/verror`) instead of the bare
+ *     `Error` global — real `VError.info()` / `serializeError` /
+ *     `findCauseByType` / `fullStack` work on these instances, rather
+ *     than a parallel error vocabulary that only mirrors verror's
+ *     marker pattern
  *   - carries a `[Symbol.for(<markerKey>)] = true` discriminator field
  *     (cross-realm safe — same symbol globally regardless of which
- *     module copy of the generated client is loaded)
+ *     module copy of the generated client is loaded); this is the
+ *     wrapper's own tag, separate from and unrelated to verror's
+ *     `WERROR_SYMBOL` / `MULTIERROR_SYMBOL`
  *   - narrows `cause` to a specific subtype (`Error` for transport,
  *     `ZodError` for unknown) so consumers can read `error.cause.<field>`
  *     without a cast
@@ -3133,13 +3164,18 @@ function symbolForExpr(key: string): CallExpression {
  *     instantiate or extend the class themselves — it's a
  *     codegen-emitted marker, not a public surface
  *
- * Optional `extraField` adds a second readonly field + constructor
- * param + assignment (used by `ResponseValidationError` to carry the original
- * wire body alongside the `ZodError` cause).
+ * Optional `extraField` adds a `<name>` accessor (used by
+ * `ResponseValidationError` to expose the original wire body). The
+ * value isn't a stored field — it's passed to `super(...)` as
+ * `info.<name>` so it flows into VError's own info bag (`VError.info(err)`,
+ * `serializeError(err)` see it under `info.<name>`), and the accessor is
+ * a getter delegating to `this.info.<name>` for source compatibility
+ * with the pre-VError shape (`error.body` still reads the same way).
  */
 function emitWrapperErrorClass({
   dsl,
   plugin,
+  verrorSymbol,
   classSymbol,
   className,
   markerKey,
@@ -3150,6 +3186,8 @@ function emitWrapperErrorClass({
 }: {
   dsl: Dsl;
   plugin: PluginLike;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  verrorSymbol: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   classSymbol: any;
   className: string;
@@ -3200,7 +3238,8 @@ function emitWrapperErrorClass({
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     .class(classSymbol as any)
     .export()
-    .extends('Error');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    .extends(verrorSymbol as any);
 
   if (jsdoc && jsdoc.length > 0) {
     // DocTsDsl `lines` arg accepts `MaybeArray<string>` — pass as
@@ -3213,17 +3252,46 @@ function emitWrapperErrorClass({
 
   classBuilder = classBuilder.field('cause', (f: unknown) =>
     // Declare-and-override `cause` to narrow it from `unknown`
-    // (Error's default). The DSL doesn't expose `declare`, so we
-    // emit `readonly cause: <T>` as a real field and assign it
-    // explicitly in the constructor.
+    // (VError inherits `Error`'s default `cause?: unknown`). The DSL
+    // doesn't expose `declare`, so we emit `readonly cause: <T>` as a
+    // real field and assign it explicitly in the constructor below.
+    //
+    // This field-with-no-initializer still runs its own
+    // define-to-undefined step after `super(...)` returns (real
+    // class-fields semantics), clobbering the value VError's
+    // constructor just set via `Object.defineProperty`. The explicit
+    // `this.cause = cause` assignment in the constructor body is what
+    // fixes that back up — same two-step dance VError's own
+    // `shortMessage` / `info` fields use internally.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (f as any).readonly().type(causeTypeExpr)
   );
 
+  // `name` is `readonly` on VError itself (`readonly name: string =
+  // 'VError'`), so a constructor-body `this.name = ...` assignment (the
+  // pre-VError approach, back when the class extended plain `Error`)
+  // no longer typechecks — TS2540, cannot assign to a readonly
+  // property. VError's own subclasses (WError, MultiError) fix this
+  // the same way: redeclare `name` as an own field with a literal
+  // initializer, which is a legal readonly-field override.
+  classBuilder = classBuilder.field('name', (f: unknown) =>
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (f as any).readonly().type('string').assign(dsl.literal(className))
+  );
+
   if (extraField) {
-    classBuilder = classBuilder.field(extraField.name, (f: unknown) =>
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (f as any).readonly().type(extraField.typeExpr)
+    // Getter, not a stored field: the value is carried in VError's
+    // `info` bag (passed via `super(...)`'s `info` option below) so
+    // `VError.info(err).<name>` and `serializeError(err)` see it too.
+    // This is the accessor consumer code reads — `error.<name>` — kept
+    // for source compatibility with the pre-VError shape.
+    classBuilder = classBuilder.do(
+      dsl.getter(extraField.name, (g: unknown) =>
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (g as any)
+          .returns(extraField.typeExpr)
+          .do(dsl.return(dsl('this').attr('info').attr(extraField.name)))
+      )
     );
   }
 
@@ -3235,23 +3303,33 @@ function emitWrapperErrorClass({
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         init = init.param(extraField.name, (p: any) => p.type(extraField.typeExpr));
       }
-      // The constructor body deliberately does NOT pass `{ cause }`
-      // to `super(...)`. The class declares a narrower `readonly cause:
-      // <T>` field above and assigns it explicitly via
-      // `this.cause = cause` here — that single assignment satisfies
-      // both the runtime (the value lands on the instance under the
-      // canonical name) and TypeScript's strict property
-      // initialization. Adding `{ cause }` to `super` would assign the
-      // same value twice for no observable benefit.
-      const stmts: unknown[] = [
-        dsl('super').call(dsl.literal(superMessage)),
-        markerAssignmentStmt,
-        dsl('this').attr('cause').assign(dsl.id('cause')),
-        dsl('this').attr('name').assign(dsl.literal(className))
-      ];
+      // `super(message, { cause, info })` — real VError construction:
+      // VError accumulates `cause`'s message into `.message` (the
+      // as-constructed message alone is still available as
+      // `.shortMessage`) and merges `info` into `.info`. `extraField`
+      // rides in under `info.<name>` rather than a separate super
+      // argument — VError's constructor only accepts `{ cause, info,
+      // constructorOpt }`.
+      const superOptions = dsl.object();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (superOptions as any).prop('cause', dsl.id('cause'));
       if (extraField) {
-        stmts.push(dsl('this').attr(extraField.name).assign(dsl.id(extraField.name)));
+        const infoObject = dsl.object();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (infoObject as any).prop(extraField.name, dsl.id(extraField.name));
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (superOptions as any).prop('info', infoObject);
       }
+      // The `this.cause = cause` reassignment is still required even
+      // though `cause` was just passed through `super(...)` above —
+      // see the field-declaration comment: the subclass's own
+      // `readonly cause` field clobbers it back to `undefined`
+      // immediately after `super()` returns.
+      const stmts: unknown[] = [
+        dsl('super').call(dsl.literal(superMessage), superOptions),
+        markerAssignmentStmt,
+        dsl('this').attr('cause').assign(dsl.id('cause'))
+      ];
       return init.do(...stmts);
     })
   );

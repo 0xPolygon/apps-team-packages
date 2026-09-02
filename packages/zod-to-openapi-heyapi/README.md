@@ -736,18 +736,18 @@ own typed slot.
 
 ```ts
 /** @internal — codegen-emitted; consumers narrow via isTransportError. */
-class TransportError extends Error {
+class TransportError extends VError {
   readonly cause: Error;
-  // super message: 'Request failed before producing an HTTP response'
+  // super('Request failed before producing an HTTP response', { cause })
   // Carries a symbol-keyed marker:
   //   this[Symbol.for('@polygonlabs/zod-to-openapi-heyapi/is-transport-error')] = true
 }
 
 /** @internal — codegen-emitted; consumers narrow via isResponseValidationError. */
-class ResponseValidationError extends Error {
+class ResponseValidationError extends VError {
   readonly cause: ZodError;        // parseAsync's issues
-  readonly body: unknown;          // original wire body (one hop, no walking)
-  // super message: 'API response did not match the registered schema'
+  get body(): unknown { return this.info.body; } // original wire body, carried in VError's info bag
+  // super('API response did not match the registered schema', { cause, info: { body } })
   // Carries a symbol-keyed marker:
   //   this[Symbol.for('@polygonlabs/zod-to-openapi-heyapi/is-response-validation-error')] = true
 }
@@ -758,10 +758,15 @@ declare const isResponseValidationError:   (value: unknown) => value is Response
 declare const isWrapperError:   (value: unknown) => value is TransportError | ResponseValidationError;
 ```
 
-Both extend `Error` so they integrate with `try/catch`, structured
+Both extend `@polygonlabs/verror`'s `VError` — a required runtime peer
+alongside `zod` — so they integrate with `try/catch`, structured
 logging (Sentry / pino walk `.cause`), and any tooling that
-introspects error chains. Both are tagged `@internal` — the wrapper
-constructs them; consumer-thrown instances would erode the
+introspects error chains, and additionally get `VError.info(err)`,
+`serializeError(err)`, and `VError.findCauseByType(err, ...)` for
+free. `.message` accumulates the cause's message the way any VError
+does; the as-constructed message alone (the pre-VError `.message`
+value) is available as `.shortMessage`. Both are tagged `@internal` —
+the wrapper constructs them; consumer-thrown instances would erode the
 discriminator's meaning.
 
 The two classes split by **whether the request reached the API**.

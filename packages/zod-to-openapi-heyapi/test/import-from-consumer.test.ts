@@ -45,6 +45,33 @@ beforeAll(async () => {
     JSON.stringify({ name: 'consumer-only-dep', type: 'module', exports: { '.': './index.mjs' } })
   );
   await writeFile(join(dep, 'index.mjs'), "export const MARKER = 'consumer-only dep';\n");
+
+  // `@polygonlabs/verror` — the required runtime peer the wrapper-error
+  // classes now extend. Same "present ONLY in the consumer's
+  // node_modules" shape as `consumer-only-dep` above: the generated
+  // client's `import { VError } from '@polygonlabs/verror'` is a plain
+  // bare specifier resolved from wherever the generated file lives (the
+  // consumer's own tree), not from this plugin package's own
+  // node_modules — this fixture is what proves that topology.
+  const verrorDep = join(consumerDir, 'node_modules', '@polygonlabs', 'verror');
+  await mkdir(verrorDep, { recursive: true });
+  await writeFile(
+    join(verrorDep, 'package.json'),
+    JSON.stringify({ name: '@polygonlabs/verror', type: 'module', exports: { '.': './index.mjs' } })
+  );
+  await writeFile(
+    join(verrorDep, 'index.mjs'),
+    [
+      'export class VError extends Error {',
+      '  constructor(message, options = {}) {',
+      '    super(message);',
+      '    this.cause = options.cause;',
+      '    this.info = options.info ?? {};',
+      '  }',
+      '}',
+      ''
+    ].join('\n')
+  );
 });
 
 afterAll(async () => {
@@ -55,6 +82,32 @@ describe('importFromConsumer', () => {
   it("resolves the consumer's '#' imports alias — the same-package canonical pattern", async () => {
     const mod = await importFromConsumer('#schemas', outputDir);
     expect(mod).property('MARKER', 'consumer schemas barrel');
+  });
+
+  it("resolves '@polygonlabs/verror' from the CONSUMER's node_modules — the wrapper-error classes' runtime peer", async () => {
+    // The generated `TransportError` / `ResponseValidationError` classes
+    // extend `VError` via a plain `import { VError } from
+    // '@polygonlabs/verror'` in the emitted file — same bare-specifier
+    // resolution as `consumer-only-dep` below, just naming the actual
+    // peer the wrapper classes depend on.
+    const mod = await importFromConsumer('@polygonlabs/verror', outputDir);
+    expect(mod).property('VError');
+    // Round-trip: a class extending the resolved VError behaves the way
+    // the codegen-emitted wrapper classes do (cause + info wiring),
+    // proving the resolved module is a real, usable VError — not just
+    // an export slot with the right name.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    class Probe extends (mod as any).VError {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      constructor(...args: any[]) {
+        super(...args);
+      }
+    }
+    const cause = new Error('boom');
+    const probe = new Probe('wrapped', { cause, info: { body: 'x' } });
+    expect(probe).toBeInstanceOf(Error);
+    expect(probe.cause).toBe(cause);
+    expect(probe.info).toEqual({ body: 'x' });
   });
 
   it("resolves a bare package name from the CONSUMER's node_modules, not this package's", async () => {

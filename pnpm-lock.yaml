@@ -432,6 +432,9 @@ importers:
       '@polygonlabs/apps-team-lint':
         specifier: workspace:*
         version: link:../apps-team-lint
+      '@polygonlabs/verror':
+        specifier: workspace:*
+        version: link:../verror
       '@polygonlabs/zod-codecs':
         specifier: workspace:*
         version: link:../zod-codecs
