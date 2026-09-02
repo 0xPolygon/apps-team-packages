@@ -1,5 +1,24 @@
 # @polygonlabs/zod-to-openapi-heyapi
 
+## 3.0.0
+
+### Major Changes
+
+- [#86](https://github.com/0xPolygon/apps-team-packages/pull/86) [`34f408d`](https://github.com/0xPolygon/apps-team-packages/commit/34f408d296381474aceeeddc12c828776b7ca402) Thanks [@MaximusHaximus](https://github.com/MaximusHaximus)! - Generated clients' `TransportError` and `ResponseValidationError` now extend `@polygonlabs/verror`'s `VError` instead of the bare `Error` global, so consumers get `VError.info()`, `serializeError()`, and cause-chain helpers for free on wrapper-emitted errors.
+
+  ## Breaking change
+
+  Install the new required runtime peer dependency, then regenerate your client:
+
+  ```sh
+  pnpm add @polygonlabs/verror
+  ```
+
+  ## Behaviour changes
+  - `.message` now includes the accumulated cause message. The as-constructed message alone is available as `.shortMessage`.
+  - `ResponseValidationError.body` is now a getter backed by `VError`'s `info` bag — `error.body` still reads the same way, and `VError.info(error).body` / `serializeError(error)` now see it too.
+  - `isTransportError`, `isResponseValidationError`, `isWrapperError`, and their marker symbols are unchanged — existing narrowing code keeps working.
+
 ## 2.1.0
 
 ### Minor Changes
