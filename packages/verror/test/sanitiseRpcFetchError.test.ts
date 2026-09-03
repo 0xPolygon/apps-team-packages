@@ -481,10 +481,10 @@ describe('sanitiseRpcFetchError — keeps the library-native shape', () => {
     expect(sanitised).nested.property('request.url', 'https://node-gateway.example.com');
     expect(sanitised).property('code', 'SERVER_ERROR');
     // v6's own info keeps its existing fields, values and types.
-    expect(sanitised.info).property('requestUrl', 'https://node-gateway.example.com');
-    expect(sanitised.info).property('responseStatus', '429 Too Many Requests');
-    expect(sanitised.info).property(
-      'responseBody',
+    expect(sanitised).nested.property('info.requestUrl', 'https://node-gateway.example.com');
+    expect(sanitised).nested.property('info.responseStatus', '429 Too Many Requests');
+    expect(sanitised).nested.property(
+      'info.responseBody',
       '{"error":{"code":-32005,"message":"rate limit exceeded"}}'
     );
     expect(JSON.stringify(sanitised)).not.contain(SECRET);
@@ -510,17 +510,16 @@ describe('sanitiseRpcFetchError — keeps the library-native shape', () => {
       })
     );
 
-    const headers = (sanitised.response as { headers?: Record<string, string> }).headers ?? {};
     // Kept: the library's own surface, left alone.
-    expect(headers).property('retry-after', '30');
-    expect(headers).property('x-request-id', 'req-8f21');
-    expect(headers).property('server', 'envoy');
-    expect(headers).property('x-envoy-upstream-service-time', '4021');
-    expect(headers).property('cf-ray', '8ab-LHR');
+    expect(sanitised).nested.property('response.headers.retry-after', '30');
+    expect(sanitised).nested.property('response.headers.x-request-id', 'req-8f21');
+    expect(sanitised).nested.property('response.headers.server', 'envoy');
+    expect(sanitised).nested.property('response.headers.x-envoy-upstream-service-time', '4021');
+    expect(sanitised).nested.property('response.headers.cf-ray', '8ab-LHR');
     // Dropped: known credential carriers, by name and by pattern.
-    expect(headers).not.property('set-cookie');
-    expect(headers).not.property('www-authenticate');
-    expect(headers).not.property('x-api-key');
+    expect(sanitised).not.nested.property('response.headers.set-cookie');
+    expect(sanitised).not.nested.property('response.headers.www-authenticate');
+    expect(sanitised).not.nested.property('response.headers.x-api-key');
     expect(JSON.stringify(sanitised)).not.contain(SECRET);
   });
 
@@ -528,8 +527,8 @@ describe('sanitiseRpcFetchError — keeps the library-native shape', () => {
     // Request headers are the asymmetric case: that is where the token is
     // sent, so the whole set goes rather than being filtered.
     const sanitised = sanitisedOf(buildV6ServerError());
-    expect(sanitised.request).not.property('headers');
-    expect(sanitised.request).not.property('body');
+    expect(sanitised).not.nested.property('request.headers');
+    expect(sanitised).not.nested.property('request.body');
     expect(sanitised).nested.property('request.url', 'https://node-gateway.example.com');
     expect(sanitised).nested.property('request.method', 'POST');
     const serialised = JSON.stringify(sanitised);
@@ -542,7 +541,7 @@ describe('sanitiseRpcFetchError — keeps the library-native shape', () => {
       buildV6ServerError({ statusCode: 504, statusMessage: 'Gateway Timeout', responseBody: null })
     );
     expect(sanitised).nested.property('response.statusCode', 504);
-    expect(sanitised.info).property('responseBody', null);
+    expect(sanitised).nested.property('info.responseBody', null);
   });
 
   it('ethers v5: its own fields survive, with the URL reduced to an origin', () => {
@@ -570,10 +569,10 @@ describe('sanitiseRpcFetchError — keeps the library-native shape', () => {
     expect(sanitised).property('url', 'https://node-gateway.example.com');
     expect(sanitised).nested.property('headers.retry-after', '15');
     expect(sanitised).nested.property('headers.x-request-id', 'req-1');
-    expect(sanitised.headers).not.property('set-cookie');
+    expect(sanitised).not.nested.property('headers.set-cookie');
     // The pre-existing info shape is untouched.
-    expect(sanitised.info).property('requestUrl', 'https://node-gateway.example.com');
-    expect(sanitised.info).property('responseStatus', 429);
+    expect(sanitised).nested.property('info.requestUrl', 'https://node-gateway.example.com');
+    expect(sanitised).nested.property('info.responseStatus', 429);
     const serialised = JSON.stringify(sanitised);
     expect(serialised).not.contain(SECRET);
     expect(serialised).not.contain('eth_getLogs');
@@ -606,7 +605,7 @@ describe('sanitiseRpcFetchError — keeps the library-native shape', () => {
     expect(sanitised).property('url', 'https://node-gateway.example.com');
     expect(sanitised).nested.property('headers.retry-after', '20');
     expect(sanitised).nested.property('headers.x-request-id', 'req-2');
-    expect(sanitised.headers).not.property('set-cookie');
+    expect(sanitised).not.nested.property('headers.set-cookie');
     // metaMessages keep viem's own key, with the URL reduced to an origin.
     expect(JSON.stringify(sanitised.metaMessages)).contain('https://node-gateway.example.com');
     const serialised = JSON.stringify(sanitised);
