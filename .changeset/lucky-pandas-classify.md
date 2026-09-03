@@ -26,6 +26,10 @@ ethers v5 nests an inner error under `.error`, not `.cause`. A contract revert s
 
 The viem fingerprint now covers every `BaseError` subclass that carries a URL — `TimeoutError`, `SocketClosedError` and `WebSocketRequestError` alongside `HttpRequestError` and `RpcRequestError`. Those three were previously not detected at all, and viem's own URL helper strips basic-auth credentials but not a token in the query or path, so a timed-out or dropped connection could publish one. This closes that.
 
+## Leak regression suite
+
+The package now carries a suite that drives the real ethers v5, ethers v6 and viem clients against a local node failing in nine different ways, asserting that no credential reaches the serialised error. The credential is planted where gateways actually put one: the URL path, the query string, and a request header. Hand-written error fixtures only prove the sanitiser handles the shape their author imagined — both leaks fixed in this release were found by driving the real clients, and neither would have been caught otherwise. The clients are dev-only dependencies and are not imposed on consumers.
+
 ## Compatibility
 
 Additive. Every field that was already emitted keeps its name, type and value, and no redaction guarantee is relaxed.
