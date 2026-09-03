@@ -147,6 +147,34 @@ describe('sanitiseRpcFetchError — ethers v5 shape', () => {
     expect(sanitiseRpcFetchError(callException)).equal(null);
   });
 
+  it('reaches a v5 fetch error nested under `.error`, not `.cause`', () => {
+    // ethers v5 nests under `.error`, not `.cause`: a contract revert
+    // surfaces as a CALL_EXCEPTION whose `.error` is the SERVER_ERROR that
+    // carries the tokenised `url`. Following only `.cause` left that node
+    // unreachable, so nothing was stripped and the outer message — which v5
+    // builds by stringifying every param, the nested error included —
+    // published the token. Shape verified against a real ethers 5.8
+    // contract call against a reverting node.
+    const SECRET = 'NESTED_UNDER_ERROR_SECRET';
+    const inner = Object.assign(new Error('bad response'), {
+      code: 'SERVER_ERROR',
+      reason: 'bad response',
+      url: `https://host.example/rpc/${SECRET}?token=${SECRET}`,
+      status: 200
+    });
+    const callException = Object.assign(
+      new Error(
+        `missing revert data in call exception (error={"reason":"bad response","url":"https://host.example/rpc/${SECRET}?token=${SECRET}"}, code=CALL_EXCEPTION, version=5.8.0)`
+      ),
+      { code: 'CALL_EXCEPTION', reason: 'missing revert data in call exception', error: inner }
+    );
+
+    const sanitised = sanitiseRpcFetchError(callException);
+    expect(sanitised).instanceOf(Error);
+    expect(sanitised?.message).not.contain(SECRET);
+    expect(JSON.stringify(serializeError(callException))).not.contain(SECRET);
+  });
+
   it('detects a v5 shape even when `reason` is missing from the raw error', () => {
     // The short-summary field is a response-surface concern (extracted by
     // the express handler's own walker), not a sanitiser concern. All the

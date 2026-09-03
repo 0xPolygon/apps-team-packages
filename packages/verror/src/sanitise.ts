@@ -343,9 +343,22 @@ function detectViem(err: ErrorLike): Projection | null {
 }
 
 /**
- * Walk an error's native `.cause` chain into a flat, cycle-safe array. Both
- * `VError` and native `new Error(msg, { cause })` expose the link as
- * `err.cause`, so this covers both.
+ * Walk an error's chain of nested errors into a flat, cycle-safe array.
+ *
+ * `.cause` covers `VError` and native `new Error(msg, { cause })`. `.error`
+ * is followed as a fallback because **ethers v5 nests under `.error`, not
+ * `.cause`**: a contract revert surfaces as a `CALL_EXCEPTION` whose
+ * `.error` is the `SERVER_ERROR` that actually carries `url` with the
+ * credential in it. Following only `.cause` left that node unreachable, so
+ * no detector ever saw the fingerprint, nothing was stripped, and the outer
+ * error's `message` — which v5 builds by stringifying every param, the
+ * nested error included — published the token. Verified against a real
+ * ethers 5.8 contract call against a reverting node.
+ *
+ * This does not widen *what* counts as an RPC fetch error: detection still
+ * requires a genuine v5/v6/viem fingerprint on some node. It only makes the
+ * nodes reachable. An error with a non-fetch code and no nested fetch error
+ * is still not detected.
  */
 function walkCauseChain(err: Error): Error[] {
   const chain: Error[] = [];
@@ -354,8 +367,9 @@ function walkCauseChain(err: Error): Error[] {
   while (current && !visited.has(current)) {
     visited.add(current);
     chain.push(current);
-    const nextCause: unknown = (current as { cause?: unknown }).cause;
-    current = nextCause instanceof Error ? nextCause : null;
+    const link: unknown =
+      (current as { cause?: unknown }).cause ?? (current as { error?: unknown }).error;
+    current = link instanceof Error ? link : null;
   }
   return chain;
 }

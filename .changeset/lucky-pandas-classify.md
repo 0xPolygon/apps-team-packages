@@ -18,6 +18,10 @@ Only what is known to be dangerous is removed; everything else is left as the li
 
 Every URL is reduced to a bare origin — not merely query-stripped, since some providers put the key in the path — including inside `metaMessages`. Request headers and request bodies are never copied: a request header set is small and credential-bearing by design, so the whole set goes. Response headers are the opposite — mostly debug metadata — so they are kept except for the names known to carry a credential (`authorization`, `cookie`, `set-cookie`, `www-authenticate` and relatives, plus any name containing `token`, `secret`, `api-key`, `password` or `credential`). `x-request-id`, `server`, `cf-ray` and `x-envoy-upstream-service-time` therefore survive for diagnosis. The field spread applies only to errors that went through sanitisation, never to an unrecognised error whose own fields have been through no projection.
 
+## Nested ethers v5 errors are now reached
+
+ethers v5 nests an inner error under `.error`, not `.cause`. A contract revert surfaces as a `CALL_EXCEPTION` whose `.error` is the fetch failure carrying the credentialed URL, and the chain walk only followed `.cause` — so that node was unreachable, nothing was stripped, and the outer error's message (which v5 composes by stringifying every parameter, the nested error included) published the token. The walk now falls back to `.error`. This does not widen what counts as an RPC fetch error: detection still requires a genuine fingerprint on some node.
+
 ## Wider viem coverage
 
 The viem fingerprint now covers every `BaseError` subclass that carries a URL — `TimeoutError`, `SocketClosedError` and `WebSocketRequestError` alongside `HttpRequestError` and `RpcRequestError`. Those three were previously not detected at all, and viem's own URL helper strips basic-auth credentials but not a token in the query or path, so a timed-out or dropped connection could publish one. This closes that.
