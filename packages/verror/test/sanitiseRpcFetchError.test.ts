@@ -147,6 +147,34 @@ describe('sanitiseRpcFetchError — ethers v5 shape', () => {
     expect(sanitiseRpcFetchError(callException)).equal(null);
   });
 
+  it('reaches a v5 fetch error nested under `.error`, not `.cause`', () => {
+    // ethers v5 nests under `.error`, not `.cause`: a contract revert
+    // surfaces as a CALL_EXCEPTION whose `.error` is the SERVER_ERROR that
+    // carries the tokenised `url`. Following only `.cause` left that node
+    // unreachable, so nothing was stripped and the outer message — which v5
+    // builds by stringifying every param, the nested error included —
+    // published the token. Shape verified against a real ethers 5.8
+    // contract call against a reverting node.
+    const SECRET = 'NESTED_UNDER_ERROR_SECRET';
+    const inner = Object.assign(new Error('bad response'), {
+      code: 'SERVER_ERROR',
+      reason: 'bad response',
+      url: `https://host.example/rpc/${SECRET}?token=${SECRET}`,
+      status: 200
+    });
+    const callException = Object.assign(
+      new Error(
+        `missing revert data in call exception (error={"reason":"bad response","url":"https://host.example/rpc/${SECRET}?token=${SECRET}"}, code=CALL_EXCEPTION, version=5.8.0)`
+      ),
+      { code: 'CALL_EXCEPTION', reason: 'missing revert data in call exception', error: inner }
+    );
+
+    const sanitised = sanitiseRpcFetchError(callException);
+    expect(sanitised).instanceOf(Error);
+    expect(sanitised?.message).not.contain(SECRET);
+    expect(JSON.stringify(serializeError(callException))).not.contain(SECRET);
+  });
+
   it('detects a v5 shape even when `reason` is missing from the raw error', () => {
     // The short-summary field is a response-surface concern (extracted by
     // the express handler's own walker), not a sanitiser concern. All the
@@ -158,11 +186,16 @@ describe('sanitiseRpcFetchError — ethers v5 shape', () => {
     expect(sanitiseRpcFetchError(err)).instanceOf(Error);
   });
 
-  it('does not copy leaky v5 top-level fields (body, responseText, url) onto the sanitised clone', () => {
+  it('does not copy leaky v5 top-level fields (body, responseText, requestBody) onto the sanitised clone', () => {
     const sanitised = sanitiseRpcFetchError(buildV5Error()) as Error & Record<string, unknown>;
-    expect(sanitised).not.property('url');
     expect(sanitised).not.property('body');
     expect(sanitised).not.property('responseText');
+    expect(sanitised).not.property('requestBody');
+    // `url` is kept under v5's own key, reduced to a bare origin — the same
+    // treatment `info.requestUrl` has always had. Reducing to the origin
+    // rather than just dropping the query matters because some gateways put
+    // the key in the path.
+    expect(sanitised).property('url', 'https://host.example');
   });
 });
 
@@ -398,6 +431,271 @@ describe('sanitiseRpcFetchError — ethers error wrapped as VError/WError cause'
   });
 });
 
+describe('sanitiseRpcFetchError — keeps the library-native shape', () => {
+  // The sanitised clone keeps each library's own field names, so a consumer
+  // classifying a failure it is about to retry reads exactly what the
+  // library documents. What forces the clone is that the hazardous members
+  // are class instances: ethers' FetchRequest/FetchResponse keep everything
+  // in #private fields (they spread and JSON.stringify to `{}`, verified
+  // against ethers 6.16), and viem's `headers` is a fetch `Headers`. Each is
+  // projected to a plain object under the same key with the same sub-keys.
+  //
+  // The fixtures below stand in for those instances with plain objects of
+  // the same shape, which is what the projection reads through.
+  const SECRET = 'NATIVE_SHAPE_SECRET';
+  const TOKEN_URL = `https://node-gateway.example.com/internal/evm/137/${SECRET}?token=${SECRET}`;
+
+  function buildV6ServerError({
+    statusCode = 429,
+    statusMessage = 'Too Many Requests',
+    headers = {},
+    responseBody = null
+  }: {
+    statusCode?: number;
+    statusMessage?: string;
+    headers?: Record<string, string>;
+    responseBody?: string | null;
+  } = {}): Error {
+    return Object.assign(
+      new Error(
+        `server response ${statusCode} ${statusMessage} (request={  }, response={  }, info={ "requestUrl": "${TOKEN_URL}" }, code=SERVER_ERROR, version=6.16.0)`
+      ),
+      {
+        code: 'SERVER_ERROR',
+        shortMessage: `server response ${statusCode} ${statusMessage}`,
+        info: {
+          requestUrl: TOKEN_URL,
+          responseBody,
+          responseStatus: `${statusCode} ${statusMessage}`
+        },
+        request: {
+          url: TOKEN_URL,
+          method: 'POST',
+          headers: { authorization: `Bearer ${SECRET}` },
+          body: `{"method":"eth_getLogs"}`
+        },
+        response: { statusCode, statusMessage, headers }
+      }
+    );
+  }
+
+  function sanitisedOf(err: unknown): Error & Record<string, unknown> {
+    const sanitised = sanitiseRpcFetchError(err);
+    expect(sanitised).instanceOf(Error);
+    return sanitised as Error & Record<string, unknown>;
+  }
+
+  it('ethers v6: response and request survive as plain objects under their own keys', () => {
+    const sanitised = sanitisedOf(
+      buildV6ServerError({
+        headers: {
+          'retry-after': '30',
+          'credits-rate-reset': '12',
+          'content-type': 'application/json',
+          'ratelimit-remaining': '0'
+        },
+        responseBody: '{"error":{"code":-32005,"message":"rate limit exceeded"}}'
+      })
+    );
+
+    // Read exactly as ethers documents it.
+    expect(sanitised).nested.property('response.statusCode', 429);
+    expect(sanitised).nested.property('response.statusMessage', 'Too Many Requests');
+    expect(sanitised).nested.property('response.headers.retry-after', '30');
+    expect(sanitised).nested.property('response.headers.credits-rate-reset', '12');
+    expect(sanitised).nested.property('response.headers.content-type', 'application/json');
+    expect(sanitised).nested.property('response.headers.ratelimit-remaining', '0');
+    expect(sanitised).nested.property('request.method', 'POST');
+    expect(sanitised).nested.property('request.url', 'https://node-gateway.example.com');
+    expect(sanitised).property('code', 'SERVER_ERROR');
+    // v6's own info keeps its existing fields, values and types.
+    expect(sanitised).nested.property('info.requestUrl', 'https://node-gateway.example.com');
+    expect(sanitised).nested.property('info.responseStatus', '429 Too Many Requests');
+    expect(sanitised).nested.property(
+      'info.responseBody',
+      '{"error":{"code":-32005,"message":"rate limit exceeded"}}'
+    );
+    expect(JSON.stringify(sanitised)).not.contain(SECRET);
+  });
+
+  it('ethers v6: keeps ordinary response headers and drops only the sensitive ones', () => {
+    // The rule is redact-what-we-know, not permit-what-we-listed: a
+    // response header is ordinary debug metadata unless we can say it
+    // carries a credential. Dropping `x-request-id` or `server` because
+    // they are not on a list costs diagnostic value for no security gain.
+    const sanitised = sanitisedOf(
+      buildV6ServerError({
+        headers: {
+          'retry-after': '30',
+          'x-request-id': 'req-8f21',
+          server: 'envoy',
+          'x-envoy-upstream-service-time': '4021',
+          'cf-ray': '8ab-LHR',
+          'set-cookie': 'session=abc',
+          'www-authenticate': 'Bearer realm="rpc"',
+          'x-api-key': `${SECRET}`
+        }
+      })
+    );
+
+    // Kept: the library's own surface, left alone.
+    expect(sanitised).nested.property('response.headers.retry-after', '30');
+    expect(sanitised).nested.property('response.headers.x-request-id', 'req-8f21');
+    expect(sanitised).nested.property('response.headers.server', 'envoy');
+    expect(sanitised).nested.property('response.headers.x-envoy-upstream-service-time', '4021');
+    expect(sanitised).nested.property('response.headers.cf-ray', '8ab-LHR');
+    // Dropped: known credential carriers, by name and by pattern.
+    expect(sanitised).not.nested.property('response.headers.set-cookie');
+    expect(sanitised).not.nested.property('response.headers.www-authenticate');
+    expect(sanitised).not.nested.property('response.headers.x-api-key');
+    expect(JSON.stringify(sanitised)).not.contain(SECRET);
+  });
+
+  it('ethers v6: drops the request headers and body wholesale', () => {
+    // Request headers are the asymmetric case: that is where the token is
+    // sent, so the whole set goes rather than being filtered.
+    const sanitised = sanitisedOf(buildV6ServerError());
+    expect(sanitised).not.nested.property('request.headers');
+    expect(sanitised).not.nested.property('request.body');
+    expect(sanitised).nested.property('request.url', 'https://node-gateway.example.com');
+    expect(sanitised).nested.property('request.method', 'POST');
+    const serialised = JSON.stringify(sanitised);
+    expect(serialised).not.contain(SECRET);
+    expect(serialised).not.contain('eth_getLogs');
+  });
+
+  it('ethers v6: an empty-bodied gateway timeout is distinguishable from a rate limit', () => {
+    const sanitised = sanitisedOf(
+      buildV6ServerError({ statusCode: 504, statusMessage: 'Gateway Timeout', responseBody: null })
+    );
+    expect(sanitised).nested.property('response.statusCode', 504);
+    expect(sanitised).nested.property('info.responseBody', null);
+  });
+
+  it('ethers v5: its own fields survive, with the URL reduced to an origin', () => {
+    // v5's web layer attaches every Logger.throwError param at the top
+    // level — the safe ones next to `requestBody` and the response body.
+    const v5 = Object.assign(
+      new Error(`bad response (status=429, url="${TOKEN_URL}", code=SERVER_ERROR, version=5.8.0)`),
+      {
+        code: 'SERVER_ERROR',
+        reason: 'bad response',
+        url: TOKEN_URL,
+        status: 429,
+        headers: { 'retry-after': '15', 'x-request-id': 'req-1', 'set-cookie': 'session=abc' },
+        body: '{"error":{"code":-32005}}',
+        requestBody: '{"method":"eth_getLogs"}',
+        requestMethod: 'POST'
+      }
+    );
+
+    const sanitised = sanitisedOf(v5);
+    expect(sanitised).property('status', 429);
+    expect(sanitised).property('code', 'SERVER_ERROR');
+    expect(sanitised).property('reason', 'bad response');
+    expect(sanitised).property('requestMethod', 'POST');
+    expect(sanitised).property('url', 'https://node-gateway.example.com');
+    expect(sanitised).nested.property('headers.retry-after', '15');
+    expect(sanitised).nested.property('headers.x-request-id', 'req-1');
+    expect(sanitised).not.nested.property('headers.set-cookie');
+    // The pre-existing info shape is untouched.
+    expect(sanitised).nested.property('info.requestUrl', 'https://node-gateway.example.com');
+    expect(sanitised).nested.property('info.responseStatus', 429);
+    const serialised = JSON.stringify(sanitised);
+    expect(serialised).not.contain(SECRET);
+    expect(serialised).not.contain('eth_getLogs');
+  });
+
+  it('viem HttpRequestError: status and the Headers instance land under their own keys', () => {
+    // viem hands back a real fetch `Headers`, not a record: enumeration is
+    // the only way in, and JSON.stringify of one yields `{}`.
+    const viemHttp = Object.assign(
+      new Error(
+        `HTTP request failed.\n\nStatus: 429\nURL: ${TOKEN_URL}\nRequest body: {"method":"eth_getLogs"}`
+      ),
+      {
+        name: 'HttpRequestError',
+        shortMessage: 'HTTP request failed.',
+        metaMessages: ['Status: 429', `URL: ${TOKEN_URL}`],
+        status: 429,
+        headers: new Headers({
+          'retry-after': '20',
+          'x-request-id': 'req-2',
+          'set-cookie': 'session=abc'
+        }),
+        url: TOKEN_URL,
+        body: { method: 'eth_getLogs' }
+      }
+    );
+
+    const sanitised = sanitisedOf(viemHttp);
+    expect(sanitised).property('status', 429);
+    expect(sanitised).property('url', 'https://node-gateway.example.com');
+    expect(sanitised).nested.property('headers.retry-after', '20');
+    expect(sanitised).nested.property('headers.x-request-id', 'req-2');
+    expect(sanitised).not.nested.property('headers.set-cookie');
+    // metaMessages keep viem's own key, with the URL reduced to an origin.
+    expect(JSON.stringify(sanitised.metaMessages)).contain('https://node-gateway.example.com');
+    const serialised = JSON.stringify(sanitised);
+    expect(serialised).not.contain(SECRET);
+    expect(serialised).not.contain('eth_getLogs');
+  });
+
+  it('viem RpcRequestError: the numeric JSON-RPC code and details survive', () => {
+    const viemRpc = Object.assign(
+      new Error(`RPC Request failed.\n\nURL: ${TOKEN_URL}\n\nDetails: execution reverted`),
+      {
+        name: 'RpcRequestError',
+        shortMessage: 'RPC Request failed.',
+        metaMessages: [`URL: ${TOKEN_URL}`],
+        details: 'execution reverted',
+        code: -32000,
+        url: TOKEN_URL
+      }
+    );
+
+    const sanitised = sanitisedOf(viemRpc);
+    // viem's code is numeric, unlike ethers' string code — it survives as-is
+    // under the same key.
+    expect(sanitised).property('code', -32000);
+    expect(sanitised).property('details', 'execution reverted');
+    expect(sanitised).property('url', 'https://node-gateway.example.com');
+    expect(JSON.stringify(sanitised)).not.contain(SECRET);
+  });
+
+  // Every viem BaseError subclass that carries a URL is in the fingerprint.
+  // viem's own getUrl strips basic-auth credentials but neither a `?token=`
+  // query nor a key in the path, so each of these leaks without detection —
+  // and TimeoutError / SocketClosedError are the shapes a failing endpoint
+  // produces most often.
+  const VIEM_URL_BEARING = [
+    'HttpRequestError',
+    'RpcRequestError',
+    'TimeoutError',
+    'SocketClosedError',
+    'WebSocketRequestError'
+  ] as const;
+
+  it.each(VIEM_URL_BEARING)('viem %s: the token never survives sanitisation', (name) => {
+    const err = Object.assign(
+      new Error(`Something failed.\n\nURL: ${TOKEN_URL}\nRequest body: {"method":"eth_call"}`),
+      {
+        name,
+        shortMessage: 'Something failed.',
+        metaMessages: [`URL: ${TOKEN_URL}`],
+        url: TOKEN_URL
+      }
+    );
+    err.stack = `${name}: Something failed.\n    at fetch (${TOKEN_URL})`;
+
+    const sanitised = sanitisedOf(err);
+    expect(sanitised).property('url', 'https://node-gateway.example.com');
+    expect(sanitised.message).not.contain(SECRET);
+    expect(sanitised.stack ?? '').not.contain(SECRET);
+    expect(JSON.stringify(sanitised)).not.contain(SECRET);
+  });
+});
+
 describe('serializeError — auto-sanitises RPC fetch errors', () => {
   // The whole reason sanitiseRpcFetchError lives in @polygonlabs/verror
   // rather than @polygonlabs/logger: every persistence path that hits
@@ -475,6 +773,56 @@ describe('serializeError — auto-sanitises RPC fetch errors', () => {
     expect(json).property('message', 'database connection reset');
     expect(json).property('shortMessage', 'database connection reset');
     expect((json as { info?: Record<string, unknown> }).info).property('connectionId', 42);
+  });
+
+  it('keeps the native fields on the serialised record', () => {
+    // The consumer-facing half of the contract: classification happens off
+    // the serialised shape (a persisted `lastError`, a status route body, a
+    // log line), so the library's own fields have to survive the trip
+    // through `serializeError`, not just `sanitiseRpcFetchError`.
+    const SECRET = 'SERIALIZE_NATIVE_SECRET';
+    const url = `https://node-gateway.example.com/internal/evm/137?token=${SECRET}`;
+    const rpcErr = Object.assign(new Error(`server response 429 Too Many Requests (…${url})`), {
+      code: 'SERVER_ERROR',
+      shortMessage: 'server response 429 Too Many Requests',
+      info: { requestUrl: url, responseBody: null, responseStatus: '429 Too Many Requests' },
+      request: { url, method: 'POST' },
+      response: {
+        statusCode: 429,
+        statusMessage: 'Too Many Requests',
+        headers: { 'retry-after': '30' }
+      }
+    });
+    const wrapped = new VError('fetching logs for block range', { cause: rpcErr });
+
+    const json = serializeError(wrapped);
+    expect(JSON.stringify(json)).not.contain(SECRET);
+    const cause = (json as { cause?: Record<string, unknown> }).cause ?? {};
+    expect(cause).nested.property('response.statusCode', 429);
+    expect(cause).nested.property('response.headers.retry-after', '30');
+    expect(cause).nested.property('request.url', 'https://node-gateway.example.com');
+    expect(cause).property('code', 'SERVER_ERROR');
+    // The fixed keys keep their existing names, types and values.
+    expect(cause).property('shortMessage', 'server response 429 Too Many Requests');
+    expect(cause).nested.property('info.responseStatus', '429 Too Many Requests');
+  });
+
+  it('does not spread an unsanitised error own fields onto the record', () => {
+    // The spread is deliberately limited to sanitised clones. An error with
+    // no RPC fingerprint has been through no projection, so its own fields
+    // may hold raw URLs — viem keeps the tokenised URL on a plain `url`
+    // property — and copying them onto the record would be the leak this
+    // whole module exists to prevent.
+    const SECRET = 'UNSANITISED_SPREAD_SECRET';
+    const leaky = Object.assign(new Error('some unrelated failure'), {
+      url: `https://host.example/rpc?token=${SECRET}`,
+      apiKey: SECRET
+    });
+
+    const json = serializeError(leaky);
+    expect(json).not.property('url');
+    expect(json).not.property('apiKey');
+    expect(JSON.stringify(json)).not.contain(SECRET);
   });
 
   it('reproduces the l2-spol-rebalancer /service-status leak end-to-end', () => {
