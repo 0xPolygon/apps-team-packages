@@ -14,7 +14,9 @@ Previously the sanitised error kept the message, stack, `code` and `info` and dr
 
 ## Redaction
 
-Every URL is reduced to a bare origin — not merely query-stripped, since some providers put the key in the path — including inside `metaMessages`. Request headers and request bodies are never copied. Response headers pass an allowlist (`retry-after`, `credits-rate-reset`, `ratelimit-*`, `content-type`), so `authorization`, `cookie` and `set-cookie` are excluded by construction rather than by being named. The field spread applies only to errors that went through sanitisation, never to an unrecognised error whose own fields have been through no projection.
+Only what is known to be dangerous is removed; everything else is left as the library had it.
+
+Every URL is reduced to a bare origin — not merely query-stripped, since some providers put the key in the path — including inside `metaMessages`. Request headers and request bodies are never copied: a request header set is small and credential-bearing by design, so the whole set goes. Response headers are the opposite — mostly debug metadata — so they are kept except for the names known to carry a credential (`authorization`, `cookie`, `set-cookie`, `www-authenticate` and relatives, plus any name containing `token`, `secret`, `api-key`, `password` or `credential`). `x-request-id`, `server`, `cf-ray` and `x-envoy-upstream-service-time` therefore survive for diagnosis. The field spread applies only to errors that went through sanitisation, never to an unrecognised error whose own fields have been through no projection.
 
 ## Wider viem coverage
 

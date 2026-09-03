@@ -490,29 +490,50 @@ describe('sanitiseRpcFetchError — keeps the library-native shape', () => {
     expect(JSON.stringify(sanitised)).not.contain(SECRET);
   });
 
-  it('ethers v6: drops request headers, request body and non-allowlisted response headers', () => {
+  it('ethers v6: keeps ordinary response headers and drops only the sensitive ones', () => {
+    // The rule is redact-what-we-know, not permit-what-we-listed: a
+    // response header is ordinary debug metadata unless we can say it
+    // carries a credential. Dropping `x-request-id` or `server` because
+    // they are not on a list costs diagnostic value for no security gain.
     const sanitised = sanitisedOf(
       buildV6ServerError({
         headers: {
           'retry-after': '30',
+          'x-request-id': 'req-8f21',
+          server: 'envoy',
+          'x-envoy-upstream-service-time': '4021',
+          'cf-ray': '8ab-LHR',
           'set-cookie': 'session=abc',
-          authorization: `Bearer ${SECRET}`,
-          'x-internal-route': 'pool-7'
+          'www-authenticate': 'Bearer realm="rpc"',
+          'x-api-key': `${SECRET}`
         }
       })
     );
 
-    expect(sanitised).nested.property('response.headers.retry-after', '30');
     const headers = (sanitised.response as { headers?: Record<string, string> }).headers ?? {};
+    // Kept: the library's own surface, left alone.
+    expect(headers).property('retry-after', '30');
+    expect(headers).property('x-request-id', 'req-8f21');
+    expect(headers).property('server', 'envoy');
+    expect(headers).property('x-envoy-upstream-service-time', '4021');
+    expect(headers).property('cf-ray', '8ab-LHR');
+    // Dropped: known credential carriers, by name and by pattern.
     expect(headers).not.property('set-cookie');
-    expect(headers).not.property('authorization');
-    expect(headers).not.property('x-internal-route');
-    // The request keeps only origin + method: no headers, no body.
+    expect(headers).not.property('www-authenticate');
+    expect(headers).not.property('x-api-key');
+    expect(JSON.stringify(sanitised)).not.contain(SECRET);
+  });
+
+  it('ethers v6: drops the request headers and body wholesale', () => {
+    // Request headers are the asymmetric case: that is where the token is
+    // sent, so the whole set goes rather than being filtered.
+    const sanitised = sanitisedOf(buildV6ServerError());
     expect(sanitised.request).not.property('headers');
     expect(sanitised.request).not.property('body');
+    expect(sanitised).nested.property('request.url', 'https://node-gateway.example.com');
+    expect(sanitised).nested.property('request.method', 'POST');
     const serialised = JSON.stringify(sanitised);
     expect(serialised).not.contain(SECRET);
-    expect(serialised).not.contain('session=abc');
     expect(serialised).not.contain('eth_getLogs');
   });
 
@@ -534,7 +555,7 @@ describe('sanitiseRpcFetchError — keeps the library-native shape', () => {
         reason: 'bad response',
         url: TOKEN_URL,
         status: 429,
-        headers: { 'retry-after': '15', 'set-cookie': 'session=abc' },
+        headers: { 'retry-after': '15', 'x-request-id': 'req-1', 'set-cookie': 'session=abc' },
         body: '{"error":{"code":-32005}}',
         requestBody: '{"method":"eth_getLogs"}',
         requestMethod: 'POST'
@@ -548,6 +569,7 @@ describe('sanitiseRpcFetchError — keeps the library-native shape', () => {
     expect(sanitised).property('requestMethod', 'POST');
     expect(sanitised).property('url', 'https://node-gateway.example.com');
     expect(sanitised).nested.property('headers.retry-after', '15');
+    expect(sanitised).nested.property('headers.x-request-id', 'req-1');
     expect(sanitised.headers).not.property('set-cookie');
     // The pre-existing info shape is untouched.
     expect(sanitised.info).property('requestUrl', 'https://node-gateway.example.com');
@@ -569,7 +591,11 @@ describe('sanitiseRpcFetchError — keeps the library-native shape', () => {
         shortMessage: 'HTTP request failed.',
         metaMessages: ['Status: 429', `URL: ${TOKEN_URL}`],
         status: 429,
-        headers: new Headers({ 'retry-after': '20', 'set-cookie': 'session=abc' }),
+        headers: new Headers({
+          'retry-after': '20',
+          'x-request-id': 'req-2',
+          'set-cookie': 'session=abc'
+        }),
         url: TOKEN_URL,
         body: { method: 'eth_getLogs' }
       }
@@ -579,6 +605,7 @@ describe('sanitiseRpcFetchError — keeps the library-native shape', () => {
     expect(sanitised).property('status', 429);
     expect(sanitised).property('url', 'https://node-gateway.example.com');
     expect(sanitised).nested.property('headers.retry-after', '20');
+    expect(sanitised).nested.property('headers.x-request-id', 'req-2');
     expect(sanitised.headers).not.property('set-cookie');
     // metaMessages keep viem's own key, with the URL reduced to an origin.
     expect(JSON.stringify(sanitised.metaMessages)).contain('https://node-gateway.example.com');

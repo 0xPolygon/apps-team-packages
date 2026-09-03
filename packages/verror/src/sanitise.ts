@@ -92,24 +92,54 @@ function tryOrigin(url: string): string {
 }
 
 /**
- * Response headers that survive projection. Two reasons to keep any of
- * them: retry pacing (`retry-after`, `credits-rate-reset` and the
- * `ratelimit-*` family tell a caller how long the provider wants it to
- * wait, instead of it having to guess) and interpreting the body
- * (`content-type` distinguishes a JSON-RPC error from an HTML error page
- * a load balancer produced).
+ * Response headers that are redacted. Everything else is kept.
  *
- * An allowlist, not a denylist: a provider that starts returning an
- * auth-bearing response header can then never widen what gets copied,
- * and `authorization` / `cookie` / `set-cookie` are excluded by
- * construction rather than by remembering to name them. Add an entry
- * only after checking it cannot carry a credential.
+ * A denylist, not an allowlist, because the job here is to leave the
+ * library's own surface alone and remove only what we know is dangerous.
+ * We know an `authorization` or `set-cookie` value is a credential; we do
+ * *not* know that `x-request-id`, `server`, `age`, `cf-ray` or
+ * `x-envoy-upstream-service-time` are unsafe — they are ordinary debug
+ * metadata, and dropping them because they weren't on a list nobody
+ * maintains loses real diagnostic value for no security gain.
+ *
+ * The asymmetry with *request* headers is deliberate and load-bearing:
+ * a request header set is small and credential-bearing by design (that
+ * is where the token is sent), so `projectRequest` drops all of them.
+ * Response headers are the opposite — mostly metadata, with a short and
+ * well-known sensitive set.
+ *
+ * Values are URL-stripped regardless, so a header echoing a tokenised
+ * URL back is covered by that pass rather than by this list.
  */
-const SAFE_HEADER_NAMES = new Set(['retry-after', 'credits-rate-reset', 'content-type']);
-const SAFE_HEADER_PREFIXES = ['ratelimit-'];
+const SENSITIVE_HEADER_NAMES = new Set([
+  'authorization',
+  'proxy-authorization',
+  'cookie',
+  'set-cookie',
+  'set-cookie2',
+  'www-authenticate',
+  'proxy-authenticate'
+]);
 
-function isSafeHeaderName(name: string): boolean {
-  return SAFE_HEADER_NAMES.has(name) || SAFE_HEADER_PREFIXES.some((p) => name.startsWith(p));
+/**
+ * Substrings that mark a header name as carrying a credential whatever
+ * the provider chose to call it — `x-api-key`, `x-amz-security-token`,
+ * `x-refresh-secret`. Costs a dropped debug field in the rare false
+ * positive; the alternative costs a leak.
+ */
+const SENSITIVE_HEADER_PATTERNS = [
+  'token',
+  'secret',
+  'api-key',
+  'apikey',
+  'password',
+  'credential'
+];
+
+function isSensitiveHeaderName(name: string): boolean {
+  return (
+    SENSITIVE_HEADER_NAMES.has(name) || SENSITIVE_HEADER_PATTERNS.some((p) => name.includes(p))
+  );
 }
 
 /**
@@ -131,7 +161,7 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 /**
  * Project a header bag — a fetch `Headers` instance or a plain record —
- * to a plain record of the allowlisted entries. Names are lowercased so
+ * to a plain record, minus the sensitive names. Names are lowercased so
  * the result is uniform across libraries and case-insensitive lookup
  * isn't needed downstream.
  */
@@ -142,7 +172,7 @@ function projectHeaders(headers: unknown): Record<string, string> | undefined {
   const safe: Record<string, string> = {};
   const keep = (value: unknown, key: string): void => {
     const name = key.toLowerCase();
-    if (!isSafeHeaderName(name) || typeof value !== 'string') return;
+    if (isSensitiveHeaderName(name) || typeof value !== 'string') return;
     safe[name] = stripUrlsInPlace(value);
   };
 
