@@ -398,6 +398,237 @@ describe('sanitiseRpcFetchError — ethers error wrapped as VError/WError cause'
   });
 });
 
+describe('sanitiseRpcFetchError — preserved response facts', () => {
+  // A caller that is about to retry an RPC failure has to classify it
+  // first: rate-limited (back off for the interval the provider named),
+  // upstream 5xx (retry another endpoint), or an empty-bodied gateway
+  // timeout (the request may still be in flight). Every field asserted
+  // here exists so that decision can be made from the sanitised error
+  // instead of from state captured at the throw site.
+  //
+  // The ethers fixtures mirror the property layout of a real ethers 6.16
+  // `FetchResponse.assertOk()` throw — own props `code`, `error`, `info`,
+  // `request`, `response`, `shortMessage`, where `info` holds only
+  // `requestUrl` / `responseBody` / the compound `responseStatus` string
+  // and the numeric status lives on the `FetchResponse` at `err.response`.
+  const SECRET = 'PRESERVE_FACTS_SECRET';
+  const TOKEN_URL = `https://node-gateway.example.com/internal/evm/137?token=${SECRET}`;
+
+  function buildV6ServerError({
+    statusCode,
+    statusMessage,
+    headers,
+    responseBody,
+    withResponse = true
+  }: {
+    statusCode: number;
+    statusMessage: string;
+    headers?: Record<string, string>;
+    responseBody?: string | null;
+    withResponse?: boolean;
+  }): Error {
+    const body = responseBody ?? null;
+    const err = Object.assign(
+      new Error(
+        `server response ${statusCode} ${statusMessage} (request={  }, response={  }, info={ "requestUrl": "${TOKEN_URL}" }, code=SERVER_ERROR, version=6.16.0)`
+      ),
+      {
+        code: 'SERVER_ERROR',
+        shortMessage: `server response ${statusCode} ${statusMessage}`,
+        info: {
+          requestUrl: TOKEN_URL,
+          responseBody: body,
+          responseStatus: `${statusCode} ${statusMessage}`
+        }
+      }
+    );
+    if (withResponse) {
+      // Stand-in for the live `FetchResponse`: the real one also holds the
+      // body buffer and a back-reference to the `FetchRequest` carrying the
+      // auth header and the tokenised URL, which is exactly why the clone
+      // reads primitives off it rather than copying it.
+      Object.assign(err, {
+        request: { url: TOKEN_URL, method: 'POST', headers: { authorization: `Bearer ${SECRET}` } },
+        response: { statusCode, statusMessage, headers: headers ?? {} }
+      });
+    }
+    return err;
+  }
+
+  function infoOf(err: unknown): Record<string, unknown> {
+    const sanitised = sanitiseRpcFetchError(err);
+    expect(sanitised).instanceOf(Error);
+    const info = (sanitised as Error & { info?: Record<string, unknown> }).info;
+    expect(info).a('object');
+    return info ?? {};
+  }
+
+  it('ethers v6: preserves the numeric status, status text, retry headers and JSON-RPC error', () => {
+    const info = infoOf(
+      buildV6ServerError({
+        statusCode: 429,
+        statusMessage: 'Too Many Requests',
+        headers: { 'retry-after': '30', 'credits-rate-reset': '12', 'set-cookie': 'session=abc' },
+        responseBody: '{"error":{"code":-32005,"message":"rate limit exceeded"}}'
+      })
+    );
+
+    expect(info).property('responseStatusCode', 429);
+    expect(info).property('responseStatusMessage', 'Too Many Requests');
+    expect(info).property('responseRetryAfter', '30');
+    expect(info).property('responseRateReset', '12');
+    expect(info).property('rpcErrorCode', -32005);
+    expect(info).property('rpcErrorMessage', 'rate limit exceeded');
+    // The origin survives; the token does not, anywhere.
+    expect(info).property('requestUrl', 'https://node-gateway.example.com');
+    expect(JSON.stringify(info)).not.contain(SECRET);
+  });
+
+  it('ethers v6: keeps only allowlisted response headers, never the request object', () => {
+    const sanitised = sanitiseRpcFetchError(
+      buildV6ServerError({
+        statusCode: 429,
+        statusMessage: 'Too Many Requests',
+        headers: { 'retry-after': '30', 'set-cookie': 'session=abc', authorization: 'Bearer x' }
+      })
+    ) as Error & Record<string, unknown>;
+
+    // Neither the FetchRequest/FetchResponse stand-ins nor any header
+    // outside the allowlist reaches the clone.
+    expect(sanitised).not.property('request');
+    expect(sanitised).not.property('response');
+    const serialised = JSON.stringify(sanitised.info);
+    expect(serialised).not.contain('set-cookie');
+    expect(serialised).not.contain('session=abc');
+    expect(serialised).not.contain('Bearer');
+  });
+
+  it('ethers v6: an empty-bodied gateway timeout still reports its status', () => {
+    const info = infoOf(
+      buildV6ServerError({ statusCode: 504, statusMessage: 'Gateway Timeout', responseBody: null })
+    );
+    expect(info).property('responseStatusCode', 504);
+    expect(info).property('responseBody', null);
+    // Nothing to parse, so no JSON-RPC fields are invented.
+    expect(info).not.property('rpcErrorCode');
+    expect(info).not.property('rpcErrorMessage');
+  });
+
+  it('ethers v6: falls back to the compound responseStatus string when no response object is attached', () => {
+    // Not every v6 throw site attaches `err.response`; the status is then
+    // only recoverable from the `"503 Service Unavailable"` compound string
+    // that `assertOk` writes into `info.responseStatus`.
+    const info = infoOf(
+      buildV6ServerError({
+        statusCode: 503,
+        statusMessage: 'Service Unavailable',
+        withResponse: false
+      })
+    );
+    expect(info).property('responseStatusCode', 503);
+    expect(info).property('responseStatus', '503 Service Unavailable');
+  });
+
+  it('ethers v5: preserves the numeric status and retry headers from the top-level params', () => {
+    // v5's web layer attaches every `Logger.throwError` param at the top
+    // level — the safe ones (`status`, `headers`, `body`) next to the leaky
+    // ones (`url`, `requestBody`, `requestMethod`).
+    const v5 = Object.assign(
+      new Error(`bad response (status=429, url="${TOKEN_URL}", code=SERVER_ERROR, version=5.8.0)`),
+      {
+        code: 'SERVER_ERROR',
+        reason: 'bad response',
+        url: TOKEN_URL,
+        status: 429,
+        headers: { 'retry-after': '15', 'credits-rate-reset': '4' },
+        body: '{"error":{"code":-32005,"message":"rate limit exceeded"}}',
+        requestBody: '{"method":"eth_getLogs","params":[{}]}',
+        requestMethod: 'POST'
+      }
+    );
+
+    const info = infoOf(v5);
+    expect(info).property('responseStatusCode', 429);
+    expect(info).property('responseRetryAfter', '15');
+    expect(info).property('responseRateReset', '4');
+    expect(info).property('rpcErrorCode', -32005);
+    expect(info).property('rpcErrorMessage', 'rate limit exceeded');
+    // The pre-existing numeric `responseStatus` field is unchanged.
+    expect(info).property('responseStatus', 429);
+    expect(JSON.stringify(info)).not.contain(SECRET);
+    expect(JSON.stringify(info)).not.contain('eth_getLogs');
+  });
+
+  it('viem HttpRequestError: preserves the status and reads retry headers off the Headers instance', () => {
+    // viem hands back a real fetch `Headers`, not a record — `.get()` is
+    // the only way in, and `JSON.stringify` of one yields `{}`.
+    const viemHttp = Object.assign(
+      new Error(
+        `HTTP request failed.\n\nStatus: 429\nURL: ${TOKEN_URL}\nRequest body: {"method":"eth_getLogs"}\n\nVersion: viem@2.55.2`
+      ),
+      {
+        name: 'HttpRequestError',
+        shortMessage: 'HTTP request failed.',
+        metaMessages: [`Status: 429`, `URL: ${TOKEN_URL}`],
+        status: 429,
+        headers: new Headers({ 'retry-after': '20', 'credits-rate-reset': '7' }),
+        url: TOKEN_URL,
+        body: { method: 'eth_getLogs', params: [{}] }
+      }
+    );
+
+    const info = infoOf(viemHttp);
+    expect(info).property('responseStatusCode', 429);
+    expect(info).property('responseRetryAfter', '20');
+    expect(info).property('responseRateReset', '7');
+    expect(info).property('requestUrl', 'https://node-gateway.example.com');
+    expect(JSON.stringify(info)).not.contain(SECRET);
+    // The request payload viem carries in `body` is not republished.
+    expect(JSON.stringify(info)).not.contain('eth_getLogs');
+  });
+
+  it('viem RpcRequestError: preserves the numeric JSON-RPC code and message', () => {
+    const viemRpc = Object.assign(
+      new Error(
+        `RPC Request failed.\n\nURL: ${TOKEN_URL}\nRequest body: {"method":"eth_call"}\n\nDetails: execution reverted\nVersion: viem@2.55.2`
+      ),
+      {
+        name: 'RpcRequestError',
+        shortMessage: 'RPC Request failed.',
+        metaMessages: [`URL: ${TOKEN_URL}`],
+        details: 'execution reverted',
+        code: -32000,
+        url: TOKEN_URL
+      }
+    );
+
+    const info = infoOf(viemRpc);
+    expect(info).property('rpcErrorCode', -32000);
+    expect(info).property('rpcErrorMessage', 'execution reverted');
+    expect(info).property('requestUrl', 'https://node-gateway.example.com');
+    // The numeric JSON-RPC code must not be mistaken for the ethers string
+    // code, which stays absent for viem errors.
+    expect(sanitiseRpcFetchError(viemRpc)).not.property('code');
+  });
+
+  it('URL-strips every string lifted into info', () => {
+    // `info` is the one part of the clone that downstream code does not
+    // strip — callers own that namespace — so anything the detectors add
+    // has to arrive already clean, even when the provider echoes the
+    // request URL back inside its own error text.
+    const info = infoOf(
+      buildV6ServerError({
+        statusCode: 400,
+        statusMessage: `Bad Request for ${TOKEN_URL}`,
+        responseBody: `{"error":{"code":-32600,"message":"invalid request to ${TOKEN_URL}"}}`
+      })
+    );
+    expect(info).property('responseStatusMessage').not.contain(SECRET);
+    expect(info).property('rpcErrorMessage').not.contain(SECRET);
+    expect(info.rpcErrorMessage).contain('https://node-gateway.example.com');
+  });
+});
+
 describe('serializeError — auto-sanitises RPC fetch errors', () => {
   // The whole reason sanitiseRpcFetchError lives in @polygonlabs/verror
   // rather than @polygonlabs/logger: every persistence path that hits
@@ -475,6 +706,32 @@ describe('serializeError — auto-sanitises RPC fetch errors', () => {
     expect(json).property('message', 'database connection reset');
     expect(json).property('shortMessage', 'database connection reset');
     expect((json as { info?: Record<string, unknown> }).info).property('connectionId', 42);
+  });
+
+  it('the failed response status survives serializeError', () => {
+    // The consumer-facing half of the contract: classification happens off
+    // the serialised shape (a persisted `lastError`, a status route body, a
+    // log line), so the response facts have to survive the trip through
+    // `serializeError`, not just `sanitiseRpcFetchError`.
+    const SECRET = 'SERIALIZE_STATUS_SECRET';
+    const url = `https://node-gateway.example.com/internal/evm/137?token=${SECRET}`;
+    const rpcErr = Object.assign(new Error(`server response 429 Too Many Requests (…${url})`), {
+      code: 'SERVER_ERROR',
+      shortMessage: 'server response 429 Too Many Requests',
+      info: { requestUrl: url, responseBody: null, responseStatus: '429 Too Many Requests' },
+      response: {
+        statusCode: 429,
+        statusMessage: 'Too Many Requests',
+        headers: { 'retry-after': '30' }
+      }
+    });
+    const wrapped = new VError('fetching logs for block range', { cause: rpcErr });
+
+    const json = serializeError(wrapped);
+    expect(JSON.stringify(json)).not.contain(SECRET);
+    const causeInfo = (json as { cause?: { info?: Record<string, unknown> } }).cause?.info;
+    expect(causeInfo).property('responseStatusCode', 429);
+    expect(causeInfo).property('responseRetryAfter', '30');
   });
 
   it('reproduces the l2-spol-rebalancer /service-status leak end-to-end', () => {
