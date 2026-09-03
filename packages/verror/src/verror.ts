@@ -27,7 +27,8 @@ export function serializeError(err: unknown): Record<string, unknown> | undefine
   // is already URL-stripped. The clone chain produced by sanitisation is
   // plain Errors (with `name`, `info`, `shortMessage` preserved where
   // present), so the plain-Error branch below carries those through.
-  const safe = sanitiseRpcFetchError(err) ?? err;
+  const sanitised = sanitiseRpcFetchError(err);
+  const safe = sanitised ?? err;
   // VError (and subclasses like HTTPError) already have toJSON — delegate so
   // that subclass-specific fields (statusCode, errors, etc.) are included.
   // Sanitised clones are plain Errors and fall through to the plain branch.
@@ -39,9 +40,23 @@ export function serializeError(err: unknown): Record<string, unknown> | undefine
   // the source (sanitised VError clones carry both); plain Errors without
   // them fall back to `message` and `{}` respectively, matching the
   // pre-sanitisation behaviour.
+  //
+  // A sanitised clone's other own fields are spread through ahead of those,
+  // so an RPC error keeps the library's own keys — ethers v6's `code` and
+  // projected `response`/`request`, viem's `status`/`details`/`url` — and a
+  // consumer reads `record.response.statusCode` exactly as it would have
+  // read `err.response.statusCode`. The fixed keys below are written after
+  // the spread, so their names, types and values are unchanged.
+  //
+  // Only a *sanitised* clone is spread. An unsanitised error's own fields
+  // have been through no projection and can hold live library objects and
+  // raw URLs — viem keeps the tokenised URL on a plain `err.url` — so
+  // copying them onto the record would be the very leak this guards.
+  const native = sanitised ? { ...sanitised } : {};
   const sourceShort = (safe as { shortMessage?: unknown }).shortMessage;
   const sourceInfo = (safe as { info?: unknown }).info;
   return {
+    ...native,
     name: safe.name,
     message: safe.message,
     shortMessage: typeof sourceShort === 'string' ? sourceShort : safe.message,

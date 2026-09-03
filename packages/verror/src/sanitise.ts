@@ -1,19 +1,20 @@
 /**
  * RPC fetch errors — the ones a JSON-RPC client throws when an HTTP
  * request to a node fails — embed the full request URL (including any
- * `?token=<secret>`) in multiple places on the error. Shape differs by
- * library:
+ * `?token=<secret>`, and for some gateways a key in the URL *path*) in
+ * multiple places on the error. Shape differs by library:
  *
- *   - **ethers v6** nests it at `err.info.requestUrl`; `err.shortMessage`
+ *   - **ethers v6** nests it at `err.info.requestUrl` and on the
+ *     top-level `err.request`/`err.response` pair; `err.shortMessage`
  *     is a safe summary ("server response 401 Unauthorized", "timeout",
  *     etc.); `err.message` and `err.stack` echo the full URL in their
  *     compound text.
  *   - **ethers v5** exposes it at top-level `err.url`; `err.reason` is a
  *     safe summary ("bad response", "missing response", etc.);
  *     `err.message` and `err.stack` echo the full URL the same way.
- *   - **viem** carries it only inside its multi-line compound `message`
- *     (and `metaMessages`) — `RpcRequestError` and `HttpRequestError`
- *     are the two URL-bearing classes. Every wrapping viem error
+ *   - **viem** carries it on a plain `err.url` property, inside its
+ *     multi-line compound `message`, and in the `metaMessages` array
+ *     that its `BaseError` builds. Every wrapping viem error
  *     (`ContractFunctionExecutionError`, `EstimateGasExecutionError`,
  *     etc.) echoes the URL too because viem builds each parent's
  *     `message` from the child's compound text.
@@ -31,6 +32,32 @@
  * RPC error is the outermost throw or nested one or more levels deep,
  * and the full wrapping chain is preserved in the sanitised clone so
  * operators still see what the service was attempting.
+ *
+ * ## Redact, don't re-describe
+ *
+ * The sanitised clone keeps each library's **own field names and
+ * structure** — same keys, scrubbed values. A consumer reads
+ * `err.response.statusCode` on an ethers v6 error or `err.status` on a
+ * viem one exactly as those libraries document, so nothing here invents
+ * a parallel vocabulary that would have to be learned, kept in sync, and
+ * mapped back.
+ *
+ * What forces the clone rather than in-place redaction is that the
+ * hazardous members are **class instances**: ethers' `FetchRequest`
+ * holds the tokenised URL, the auth headers and the request body, and
+ * both it and `FetchResponse` keep everything in `#private` fields — so
+ * they survive neither `JSON.stringify` nor a spread as anything but
+ * `{}`, and their contents are reachable only through getters. viem's
+ * `headers` is a fetch `Headers` instance with the same problem. Each is
+ * therefore **projected** to a plain object under the same key with the
+ * same sub-keys, carrying only the members that cannot hold a
+ * credential.
+ *
+ * This projection is an **egress** step, applied where an error leaves
+ * the process (the pino `err` serializer, `serializeError`,
+ * `VError.toJSON`). In-process code keeps the genuine ethers/viem
+ * instance with its full behaviour; only what gets written out is
+ * projected.
  *
  * Lives in `@polygonlabs/verror` rather than `@polygonlabs/logger`
  * because it is an Error primitive — peer with `cause()`, `info()`,
@@ -65,128 +92,110 @@ function tryOrigin(url: string): string {
 }
 
 /**
- * Response headers copied onto the sanitised `info`, mapped to the flat
- * field name each lands under. Retry pacing is the point: a consumer that
- * can see `retry-after` (standard) or `credits-rate-reset` (what the node
- * gateway returns) can back off for the interval the provider actually
- * asked for instead of guessing at one. Both are scheduling hints with no
- * credential surface.
+ * Response headers that survive projection. Two reasons to keep any of
+ * them: retry pacing (`retry-after`, `credits-rate-reset` and the
+ * `ratelimit-*` family tell a caller how long the provider wants it to
+ * wait, instead of it having to guess) and interpreting the body
+ * (`content-type` distinguishes a JSON-RPC error from an HTML error page
+ * a load balancer produced).
  *
- * This is an allowlist rather than a denylist so that a provider which
- * starts returning an auth-bearing response header can never widen what
- * gets copied. Add a name here only after checking it cannot carry a
- * credential.
+ * An allowlist, not a denylist: a provider that starts returning an
+ * auth-bearing response header can then never widen what gets copied,
+ * and `authorization` / `cookie` / `set-cookie` are excluded by
+ * construction rather than by remembering to name them. Add an entry
+ * only after checking it cannot carry a credential.
  */
-const SAFE_RESPONSE_HEADERS: Record<string, string> = {
-  'retry-after': 'responseRetryAfter',
-  'credits-rate-reset': 'responseRateReset'
-};
+const SAFE_HEADER_NAMES = new Set(['retry-after', 'credits-rate-reset', 'content-type']);
+const SAFE_HEADER_PREFIXES = ['ratelimit-'];
 
-/** The fetch `Headers` shape viem hands us; ethers uses a plain record. */
+function isSafeHeaderName(name: string): boolean {
+  return SAFE_HEADER_NAMES.has(name) || SAFE_HEADER_PREFIXES.some((p) => name.startsWith(p));
+}
+
+/**
+ * The fetch `Headers` shape viem hands us. ethers uses a plain record, so
+ * `forEach` is the discriminator: enumeration (not `get`) is what the
+ * prefix match needs.
+ */
 interface HeadersLike {
-  get(name: string): string | null;
+  forEach(callback: (value: string, key: string) => void): void;
 }
 
 function isHeadersLike(value: object): value is HeadersLike {
-  return typeof (value as { get?: unknown }).get === 'function';
+  return typeof (value as { forEach?: unknown }).forEach === 'function';
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === 'object' ? (value as Record<string, unknown>) : null;
 }
 
-function readHeader({ headers, name }: { headers: unknown; name: string }): string | undefined {
+/**
+ * Project a header bag — a fetch `Headers` instance or a plain record —
+ * to a plain record of the allowlisted entries. Names are lowercased so
+ * the result is uniform across libraries and case-insensitive lookup
+ * isn't needed downstream.
+ */
+function projectHeaders(headers: unknown): Record<string, string> | undefined {
   const bag = asRecord(headers);
   if (!bag) return undefined;
-  if (isHeadersLike(bag)) {
-    const value = bag.get(name);
-    return typeof value === 'string' ? value : undefined;
-  }
-  for (const [key, value] of Object.entries(bag)) {
-    if (key.toLowerCase() === name && typeof value === 'string') return value;
-  }
-  return undefined;
+
+  const safe: Record<string, string> = {};
+  const keep = (value: unknown, key: string): void => {
+    const name = key.toLowerCase();
+    if (!isSafeHeaderName(name) || typeof value !== 'string') return;
+    safe[name] = stripUrlsInPlace(value);
+  };
+
+  if (isHeadersLike(bag)) bag.forEach(keep);
+  else for (const [key, value] of Object.entries(bag)) keep(value, key);
+
+  return safe;
 }
 
 /**
- * The HTTP status as a number. ethers v6 exposes it only as the compound
- * `"429 Too Many Requests"` string in `info.responseStatus` when the
- * `FetchResponse` object isn't reachable, so that form is accepted too.
+ * ethers' `FetchResponse` → a plain object under the same key with the
+ * same sub-keys. The body is excluded: it is the one member whose size is
+ * unbounded, and v6 already exposes the text safely at
+ * `info.responseBody`.
  */
-function statusCodeFrom(value: unknown): number | undefined {
-  if (typeof value === 'number' && Number.isInteger(value)) return value;
-  if (typeof value !== 'string') return undefined;
-  const digits = /^\s*(\d{3})\b/.exec(value)?.[1];
-  return digits === undefined ? undefined : Number(digits);
+function projectResponse(response: unknown): Record<string, unknown> | undefined {
+  const source = asRecord(response);
+  if (!source) return undefined;
+
+  const projected: Record<string, unknown> = {};
+  if (typeof source.statusCode === 'number') projected.statusCode = source.statusCode;
+  if (typeof source.statusMessage === 'string') {
+    projected.statusMessage = stripUrlsInPlace(source.statusMessage);
+  }
+  const headers = projectHeaders(source.headers);
+  if (headers) projected.headers = headers;
+  return projected;
 }
 
 /**
- * Pull the JSON-RPC error out of a response body. A provider that rejects
- * a call at the JSON-RPC layer (rate limit, execution revert, method not
- * found) reports the reason here rather than in the HTTP status, so this is
- * frequently the only field separating two failures that share a status.
- * Batch responses (a top-level array) are skipped: there is no single error
- * to report and picking one would misrepresent the others.
+ * ethers' `FetchRequest` → a plain object under the same key. Only the
+ * URL's origin and the HTTP method: the request headers hold the
+ * `authorization` credential and the body holds the JSON-RPC payload,
+ * neither of which is ours to republish. The URL is reduced to a bare
+ * origin rather than merely having its query stripped, because some
+ * gateways put the key in the *path*.
  */
-function rpcErrorFrom(body: unknown): Record<string, unknown> {
-  if (typeof body !== 'string' || body === '') return {};
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(body);
-  } catch {
-    return {};
-  }
-  const error = asRecord(asRecord(parsed)?.error);
-  if (!error) return {};
-  const facts: Record<string, unknown> = {};
-  if (typeof error.code === 'number') facts.rpcErrorCode = error.code;
-  if (typeof error.message === 'string') facts.rpcErrorMessage = stripUrlsInPlace(error.message);
-  return facts;
+function projectRequest(request: unknown): Record<string, unknown> | undefined {
+  const source = asRecord(request);
+  if (!source) return undefined;
+
+  const projected: Record<string, unknown> = {};
+  if (typeof source.url === 'string') projected.url = tryOrigin(source.url);
+  if (typeof source.method === 'string') projected.method = source.method;
+  return projected;
 }
 
 /**
- * The subset of a failed RPC response that is safe to keep, as flat
- * primitives — never the library's request/response objects, which carry
- * auth headers, request payloads and non-plain-object shapes (see
- * `sanitiseNode`).
- *
- * Every string lifted in here is URL-stripped on the way: `info` is the one
- * part of the sanitised clone that downstream code does *not* strip, since
- * callers own that namespace, so anything this function adds has to arrive
- * already clean.
+ * The library-native fields to project onto the sanitised clone: the same
+ * key names the library used, with scrubbed values. A `null` detection
+ * means "not this library's shape".
  */
-function responseFacts({
-  statusCode,
-  statusMessage,
-  headers,
-  body
-}: {
-  statusCode?: unknown;
-  statusMessage?: unknown;
-  headers?: unknown;
-  body?: unknown;
-}): Record<string, unknown> {
-  const facts: Record<string, unknown> = {};
-
-  const code = statusCodeFrom(statusCode);
-  if (code !== undefined) facts.responseStatusCode = code;
-  if (typeof statusMessage === 'string' && statusMessage !== '') {
-    facts.responseStatusMessage = stripUrlsInPlace(statusMessage);
-  }
-  for (const [header, field] of Object.entries(SAFE_RESPONSE_HEADERS)) {
-    const value = readHeader({ headers, name: header });
-    if (value !== undefined) facts[field] = stripUrlsInPlace(value);
-  }
-
-  return { ...facts, ...rpcErrorFrom(body) };
-}
-
-interface Detected {
-  /** Fully sanitised `info` object to attach to the sanitised clone node. */
-  info: Record<string, unknown>;
-  /** Code field to propagate from the RPC error onto the sanitised clone node. */
-  code: string | undefined;
-}
+type Projection = Record<string, unknown>;
 
 type ErrorLike = Error & Record<string, unknown>;
 
@@ -196,36 +205,30 @@ type ErrorLike = Error & Record<string, unknown>;
  * operators keep useful debug context; only `requestUrl` is rewritten to
  * its origin.
  *
- * The numeric status, status text and retry headers come off `err.response`
- * — a live `FetchResponse` that is never itself copied onto the clone (it
- * holds the body buffer plus a back-reference to the `FetchRequest` with
- * the auth headers and the tokenised URL). Reading them here is the only
- * way to keep them: v6's own `info` carries the status solely as the
- * compound `"429 Too Many Requests"` string in `responseStatus`, which no
- * consumer can classify on without parsing it apart again.
+ * `err.response` and `err.request` are the `FetchResponse`/`FetchRequest`
+ * instances, projected to plain objects under their own names. Projecting
+ * them is the only way they survive at all: their fields are `#private`,
+ * so a serialiser sees `{}` where `err.response.statusCode` should be.
  */
-function detectV6(err: ErrorLike): Detected | null {
+function detectV6(err: ErrorLike): Projection | null {
   const info = err.info;
   if (!info || typeof info !== 'object' || !('requestUrl' in info)) return null;
 
   const source = info as Record<string, unknown>;
-  const safe: Record<string, unknown> = { ...source };
-  if (typeof safe.requestUrl === 'string') {
-    safe.requestUrl = tryOrigin(safe.requestUrl);
+  const safeInfo: Record<string, unknown> = { ...source };
+  if (typeof safeInfo.requestUrl === 'string') {
+    safeInfo.requestUrl = tryOrigin(safeInfo.requestUrl);
   }
 
-  const response = asRecord(err.response);
-  const facts = responseFacts({
-    statusCode: response?.statusCode ?? source.responseStatus,
-    statusMessage: response?.statusMessage,
-    headers: response?.headers,
-    body: source.responseBody
-  });
+  const projection: Projection = { info: safeInfo };
+  if (typeof err.code === 'string') projection.code = err.code;
 
-  return {
-    info: { ...safe, ...facts },
-    code: typeof err.code === 'string' ? err.code : undefined
-  };
+  const response = projectResponse(err.response);
+  if (response) projection.response = response;
+  const request = projectRequest(err.request);
+  if (request) projection.request = request;
+
+  return projection;
 }
 
 /**
@@ -233,63 +236,80 @@ function detectV6(err: ErrorLike): Detected | null {
  * that the v5 web layer raises for RPC HTTP failures. Unlike v6, v5 attaches
  * every `Logger.throwError` param — `url`, `body`, `responseText`,
  * `serverError`, etc. — as top-level properties on the error, so the
- * clone builds a fresh `info` from an allowlist (the sanitised URL, the
- * response status and the safe response facts) instead of copying through
- * potentially-leaky fields. `requestBody` and `requestMethod` sit right
- * next to the safe ones and stay out: the request payload is not ours to
- * republish, and the HTTP verb is always POST.
+ * projection names the safe ones explicitly instead of copying the lot:
+ * `url` reduced to its origin, plus `code`, `reason`, `status`,
+ * `requestMethod` and the allowlisted `headers`. `body`, `responseText`
+ * and `requestBody` sit right next to them and stay out — the request
+ * payload is not ours to republish, and the response body is already
+ * unbounded text the v5 path never promised to carry.
  */
 const V5_CODES = new Set(['SERVER_ERROR', 'TIMEOUT', 'NETWORK_ERROR']);
 
-function detectV5(err: ErrorLike): Detected | null {
+function detectV5(err: ErrorLike): Projection | null {
   const code = typeof err.code === 'string' ? err.code : null;
   const url = typeof err.url === 'string' ? err.url : null;
   if (!code || !url || !V5_CODES.has(code)) return null;
 
   const info: Record<string, unknown> = { requestUrl: tryOrigin(url) };
   if (typeof err.status === 'number') info.responseStatus = err.status;
-  Object.assign(
-    info,
-    responseFacts({ statusCode: err.status, headers: err.headers, body: err.body })
-  );
 
-  return { info, code };
+  const projection: Projection = { code, info, url: tryOrigin(url) };
+  if (typeof err.reason === 'string') projection.reason = stripUrlsInPlace(err.reason);
+  if (typeof err.status === 'number') projection.status = err.status;
+  if (typeof err.requestMethod === 'string') projection.requestMethod = err.requestMethod;
+  const headers = projectHeaders(err.headers);
+  if (headers) projection.headers = headers;
+
+  return projection;
 }
 
 /**
- * viem fingerprint: `RpcRequestError` (JSON-RPC layer) and
- * `HttpRequestError` (transport layer) carry the full URL in `err.url` and
- * in their multi-line `message` and the `metaMessages` array that viem's
- * `BaseError` builds. The chain rebuild runs `stripUrlsInPlace` on every
- * node's `message` and `stack` once any node matches; `err.url` is reduced
- * to its origin so operators still see which host refused the call.
+ * viem fingerprint: any `BaseError` subclass that carries a URL. All five
+ * hold it on a plain `err.url` property as well as in `message` and the
+ * `metaMessages` array, and viem's own `getUrl` strips only basic-auth
+ * credentials — not a `?token=` query or a key in the path — so every one
+ * of them leaks without this. `TimeoutError` and `SocketClosedError` in
+ * particular are the shapes a failing endpoint produces most often.
  *
  * `metaMessages` being an array is a viem `BaseError`-specific marker;
  * it makes the fingerprint specific enough that an unrelated library
- * happening to share the class name won't falsely match.
+ * happening to share a class name (`TimeoutError` is not a rare one)
+ * won't falsely match.
  *
- * `HttpRequestError` carries the HTTP status as a number, and its
- * `headers` is a fetch `Headers` instance rather than a record — hence
- * `readHeader`. `RpcRequestError` carries the JSON-RPC error instead: a
- * numeric `code`, which can't ride on `Detected.code` (that field is the
- * ethers string code), and the JSON-RPC message in `details`.
- * `err.body` is the *request* payload and stays out.
+ * The projection keeps viem's own names: `status` (HTTP status, on
+ * `HttpRequestError`), `code` (the numeric JSON-RPC code, on
+ * `RpcRequestError`), `details` (which for `RpcRequestError` is the
+ * JSON-RPC error message), the URL-stripped `metaMessages`, and `url`
+ * reduced to its origin. `err.body` is the *request* payload and stays
+ * out; `info` stays the empty object viem errors have always serialised
+ * with, since viem has no such field of its own.
  */
-const VIEM_FETCH_ERRORS = new Set(['RpcRequestError', 'HttpRequestError']);
+const VIEM_URL_BEARING_ERRORS = new Set([
+  'HttpRequestError',
+  'RpcRequestError',
+  'TimeoutError',
+  'SocketClosedError',
+  'WebSocketRequestError'
+]);
 
-function detectViem(err: ErrorLike): Detected | null {
-  if (!VIEM_FETCH_ERRORS.has(err.name)) return null;
+function detectViem(err: ErrorLike): Projection | null {
+  if (!VIEM_URL_BEARING_ERRORS.has(err.name)) return null;
   if (!Array.isArray(err.metaMessages)) return null;
 
-  const info: Record<string, unknown> = {};
-  if (typeof err.url === 'string') info.requestUrl = tryOrigin(err.url);
-  Object.assign(info, responseFacts({ statusCode: err.status, headers: err.headers }));
-  if (typeof err.code === 'number') info.rpcErrorCode = err.code;
-  if (err.name === 'RpcRequestError' && typeof err.details === 'string') {
-    info.rpcErrorMessage = stripUrlsInPlace(err.details);
-  }
+  const projection: Projection = {
+    info: {},
+    metaMessages: err.metaMessages.map((line: unknown) =>
+      typeof line === 'string' ? stripUrlsInPlace(line) : line
+    )
+  };
+  if (typeof err.url === 'string') projection.url = tryOrigin(err.url);
+  if (typeof err.status === 'number') projection.status = err.status;
+  if (typeof err.code === 'number') projection.code = err.code;
+  if (typeof err.details === 'string') projection.details = stripUrlsInPlace(err.details);
+  const headers = projectHeaders(err.headers);
+  if (headers) projection.headers = headers;
 
-  return { info, code: undefined };
+  return projection;
 }
 
 /**
@@ -321,40 +341,38 @@ function walkCauseChain(err: Error): Error[] {
  *     — `serializeError`'s plain-Error branch and any consumer reading
  *     `err.shortMessage` directly — keeps the cleaner summary text rather
  *     than collapsing to the full compound `message`.
- *   - If this node is the detected RPC fetch error, its `info` is rebuilt
- *     from the detector's output: the request URL reduced to its origin,
- *     plus flat primitives describing the failed response (numeric
- *     `responseStatusCode`, `responseStatusMessage`, the allowlisted retry
- *     headers, and the JSON-RPC `rpcErrorCode`/`rpcErrorMessage` when the
- *     provider returned one). Only primitives: the libraries' own
- *     request/response objects are never copied through — ethers v6's
- *     `FetchRequest`/`FetchResponse` and viem's `Headers` carry auth
- *     headers, the request payload and a tokenised URL, and don't survive
- *     `JSON.stringify` as anything but `{}` anyway. For v5 that also means
- *     dropping the top-level `body`, `responseText`, `url`, `requestBody`
- *     and `requestMethod`.
+ *   - If this node is the detected RPC fetch error, the detector's
+ *     projection is assigned over it: the library's own keys, carrying
+ *     scrubbed values, with class instances replaced by plain objects of
+ *     the same shape. Fields the projection doesn't name are dropped, so
+ *     v5's `body`/`responseText`/`requestBody` and every library's
+ *     request headers never reach the clone.
  *   - If it is not the RPC node but carries a generic `info` (typical
  *     VError), that info is preserved as-is. We do not deep-scrub VError
  *     info values: callers own that namespace, and collateral URL-stripping
  *     could mangle intentional data.
- *   - `code` is propagated if present.
+ *   - `code` is propagated if present, and overridden by the projection
+ *     when the library's own code is not a string (viem's numeric
+ *     JSON-RPC code).
+ *
+ * The clone is a plain `Error` with plain-object fields throughout, which
+ * is what lets `serializeError` spread it: everything on it is already
+ * safe and already serialisable.
  */
-function sanitiseNode(e: Error, detected: Detected | null): Error {
+function sanitiseNode(e: Error, projection: Projection | null): Error {
   const clone = new Error(stripUrlsInPlace(e.message));
   clone.name = e.name;
   if (e.stack) clone.stack = stripUrlsInPlace(e.stack);
 
   const source = e as ErrorLike;
-  const sourceShortMessage = (source as { shortMessage?: unknown }).shortMessage;
+  const sourceShortMessage = source.shortMessage;
   if (typeof sourceShortMessage === 'string') {
     (clone as ErrorLike).shortMessage = stripUrlsInPlace(sourceShortMessage);
   }
+  if (typeof source.code === 'string') (clone as ErrorLike).code = source.code;
 
-  const code = detected?.code ?? (typeof source.code === 'string' ? source.code : undefined);
-  if (code !== undefined) (clone as ErrorLike).code = code;
-
-  if (detected) {
-    (clone as ErrorLike).info = detected.info;
+  if (projection) {
+    Object.assign(clone, projection);
   } else if (source.info && typeof source.info === 'object') {
     (clone as ErrorLike).info = source.info;
   }
@@ -365,21 +383,18 @@ function sanitiseNode(e: Error, detected: Detected | null): Error {
  * If `err` — or any error in its `.cause` chain — looks like an ethers v5,
  * ethers v6, or viem RPC fetch error, returns a sanitised clone of the
  * error: the full cause chain is preserved node-for-node with every
- * `message` and `stack` URL-stripped, the detected node's `info` reduced
- * to a flat, library-agnostic set of safe primitives (`requestUrl` as a
- * bare origin, `responseStatusCode`, `responseStatusMessage`,
- * `responseRetryAfter`, `responseRateReset`, `rpcErrorCode`,
- * `rpcErrorMessage` — each present only when the library exposed it), and
+ * `message` and `stack` URL-stripped, the detected node's own fields
+ * projected to scrubbed values under the library's own key names, and
  * intermediate `VError`/`WError` wrappers kept intact with their own
  * `info` and stack traces. Returns `null` for any other error shape,
  * letting the caller fall through to default handling.
  *
- * Those response fields are what lets a caller classify a failure it is
- * about to retry — rate-limited vs upstream 5xx vs an empty-bodied gateway
- * timeout — without capturing the status at the throw site and threading it
- * out of band. They are normalised across libraries deliberately: ethers v6
- * reports the status only as a compound string, ethers v5 as a number, and
- * viem on a different property again.
+ * Because the projection keeps native names, a consumer that needs to
+ * classify a failure it is about to retry — rate-limited vs upstream 5xx
+ * vs an empty-bodied gateway timeout — reads the same fields the library
+ * documents (`err.response.statusCode`, `err.status`,
+ * `err.response.headers['retry-after']`) rather than fields invented
+ * here, and needs no separate capture at the throw site.
  *
  * Preserving the chain matters: a service that wraps an RPC failure with
  * `new VError('failed to fetch block number', { cause: rpcErr })` logs a

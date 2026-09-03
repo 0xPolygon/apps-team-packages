@@ -2,26 +2,24 @@
 '@polygonlabs/verror': minor
 ---
 
-RPC fetch-error sanitisation now keeps the safe, non-credential parts of a failed response, so a caller can tell a rate-limited call from an upstream 5xx or an empty-bodied gateway timeout without capturing the status separately before the error is sanitised.
+Sanitised RPC fetch errors now keep the failing library's own field names and structure, with only the secrets scrubbed, so a consumer reads `err.response.statusCode` on an ethers v6 error or `err.status` on a viem one exactly as those libraries document it.
 
-Previously the sanitised clone reported the HTTP status inconsistently — ethers v6 only as the compound `"429 Too Many Requests"` string, ethers v5 as a bare number under a different key, viem not at all — and dropped the retry-pacing headers entirely, because the objects holding them (ethers' `FetchRequest`/`FetchResponse`, viem's `Headers`) are never copied onto the clone. There was no single field a consumer could classify on.
+Previously the sanitised error kept the message, stack, `code` and `info` and dropped everything else, which took the HTTP status, the status text and the retry-pacing headers with it. Those live on ethers' `FetchRequest`/`FetchResponse` and viem's `Headers` — class instances whose fields are private, so they survive neither a spread nor `JSON.stringify` as anything but `{}`. Each is now projected onto the sanitised error as a plain object under the same key with the same sub-keys:
 
-## What is preserved
+- **ethers v6** — `response` as `{ statusCode, statusMessage, headers }` and `request` as `{ url, method }`, alongside the existing `code` and `info`
+- **ethers v5** — its own `status`, `reason`, `requestMethod`, `headers` and `url`
+- **viem** — `status`, `code` (the numeric JSON-RPC code), `details`, `metaMessages` and `url`
 
-The detected RPC node's `info` now carries these flat primitives, normalised across ethers v5, ethers v6 and viem, each present only when the library exposed it:
+`serializeError` and `VError.toJSON` carry those fields onto the serialised record instead of copying a fixed key set, so the shape reaches logs, persisted state and status routes intact.
 
-- `responseStatusCode` — the HTTP status as a number
-- `responseStatusMessage` — the HTTP status text
-- `responseRetryAfter` — the `retry-after` response header
-- `responseRateReset` — the `credits-rate-reset` response header, for providers that pace on credits
-- `rpcErrorCode` / `rpcErrorMessage` — the JSON-RPC error the provider returned, parsed from the response body (ethers) or read off the error (viem)
+## Redaction
 
-`requestUrl` is now also populated for viem errors, reduced to a bare origin as it already was for ethers, so operators can see which host refused a call.
+Every URL is reduced to a bare origin — not merely query-stripped, since some providers put the key in the path — including inside `metaMessages`. Request headers and request bodies are never copied. Response headers pass an allowlist (`retry-after`, `credits-rate-reset`, `ratelimit-*`, `content-type`), so `authorization`, `cookie` and `set-cookie` are excluded by construction rather than by being named. The field spread applies only to errors that went through sanitisation, never to an unrecognised error whose own fields have been through no projection.
 
-## What still stays out
+## Wider viem coverage
 
-Request URLs beyond their origin, request bodies and payloads, request headers, and any response header outside the two-name allowlist. The libraries' request/response objects are still never copied through — only primitives read off them — and every string lifted into `info` is URL-stripped on the way, since `info` is the one part of the clone that downstream code deliberately leaves alone.
+The viem fingerprint now covers every `BaseError` subclass that carries a URL — `TimeoutError`, `SocketClosedError` and `WebSocketRequestError` alongside `HttpRequestError` and `RpcRequestError`. Those three were previously not detected at all, and viem's own URL helper strips basic-auth credentials but not a token in the query or path, so a timed-out or dropped connection could publish one. This closes that.
 
 ## Compatibility
 
-Additive. Existing fields (`requestUrl`, `responseStatus`, `responseBody`) keep their current names, types and values, and every redaction guarantee is unchanged.
+Additive. Every field that was already emitted keeps its name, type and value, and no redaction guarantee is relaxed.
