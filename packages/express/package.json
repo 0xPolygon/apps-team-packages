@@ -1,6 +1,6 @@
 {
   "name": "@polygonlabs/express",
-  "version": "5.0.0",
+  "version": "6.0.0",
   "description": "Shared Express middleware for Polygon Apps Team services: per-request child logger, global error handler with ethers fetch-error sanitisation, and a uniform 404 handler.",
   "license": "Apache-2.0",
   "type": "module",
@@ -69,9 +69,9 @@
   },
   "peerDependencies": {
     "@asteasolutions/zod-to-openapi": "^8.0.0",
-    "@polygonlabs/logger": "^3.0.2",
+    "@polygonlabs/logger": "^4.0.0",
     "@polygonlabs/openapi-registry": "^3.0.0",
-    "@polygonlabs/verror": "^1.1.2",
+    "@polygonlabs/verror": "^1.2.0",
     "express": ">=5",
     "zod": "^4.0.0"
   },

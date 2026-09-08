@@ -1,5 +1,12 @@
 # @polygonlabs/logger
 
+## 4.0.0
+
+### Patch Changes
+
+- Updated dependencies [[`aea7537`](https://github.com/0xPolygon/apps-team-packages/commit/aea7537c5dc954c3f801122e58f930f110085175)]:
+  - @polygonlabs/verror@1.2.0
+
 ## 3.0.2
 
 ### Patch Changes
