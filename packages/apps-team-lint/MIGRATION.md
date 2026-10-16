@@ -10,6 +10,8 @@ upgrading across multiple versions.
 
 Feature adoption (non-breaking): [Adopting `astro()`](#adopting-astro).
 
+New lint rules that can fail CI on upgrade: [`export *` ban](#export--ban).
+
 ---
 
 ## Adopting `astro()`
@@ -80,6 +82,28 @@ Notes when adopting:
   aren't in a tsconfig project); `astro check` covers type errors there.
 - **Trialing this from a worktree before release?** Consume it with `link:`,
   not `file:` — see [Testing an unpublished build](./README.md#testing-an-unpublished-build).
+
+---
+
+## `export *` ban
+
+`recommended()` now reports `export * from '…'` and
+`export * as ns from '…'` as errors. Replace each with explicit
+re-exports, values in `export { … }` and types in `export type { … }`:
+
+```diff
+-export * from './widgets.ts';
++export { buildWidget, type Widget, type WidgetOptions } from './widgets.ts';
+```
+
+For `export * as ns from './x.ts'`, either import and export the
+namespace explicitly (`import * as ns from './x.ts'; export { ns };`) or
+list the names. Not sure which names a star re-exports? Delete the line
+and let `tsc` list what is now missing. For a generated barrel you do not
+own, add `// eslint-disable-next-line no-restricted-syntax -- <reason>`.
+If your config already sets `no-restricted-syntax`, add the
+`ExportAllDeclaration` selector to its array, because ESLint replaces
+rather than merges a rule's options across config objects.
 
 ---
 

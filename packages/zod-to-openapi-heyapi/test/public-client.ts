@@ -23,4 +23,5 @@
 // `${Op}Mutation` factories all flow through the auto-barrel
 // alongside the codec-aware emissions from `registry-validator.gen.ts`.
 // One canonical entry, no deep paths.
+// eslint-disable-next-line no-restricted-syntax -- the barrel is hey-api's generated, regenerated output; an enumerated list here would drift from it and defeat the point of mirroring it.
 export * from './__generated__/index.ts';
