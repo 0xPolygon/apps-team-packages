@@ -254,10 +254,26 @@ own config automatically.
 
 | Export | Options | What it configures |
 | --- | --- | --- |
-| `recommended(options?)` | `{ globals?: 'node' \| 'browser' \| Record<string, boolean> }` | Global ignores, import sorting (perfectionist), import-x rules, core rules (`no-param-reassign`, etc.), default-export exemptions for config files, Prettier compatibility, environment globals |
+| `recommended(options?)` | `{ globals?: 'node' \| 'browser' \| Record<string, boolean> }` | Global ignores, import sorting (perfectionist), import-x rules, core rules (`no-param-reassign`, the [`export *` ban](#no-export-star), etc.), default-export exemptions for config files, Prettier compatibility, environment globals |
 | `typescript(options?)` | `{ tsconfigRootDir?: string }` — required in monorepo per-package configs | TS-ESLint recommended rules, type-aware linting (`projectService`), TS import resolver, `consistent-type-imports`, `no-floating-promises`, `no-explicit-any` (warn), [`polygon/no-discarded-typed-registry-chain`](#no-discarded-typed-registry-chain) |
 | `frontend()` | none | `no-default-export` exemption for `.tsx` files |
 | [`astro(options?)`](#astro-components) — imported from `@polygonlabs/apps-team-lint/astro` | `{ a11y?: boolean }` — accessibility ruleset, default `true` | `eslint-plugin-astro` recommended, `client-side-ts` processor (TypeScript in `<script>`), TypeScript parser + team import rules on the frontmatter, `astro/no-set-html-directive` error, jsx-a11y recommended (on by default) |
+
+## Barrel exports
+
+### no-export-star
+
+`recommended()` forbids `export * from '…'` and `export * as ns from '…'`
+(via `no-restricted-syntax` on `ExportAllDeclaration`) at `'error'`
+severity. Barrels list their names explicitly: values in `export { … }`,
+types in `export type { … }`. A star re-export hides which names are
+types, so it silently pulls them through as values and slips past
+`@typescript-eslint/consistent-type-exports`.
+
+ESLint replaces rather than merges a rule's options across config
+objects, so if your own config sets `no-restricted-syntax`, repeat this
+selector in it. For output you do not own (a generated barrel), use a
+scoped `eslint-disable-next-line no-restricted-syntax -- reason`.
 
 ## Custom rules
 

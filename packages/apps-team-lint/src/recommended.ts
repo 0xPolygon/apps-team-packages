@@ -61,6 +61,17 @@ export function recommended(options?: RecommendedOptions) {
         'import-x/prefer-default-export': ['off'],
         'no-await-in-loop': 'off',
         'no-param-reassign': 'error',
+        // ESLint replaces (never merges) a rule's options across config
+        // objects, so any sibling config that sets no-restricted-syntax
+        // must repeat this selector.
+        'no-restricted-syntax': [
+          'error',
+          {
+            selector: 'ExportAllDeclaration',
+            message:
+              'Use explicit `export { … }` / `export type { … }` re-exports; `export *` hides which names are types (team standard: explicit barrels).'
+          }
+        ],
         'no-underscore-dangle': ['off'],
         'no-useless-escape': 'off'
       }
