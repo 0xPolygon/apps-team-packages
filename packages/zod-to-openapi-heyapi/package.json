@@ -67,7 +67,7 @@
   "devDependencies": {
     "@asteasolutions/zod-to-openapi": "^8.5.0",
     "@hey-api/openapi-ts": "^0.97.3",
-    "@playwright/browser-chromium": "1.60.0",
+    "@playwright/browser-chromium": "1.61.0",
     "@polygonlabs/apps-team-lint": "workspace:*",
     "@polygonlabs/verror": "workspace:*",
     "@polygonlabs/zod-codecs": "workspace:*",
@@ -82,7 +82,7 @@
     "@vitest/browser": "^3.2.4",
     "eslint": "^10.0.0",
     "msw": "^2.7.0",
-    "playwright": "1.60.0",
+    "playwright": "1.61.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "typescript": "^5.9.3",
